@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Node / Next.js
+node_modules/
+frontend/.next/
+frontend/out/
+frontend/next-env.d.ts
+*.tsbuildinfo
+
+# Local config and data (never commit secrets)
+.env
+.env.*
+!.env.example
+backups/
+*.age
+*.key
+
+# Test output
+smoke-results/
+test-results/
+playwright-report/
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store
