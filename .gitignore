@@ -31,3 +31,6 @@ playwright-report/
 .idea/
 .vscode/
 .DS_Store
+
+# Server-side
+.update.lock

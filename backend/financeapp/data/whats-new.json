@@ -1,0 +1,14 @@
+[
+  {
+    "version": "0.1.0",
+    "title": "First look",
+    "features": [
+      {
+        "id": "app-shell",
+        "title": "The app, ready to install on your phone",
+        "body": "Open the app on your phone and add it to your home screen. Home shows net worth with today's change, what's safe to spend for the rest of the month, the three budgets closest to their limit and your latest alerts. Spending, Budget, Portfolio and Plan are one tap away in the bar at the bottom. The eye button blurs every amount when someone is looking over your shoulder. This release runs on sample data; linking your own accounts comes with sign-in in the next phase.",
+        "tryIt": "/"
+      }
+    ]
+  }
+]

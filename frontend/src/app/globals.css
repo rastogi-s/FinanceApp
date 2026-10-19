@@ -1,0 +1,114 @@
+@import "tailwindcss";
+@import "@fontsource-variable/inter";
+
+/* Design tokens (shadcn/ui naming). Light by default, dark when the phone or laptop is set to dark. */
+:root {
+  --background: oklch(0.985 0.002 247);
+  --foreground: oklch(0.21 0.02 264);
+  --card: oklch(1 0 0);
+  --card-foreground: var(--foreground);
+  --muted: oklch(0.955 0.004 247);
+  --muted-foreground: oklch(0.5 0.02 257);
+  --border: oklch(0.92 0.006 247);
+  --primary: oklch(0.5 0.13 172);
+  --primary-foreground: oklch(0.99 0.01 172);
+  --accent: oklch(0.95 0.03 172);
+  --accent-foreground: oklch(0.32 0.08 172);
+  --positive: oklch(0.48 0.12 155);
+  --negative: oklch(0.52 0.19 22);
+  --warning: oklch(0.48 0.12 58);
+  --ring: oklch(0.55 0.13 172);
+  --chart-1: oklch(0.55 0.13 172);
+  --chart-2: oklch(0.6 0.14 250);
+  --chart-3: oklch(0.7 0.14 75);
+  --chart-4: oklch(0.6 0.16 320);
+  --chart-5: oklch(0.65 0.04 257);
+  --radius: 1rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: oklch(0.16 0.012 264);
+    --foreground: oklch(0.96 0.005 247);
+    --card: oklch(0.205 0.014 264);
+    --muted: oklch(0.25 0.014 264);
+    --muted-foreground: oklch(0.71 0.02 257);
+    --border: oklch(0.29 0.014 264);
+    --primary: oklch(0.74 0.12 172);
+    --primary-foreground: oklch(0.2 0.04 172);
+    --accent: oklch(0.28 0.04 172);
+    --accent-foreground: oklch(0.88 0.08 172);
+    --positive: oklch(0.76 0.14 155);
+    --negative: oklch(0.72 0.16 22);
+    --warning: oklch(0.8 0.14 75);
+    --ring: oklch(0.74 0.12 172);
+  }
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-positive: var(--positive);
+  --color-negative: var(--negative);
+  --color-warning: var(--warning);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --radius-sm: calc(var(--radius) - 8px);
+  --radius-md: calc(var(--radius) - 4px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+  html {
+    color-scheme: light dark;
+    -webkit-tap-highlight-color: transparent;
+    text-size-adjust: 100%;
+  }
+  body {
+    background: var(--background);
+    color: var(--foreground);
+    font-feature-settings: "cv11", "ss01";
+    -webkit-font-smoothing: antialiased;
+  }
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+}
+
+/* Every amount on screen carries .money, so the privacy button can hide them all at once. */
+.money {
+  font-variant-numeric: tabular-nums;
+  transition: filter 150ms ease;
+}
+[data-privacy="on"] .money {
+  filter: blur(0.45em);
+  user-select: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

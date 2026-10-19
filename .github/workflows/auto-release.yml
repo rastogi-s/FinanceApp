@@ -1,0 +1,64 @@
+# Every merge to main becomes a release: this picks the next version, tags the merge commit, then runs release.yml
+# for that tag (Docker image and GitHub Release). Servers pick it up with ./update.sh, or overnight with the timer.
+#
+# Version: the next patch (1.1.0 -> 1.1.1) by default. To ship a bigger version, add its entry to
+# backend/financeapp/data/whats-new.json in the PR (e.g. "1.2.0"): a version listed there that is newer than the
+# last release is used instead. Put [skip release] in the merge commit message to merge without releasing.
+name: Auto release
+
+on:
+  push:
+    branches: [main]
+
+# One release at a time, in merge order; never cancel one halfway.
+concurrency:
+  group: auto-release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  version:
+    if: ${{ !contains(github.event.head_commit.message, '[skip release]') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # to push the tag
+    outputs:
+      tag: ${{ steps.next.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0   # all tags
+      - name: Pick the next version
+        id: next
+        run: |
+          if [ -n "$(git tag --points-at HEAD 'v*')" ]; then
+            echo "This commit is already released as $(git tag --points-at HEAD 'v*'); nothing to do."
+            exit 0
+          fi
+          LAST=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
+          LAST=${LAST:-v0.0.0}
+          IFS=. read -r MA MI PA <<< "${LAST#v}"
+          NEXT="$MA.$MI.$((PA + 1))"
+          # A newer version described in whats-new.json wins (e.g. a feature release 1.2.0).
+          NOTED=$(jq -r '.[].version' backend/financeapp/data/whats-new.json | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
+          if [ -n "$NOTED" ] && [ "$(printf '%s\n%s\n' "${LAST#v}" "$NOTED" | sort -V | tail -1)" = "$NOTED" ] && [ "$NOTED" != "${LAST#v}" ]; then
+            NEXT="$NOTED"
+          fi
+          echo "Last release $LAST, releasing v$NEXT"
+          git tag "v$NEXT" "$GITHUB_SHA"
+          git push origin "v$NEXT"
+          echo "tag=v$NEXT" >> "$GITHUB_OUTPUT"
+
+  release:
+    needs: version
+    if: ${{ needs.version.outputs.tag != '' }}
+    # A tag pushed with the workflow's own token doesn't start other workflows, so call the release directly.
+    uses: ./.github/workflows/release.yml
+    with:
+      tag: ${{ needs.version.outputs.tag }}
+    permissions:
+      contents: write   # create the GitHub Release
+      packages: write   # push the Docker image
+      id-token: write   # sign the image (keyless, with the workflow's own identity)
