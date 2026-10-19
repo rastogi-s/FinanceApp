@@ -47,6 +47,9 @@ env_set() {
 docker compose version >/dev/null 2>&1 || die "docker compose is not installed"
 chmod 600 .env
 
+# .env is the one source of truth for what runs: a value exported in the shell would silently override it.
+unset FINANCEAPP_IMAGE FINANCEAPP_VERSION
+
 exec 9>.update.lock
 flock -n 9 || die "another update is already running"
 
@@ -60,7 +63,9 @@ image_version() { docker image inspect -f '{{ index .Config.Labels "org.opencont
 running_version() {
   local id
   id=$(docker compose ps -q app 2>/dev/null || true)
-  [ -n "$id" ] && docker inspect -f '{{ index .Config.Labels "org.opencontainers.image.version" }}' "$id" 2>/dev/null || true
+  if [ -n "$id" ]; then
+    docker inspect -f '{{ index .Config.Labels "org.opencontainers.image.version" }}' "$id" 2>/dev/null || true
+  fi
 }
 
 verify_signature() {
