@@ -1,4 +1,6 @@
-# Static analysis of the Python, TypeScript and workflow code. Findings show under Security > Code scanning.
+# Static analysis of the Python, TypeScript and workflow code. Code scanning (the Security tab) needs a paid plan
+# on a private repository, so the results are checked here instead: any warning or error fails the job, and the
+# full report is attached to the run as codeql-<language>.
 name: CodeQL
 
 on:
@@ -15,7 +17,7 @@ jobs:
   analyze:
     runs-on: ubuntu-latest
     permissions:
-      actions: read         # CodeQL reads the workflow run (required on private repositories)
+      actions: read
       contents: read
       security-events: write
     strategy:
@@ -33,3 +35,20 @@ jobs:
       - uses: github/codeql-action/analyze@v4
         with:
           category: /language:${{ matrix.language }}
+          upload: never
+          output: codeql-results
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: codeql-${{ matrix.language }}
+          path: codeql-results/
+          if-no-files-found: ignore
+      - name: Fail on findings
+        run: |
+          jq -r '.runs[].results[] | select((.level // "warning") != "note")
+            | "\(.ruleId): \(.message.text) (\(.locations[0].physicalLocation.artifactLocation.uri):\(.locations[0].physicalLocation.region.startLine))"' \
+            codeql-results/*.sarif > findings.txt
+          if [ -s findings.txt ]; then
+            echo "CodeQL found problems:"; cat findings.txt; exit 1
+          fi
+          echo "No findings."
