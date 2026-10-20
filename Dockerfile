@@ -3,7 +3,7 @@
 # keeps them current) and the app runs as a non-root user on a read-only filesystem (see docker-compose.yml).
 
 # ---- web: the Next.js static export (built once on the build machine's own platform; the output is plain files)
-FROM --platform=$BUILDPLATFORM node:24-trixie-slim@sha256:7f486cabe892bff8fef04c0f7da8dba84a560be3e4e2740b7a86afc57ebec315 AS web
+FROM --platform=$BUILDPLATFORM node:26-trixie-slim@sha256:0d1e33586362bb9e608c4e751e7a9e7edb55c9ac11461ed5666af696cc461dd4 AS web
 WORKDIR /web
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci --no-audit --no-fund
