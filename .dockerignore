@@ -1,0 +1,15 @@
+**/node_modules
+**/.next
+**/out
+**/.venv
+**/__pycache__
+**/.pytest_cache
+**/.ruff_cache
+.git
+.github
+e2e
+deploy
+backups
+.env
+.env.*
+*.md

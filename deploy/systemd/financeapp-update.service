@@ -1,0 +1,12 @@
+# Runs update.sh once. Installed by the README's "Hands-off updates" step; WorkingDirectory is the folder with
+# docker-compose.yml, .env and update.sh.
+[Unit]
+Description=Update the Finance App
+Wants=network-online.target docker.service
+After=network-online.target docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/financeapp
+ExecStart=/opt/financeapp/update.sh
+# Failures show in: journalctl -u financeapp-update

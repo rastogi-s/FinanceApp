@@ -1,0 +1,11 @@
+# Checks for a new release every night around 4 AM (server time) and installs it.
+[Unit]
+Description=Nightly Finance App update
+
+[Timer]
+OnCalendar=*-*-* 04:00:00
+RandomizedDelaySec=30m
+Persistent=true
+
+[Install]
+WantedBy=timers.target

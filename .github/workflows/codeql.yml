@@ -1,0 +1,46 @@
+# Static analysis of the Python, TypeScript and workflow code. Findings show under Security > Code scanning, and
+# any warning or error also fails this job, so a pull request can't merge past one.
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "17 6 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [python, javascript-typescript, actions]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          queries: security-extended
+      - uses: github/codeql-action/analyze@v4
+        with:
+          category: /language:${{ matrix.language }}
+          output: codeql-results
+      - name: Fail on findings
+        run: |
+          jq -r '.runs[].results[] | select((.level // "warning") != "note")
+            | "\(.ruleId): \(.message.text) (\(.locations[0].physicalLocation.artifactLocation.uri):\(.locations[0].physicalLocation.region.startLine))"' \
+            codeql-results/*.sarif > findings.txt
+          if [ -s findings.txt ]; then
+            echo "CodeQL found problems:"; cat findings.txt; exit 1
+          fi
+          echo "No findings."

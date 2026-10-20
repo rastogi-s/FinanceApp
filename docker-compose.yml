@@ -1,0 +1,68 @@
+# Finance App on a server: the app and Postgres. First run:
+#   cp .env.example .env    (fill it in; see the comments there)
+#   docker compose up -d
+# Updates: ./update.sh (backs up, pulls the new version, checks it's healthy, rolls back if not).
+#
+# Locked down: the app listens on 127.0.0.1 only (reach it over Tailscale, see README), Postgres is on an internal
+# network with no way out and no published port, both run as non-root users on read-only filesystems with every
+# Linux capability dropped, and neither can gain new privileges. Nothing here mounts the Docker socket.
+
+x-hardening: &hardening
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options: { max-size: "10m", max-file: "5" }
+
+services:
+  app:
+    <<: *hardening
+    image: ${FINANCEAPP_IMAGE:-ghcr.io/rastogi-s/financeapp}:${FINANCEAPP_VERSION:-latest}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg://finance:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/finance
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1}
+      HSTS: ${HSTS:-false}
+      DEMO_MODE: ${DEMO_MODE:-false}
+      TZ: ${TZ:-UTC}
+    ports:
+      - "127.0.0.1:${APP_PORT:-8080}:8080"
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    networks: [web, db]
+    mem_limit: 512m
+    pids_limit: 200
+
+  postgres:
+    <<: *hardening
+    image: postgres:17-trixie@sha256:2d2b8998d31037bf721cfdf764d76ba74171b4fab3431b7f72c27c56ddbdf9e3
+    user: postgres
+    environment:
+      POSTGRES_DB: finance
+      POSTGRES_USER: finance
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256 --data-checksums
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+      - /var/run/postgresql:size=1m,uid=999,gid=999,mode=0775
+    networks: [db]
+    shm_size: 128m
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "finance", "-d", "finance"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+networks:
+  web: {}
+  db:
+    internal: true   # no route to the internet or the host
+
+volumes:
+  pgdata:

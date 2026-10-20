@@ -1,0 +1,25 @@
+# Weekly dependency updates, grouped so they arrive as a few PRs. CI checks each one; security fixes come at once.
+version: 2
+updates:
+  - package-ecosystem: uv
+    directory: /backend
+    schedule: { interval: weekly }
+    groups: { python: { patterns: ["*"] } }
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule: { interval: weekly }
+    groups: { web: { patterns: ["*"] } }
+  - package-ecosystem: npm
+    directory: /e2e
+    schedule: { interval: weekly }
+    groups: { e2e: { patterns: ["*"] } }
+  - package-ecosystem: docker
+    directory: /
+    schedule: { interval: weekly }
+  - package-ecosystem: docker-compose
+    directory: /
+    schedule: { interval: weekly }
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: weekly }
+    groups: { actions: { patterns: ["*"] } }
