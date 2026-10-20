@@ -135,3 +135,10 @@ def test_whats_new_is_valid():
         assert e["title"] and e["features"]
         for f in e["features"]:
             assert f["id"] and f["title"] and f["body"]
+
+
+def test_csp_hashes_scripts_whatever_the_end_tag_spelling(tmp_path):
+    (tmp_path / "index.html").write_bytes(b"<html><SCRIPT>a()</script ><script type='x'>b()</Script></html>")
+    csp = client(tmp_path).get("/").headers["content-security-policy"]
+    for code in (b"a()", b"b()"):
+        assert base64.b64encode(hashlib.sha256(code).digest()).decode() in csp

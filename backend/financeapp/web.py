@@ -8,8 +8,8 @@ the SHA-256 of every inline script Next.js wrote into it, so the browser runs th
 import base64
 import hashlib
 import mimetypes
-import re
 from dataclasses import dataclass
+from html.parser import HTMLParser
 from pathlib import Path
 
 from starlette.datastructures import MutableHeaders
@@ -17,7 +17,39 @@ from starlette.requests import Request
 from starlette.responses import FileResponse, Response
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-INLINE_SCRIPT = re.compile(rb"<script(?![^>]*\bsrc=)[^>]*>(.*?)</script>", re.DOTALL | re.IGNORECASE)
+
+class _InlineScripts(HTMLParser):
+    """Collects the exact text of every inline <script> (one without src) in a page."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=False)
+        self.scripts: list[str] = []
+        self._current: list[str] | None = None
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag == "script" and not any(name == "src" for name, _ in attrs):
+            self._current = []
+
+    def handle_data(self, data: str) -> None:
+        if self._current is not None:
+            self._current.append(data)
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "script" and self._current is not None:
+            self.scripts.append("".join(self._current))
+            self._current = None
+
+
+def inline_script_hashes(html: bytes) -> list[str]:
+    parser = _InlineScripts()
+    parser.feed(html.decode("utf-8"))
+    parser.close()
+    return [
+        base64.b64encode(hashlib.sha256(script.encode("utf-8")).digest()).decode()
+        for script in parser.scripts
+        if script.strip()
+    ]
+
 
 # Next.js content-hashes everything under _next/static, so those files never change at a given URL.
 IMMUTABLE = "public, max-age=31536000, immutable"
@@ -74,11 +106,7 @@ class StaticSite:
             rel = file.relative_to(self.root).as_posix()
             if file.suffix == ".html":
                 body = file.read_bytes()
-                hashes = [
-                    base64.b64encode(hashlib.sha256(m.group(1)).digest()).decode()
-                    for m in INLINE_SCRIPT.finditer(body)
-                    if m.group(1).strip()
-                ]
+                hashes = inline_script_hashes(body)
                 entry = StaticFile(file, "text/html; charset=utf-8", REVALIDATE, body, page_csp(hashes, hsts))
                 if rel == "404.html":
                     self.not_found = entry

@@ -1,6 +1,5 @@
-# Static analysis of the Python, TypeScript and workflow code. Code scanning (the Security tab) needs a paid plan
-# on a private repository, so the results are checked here instead: any warning or error fails the job, and the
-# full report is attached to the run as codeql-<language>.
+# Static analysis of the Python, TypeScript and workflow code. Findings show under Security > Code scanning, and
+# any warning or error also fails this job, so a pull request can't merge past one.
 name: CodeQL
 
 on:
@@ -35,14 +34,7 @@ jobs:
       - uses: github/codeql-action/analyze@v4
         with:
           category: /language:${{ matrix.language }}
-          upload: never
           output: codeql-results
-      - uses: actions/upload-artifact@v7
-        if: always()
-        with:
-          name: codeql-${{ matrix.language }}
-          path: codeql-results/
-          if-no-files-found: ignore
       - name: Fail on findings
         run: |
           jq -r '.runs[].results[] | select((.level // "warning") != "note")
