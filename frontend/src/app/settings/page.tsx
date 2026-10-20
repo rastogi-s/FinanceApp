@@ -1,35 +1,51 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Sparkles } from "lucide-react";
+import Link from "next/link";
+import { ChevronRight, Landmark, LogOut, ShieldCheck, Sparkles, Users } from "lucide-react";
 import { PageTitle } from "@/components/page";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useMeta } from "@/lib/household";
+import { useAuth, useUser } from "@/lib/auth";
+import { useApi, useMeta } from "@/lib/household";
 
 type Release = { version: string; title: string; features: { id: string; title: string; body: string }[] };
+type Connections = { connections: { status: string; accounts: unknown[] }[] };
 
 export default function Settings() {
   const meta = useMeta();
-  const [releases, setReleases] = useState<Release[] | null>(null);
-  useEffect(() => {
-    fetch("/api/whats-new")
-      .then((r) => (r.ok ? r.json() : []))
-      .then(setReleases, () => setReleases([]));
-  }, []);
+  const user = useUser();
+  const { signOut, state } = useAuth();
+  const { data: releases } = useApi<Release[]>("/api/whats-new");
+  const { data: connections } = useApi<Connections>("/api/connections");
+  const accounts = connections?.connections.reduce((n, c) => n + c.accounts.length, 0) ?? 0;
+  const stale = connections?.connections.filter((c) => c.status === "stale").length ?? 0;
 
   return (
     <>
-      <PageTitle title="Settings" subtitle={meta ? `Version ${meta.version}` : " "} />
-      <div className="grid gap-4">
+      <PageTitle title="Settings" subtitle={user ? `Signed in as ${user.name}` : " "} />
+      <div className="grid grid-cols-1 gap-4">
         <Card>
-          <CardHeader>
-            <CardTitle>Accounts, sign-in and alerts</CardTitle>
-          </CardHeader>
-          <CardContent className="text-sm text-muted-foreground">
-            Adding accounts, passkey sign-in for both of you, and alert channels (ntfy push and email) arrive in
-            the next update.
-          </CardContent>
+          <ul className="divide-y">
+            <Row
+              href="/settings/accounts"
+              icon={<Landmark />}
+              title="Accounts"
+              detail={
+                connections
+                  ? stale
+                    ? `${stale} need${stale === 1 ? "s" : ""} attention`
+                    : accounts
+                      ? `${accounts} linked`
+                      : "Add your first account"
+                  : " "
+              }
+              warn={stale > 0}
+              tab="accounts"
+            />
+            <Row href="/settings/people" icon={<Users />} title="People" detail="You and your partner" tab="people" />
+            <Row href="/settings/security" icon={<ShieldCheck />} title="Security" detail="Passkeys, devices, activity" tab="security" />
+          </ul>
         </Card>
 
         <h2 className="mt-2 flex items-center gap-2 px-1 text-lg font-semibold tracking-tight">
@@ -42,7 +58,7 @@ export default function Settings() {
               <CardTitle className="text-base font-semibold text-foreground">{r.title}</CardTitle>
               <span className="text-xs text-muted-foreground">{r.version}</span>
             </CardHeader>
-            <CardContent className="grid gap-3">
+            <CardContent className="grid grid-cols-1 gap-3">
               {r.features.map((f) => (
                 <div key={f.id}>
                   <p className="text-sm font-medium">{f.title}</p>
@@ -52,7 +68,47 @@ export default function Settings() {
             </CardContent>
           </Card>
         ))}
+
+        <div className="mt-2 flex items-center justify-between px-1">
+          <span className="text-xs text-muted-foreground">{meta && `Version ${meta.version}`}</span>
+          {state.status === "signed-in" && !state.demo && (
+            <Button variant="ghost" onClick={signOut}>
+              <LogOut /> Sign out
+            </Button>
+          )}
+        </div>
       </div>
     </>
+  );
+}
+
+function Row({
+  href,
+  icon,
+  title,
+  detail,
+  warn,
+  tab,
+}: {
+  href: string;
+  icon: React.ReactNode;
+  title: string;
+  detail: string;
+  warn?: boolean;
+  tab: string;
+}) {
+  return (
+    <li>
+      <Link href={href} data-tab={tab} className="flex items-center gap-4 px-5 py-4 transition-colors hover:bg-muted/50">
+        <span className="grid size-10 shrink-0 place-items-center rounded-full bg-accent text-accent-foreground [&_svg]:size-5" aria-hidden>
+          {icon}
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block font-medium">{title}</span>
+          <span className={warn ? "block text-sm font-medium text-warning" : "block text-sm text-muted-foreground"}>{detail}</span>
+        </span>
+        <ChevronRight className="size-5 text-muted-foreground" aria-hidden />
+      </Link>
+    </li>
   );
 }

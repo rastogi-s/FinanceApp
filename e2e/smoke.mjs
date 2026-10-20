@@ -18,7 +18,8 @@ const SIZES = {
   "phone-light": { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2, colorScheme: "light" },
   "phone-dark": { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2, colorScheme: "dark" },
 };
-// [page, path, how to get there]: "tab" is in the tab bar or sidebar, "header" is the button at the top right.
+// [page, path, how to get there]: "tab" is in the tab bar or sidebar, "header" is the button at the top right,
+// "direct" is only opened by its address (it's a row inside Settings).
 const PLACES = [
   ["home", "/", "tab"],
   ["spending", "/spending", "tab"],
@@ -26,6 +27,9 @@ const PLACES = [
   ["portfolio", "/portfolio", "tab"],
   ["plan", "/plan", "tab"],
   ["settings", "/settings", "header"],
+  ["accounts", "/settings/accounts", "direct"],
+  ["security", "/settings/security", "direct"],
+  ["people", "/settings/people", "direct"],
 ];
 const REQUIRED_HEADERS = {
   "content-security-policy": /default-src 'none'.*frame-ancestors 'none'/,
@@ -125,7 +129,7 @@ try {
 
     // 2. Move between pages with the navigation, as you would.
     await page.goto(BASE + "/");
-    for (const [name, path, how] of PLACES) {
+    for (const [name, path, how] of PLACES.filter((p) => p[2] !== "direct")) {
       errors = [];
       const problems = [];
       try {

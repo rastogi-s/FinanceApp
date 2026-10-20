@@ -1,10 +1,12 @@
 # Checks every pull request and every push to main:
-#   backend   lint, format and unit tests for the FastAPI app, plus pip-audit
+#   backend   lint, format and unit tests for the FastAPI app (against a real Postgres), plus pip-audit
 #   frontend  lint, type check and build of the Next.js app, plus npm audit
 #   scripts   shellcheck on update.sh and the test scripts
 #   image     builds the Docker image, scans it and the Dockerfile/Compose file with Trivy, starts it with Postgres
 #             in demo mode and runs the smoke test (every page at laptop and phone size, light and dark, with an
-#             accessibility check; screenshots are attached to the run), then tests update.sh end to end.
+#             accessibility check; screenshots are attached to the run), then starts it for real (not demo) and runs
+#             the flow test: first-run setup, code app, passkey, file uploads, recategorizing, inviting, signing
+#             out and back in. Then tests update.sh end to end.
 # CodeQL runs separately (codeql.yml).
 name: CI
 
@@ -23,6 +25,17 @@ concurrency:
 jobs:
   backend:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-trixie@sha256:2d2b8998d31037bf721cfdf764d76ba74171b4fab3431b7f72c27c56ddbdf9e3
+        env:
+          POSTGRES_DB: finance_test
+          POSTGRES_USER: finance
+          POSTGRES_PASSWORD: ci-only-password
+        ports: ["127.0.0.1:5432:5432"]
+        options: --health-cmd "pg_isready -U finance" --health-interval 5s --health-timeout 3s --health-retries 20
+    env:
+      TEST_DATABASE_URL: postgresql+psycopg://finance:ci-only-password@127.0.0.1:5432/finance_test
     defaults:
       run:
         working-directory: backend
@@ -137,6 +150,28 @@ jobs:
         with:
           name: screenshots
           path: e2e/smoke-results/
+          if-no-files-found: ignore
+      - if: failure()
+        run: docker compose logs
+      - name: Stop the demo
+        run: docker compose down -v
+      - name: Start the app for real (no sample data)
+        env:
+          DEMO_MODE: "false"
+        run: |
+          ENCRYPTION_KEY=$(openssl rand -base64 32) docker compose up -d --wait --wait-timeout 120
+          curl -fsS http://localhost:8080/health | grep -q '"encryption_key":"ok"'
+      - name: Set up, sign in, upload, recategorize, invite, sign out and back in
+        working-directory: e2e
+        run: |
+          SETUP_CODE=$(docker compose -f ../docker-compose.yml logs app | grep -o '[A-Z0-9]\{4\}-[A-Z0-9]\{4\}-[A-Z0-9]\{4\}' | tail -1)
+          SETUP_CODE=$SETUP_CODE node flow.mjs
+      - name: Attach the flow screenshots
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: flow-screenshots
+          path: e2e/flow-results/
           if-no-files-found: ignore
       - if: failure()
         run: docker compose logs

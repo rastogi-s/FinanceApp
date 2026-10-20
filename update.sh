@@ -47,6 +47,13 @@ env_set() {
 docker compose version >/dev/null 2>&1 || die "docker compose is not installed"
 chmod 600 .env
 
+# The master key for tokens stored in the database. Made once, here, so a first install needs no extra step.
+if [ -z "$(env_get ENCRYPTION_KEY)" ]; then
+  env_set ENCRYPTION_KEY "$(head -c 32 /dev/urandom | base64)"
+  say "Made ENCRYPTION_KEY in .env. Copy it to your password manager now: backups don't include it, and without"
+  say "it the bank connections and code-app setup in a restored backup can't be read (you'd link them again)."
+fi
+
 # .env is the one source of truth for what runs: a value exported in the shell would silently override it.
 unset FINANCEAPP_IMAGE FINANCEAPP_VERSION
 

@@ -43,6 +43,7 @@ ENV
 step "First install"
 ./update.sh
 health | grep -q '"version":"1.0.0"' || fail "1.0.0 is not running"
+grep -qE '^ENCRYPTION_KEY=.{44}$' .env || fail "update.sh did not make an ENCRYPTION_KEY"
 
 step "Update to the latest release, with a backup"
 latest 1.0.1

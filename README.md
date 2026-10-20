@@ -7,8 +7,10 @@ It runs as one Docker image next to Postgres on a small server you own, reachabl
 Nothing in it can move money: every connection is read-only.
 
 The build plan lives in the [Finance App Execution Plan](https://claude.ai/code/artifact/cf425499-0011-45e0-af13-d8e20bcbc76b).
-This is Phase 0: the app shell running on sample data, the server setup, safe updates, and CI. Sign-in and
-account linking come in Phase 1, before any real account is connected.
+Phase 1 is here: sign-in with passkeys (password + code app as the backup), linking accounts through Plaid
+(banks, cards) and SnapTrade (brokerages) or by uploading a CSV/OFX file, a sync every few hours, transfers
+between your own accounts left out of spending, and categories that learn from the two taps it takes to fix one.
+Budgets, the savings rate and the projection come in Phase 2.
 
 ## What's in the repository
 
@@ -16,7 +18,7 @@ account linking come in Phase 1, before any real account is connected.
 | --- | --- |
 | `backend/` | FastAPI app (Python 3.13, uv). Serves `/api`, `/health` and the built web app, and sets the security headers. |
 | `frontend/` | Next.js PWA (Tailwind, shadcn/ui), built as a static export that the backend serves. Phone first, light and dark. |
-| `e2e/` | The smoke test (every page on a laptop and a phone, plus an accessibility check) and the `update.sh` test. |
+| `e2e/` | The smoke test (every page on a laptop and a phone, plus an accessibility check), the real-mode flow test (setup, passkey, uploads, sign-in), and the `update.sh` test. |
 | `Dockerfile`, `docker-compose.yml` | One image for the app; Compose runs it with Postgres. |
 | `update.sh`, `deploy/systemd/` | Updating a server: backup, signed-image check, health check, rollback. |
 | `.github/` | CI, CodeQL, Dependabot, and the release that runs on every merge to main. |
@@ -30,7 +32,7 @@ cd backend && uv sync && DEMO_MODE=true uv run uvicorn financeapp.main:app --rel
 # Web app on :3000 (sends /api to :8000)
 cd frontend && npm ci && npm run dev
 
-# Checks CI runs
+# Checks CI runs (backend tests need Postgres: createdb finance_test, or set TEST_DATABASE_URL)
 cd backend && uv run ruff check . && uv run pytest
 cd frontend && npm run lint && npm run typecheck && npm run build
 
@@ -38,6 +40,13 @@ cd frontend && npm run lint && npm run typecheck && npm run build
 docker build -t financeapp:dev .
 POSTGRES_PASSWORD=dev FINANCEAPP_IMAGE=financeapp FINANCEAPP_VERSION=dev DEMO_MODE=true docker compose up -d --wait
 cd e2e && npm ci && npx playwright install chromium && node smoke.mjs   # screenshots in e2e/smoke-results/
+
+# The real thing, from an empty database: setup, passkey, uploads, sign-in (screenshots in e2e/flow-results/)
+docker compose down -v
+POSTGRES_PASSWORD=dev FINANCEAPP_IMAGE=financeapp FINANCEAPP_VERSION=dev ENCRYPTION_KEY=$(openssl rand -base64 32) \
+  docker compose up -d --wait
+SETUP_CODE=$(docker compose logs app | grep -o '[A-Z0-9]\{4\}-[A-Z0-9]\{4\}-[A-Z0-9]\{4\}' | tail -1)
+cd e2e && SETUP_CODE=$SETUP_CODE node flow.mjs
 ```
 
 Every amount on screen goes through the `Money` component, so the privacy button (the eye) can blur it.
@@ -67,7 +76,17 @@ On a small Linux VM (Debian or Ubuntu):
 5. `./update.sh`, which installs the latest release and checks it is healthy.
 6. `sudo tailscale serve --bg --https=443 http://127.0.0.1:8080`, then add the `*.ts.net` name it prints to
    `ALLOWED_HOSTS` in `.env`, set `HSTS=true`, and run `docker compose up -d`.
-7. Open that address on your phone and add it to the home screen.
+7. Open that address on your phone. It asks for the **setup code**, which the app prints in its log on first
+   start: `docker compose logs app | grep "setup code"` (it changes on every restart until someone has set up,
+   and expires after 24 hours). Then add a code app and a passkey, and add the address to your home screen.
+8. **Copy `ENCRYPTION_KEY` from `.env` to your password manager.** `update.sh` made it on the first run.
+9. Invite your partner from Settings → People: it makes a one-time link (valid 48 hours) to send them.
+10. Link accounts from Settings → Accounts (fill in the Plaid and SnapTrade keys in `.env` first, then
+    `docker compose up -d`), or upload a CSV or OFX file from your bank or broker.
+
+Passkeys and the `__Host-` session cookie need HTTPS, which `tailscale serve` provides (browsers also allow them
+on `http://localhost`). The address you sign in at is the passkey's home: passkeys made at
+`finance.tail1234.ts.net` only work there, so pick the name before adding them.
 
 The app listens on 127.0.0.1 only, so it can't be reached from the internet; Tailscale is the only way in.
 
@@ -112,5 +131,33 @@ them. To restore one, bring the private key over for the moment you need it:
   carry an SBOM and provenance and are signed with cosign; `update.sh` refuses unsigned images.
 - **No financial data in the browser cache.** The service worker caches the app itself, never `/api`.
 
-Sign-in (passkeys, then password + TOTP), encrypted tokens, the audit log and "revoke all" arrive in Phase 1,
-before any real account is linked.
+- **Sign-in.** Passkeys first (Face ID, Touch ID, fingerprint), password + code app as the backup. Passwords are
+  hashed with Argon2id; a code works once. Five wrong tries lock the account for 15 minutes. Sessions end after
+  15 idle minutes and 12 hours at most, live in an `HttpOnly`, `Secure`, `SameSite=Strict` `__Host-` cookie, and
+  only a hash of the token is stored. Every change is CSRF-checked twice (a per-session token and the browser's
+  `Origin`/`Sec-Fetch-Site`). Inviting, removing a person or passkey, changing the password and revoking need a
+  fresh passkey or code from the last 10 minutes. Sign-in attempts are rate limited per address.
+- **Alerts.** A sign-in from a new device, a lockout, or a connection that stopped syncing sends a push through
+  ntfy (email if ntfy isn't set). Alerts never contain amounts.
+- **Audit log.** Every sign-in, failure, link, import, invite and revoke is recorded and shown under Settings →
+  Security.
+- **Tokens encrypted.** Aggregator tokens and code-app secrets are encrypted with AES-256-GCM under
+  `ENCRYPTION_KEY`, which lives only in `.env` (not the database, not the backups). Each value is bound to its
+  column, so a ciphertext moved elsewhere won't decrypt.
+- **Read-only, revocable.** Plaid gets only read products (transactions, investments, liabilities, balance); SnapTrade connections are
+  made read-only. Plaid Link is the hosted page (no Plaid script runs inside the app, so the CSP stays strict).
+  "Revoke all connections" removes every connection at Plaid and SnapTrade and deletes every token here.
+- **Uploads checked.** Files are capped at 5 MB and parsed on the server (the raw file is never kept); you see a
+  preview before anything is saved.
+
+## Linking accounts
+
+| Provider | For | Notes |
+| --- | --- | --- |
+| Plaid | Banks and cards (Chase, Amex, Ally...) | Hosted Link; `/transactions/sync` with a cursor. The free Trial plan covers a household. |
+| SnapTrade | Brokerages (E*TRADE, Fidelity, Schwab, Robinhood...) | One SnapTrade user for the household; read-only connections. Covers E*TRADE, so its own API isn't needed. |
+| File upload | Anything | Fidelity and E*TRADE positions CSVs, any bank's transactions CSV, OFX/QFX. Fidelity 401(k)s, which no aggregator reaches well, go this way. |
+
+Each account has an "authoritative" switch for when the same account comes in two ways (say, an upload and a
+link): only the authoritative one counts toward net worth. Enter a statement balance on any account to check the
+synced number against it; the Phase 1 gate is every account within 1%.

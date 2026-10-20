@@ -14,7 +14,7 @@ export default function Portfolio() {
         const total = h.allocation.reduce((s, a) => s + a.cents, 0);
         const holdings = [...h.holdings].sort((a, b) => b.value_cents - a.value_cents);
         return (
-          <div className="grid gap-4">
+          <div className="grid grid-cols-1 gap-4">
             <Card>
               <CardHeader>
                 <CardTitle>Allocation</CardTitle>

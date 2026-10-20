@@ -1,5 +1,29 @@
 [
   {
+    "version": "0.2.0",
+    "title": "Your own accounts",
+    "features": [
+      {
+        "id": "sign-in",
+        "title": "Sign in with a glance",
+        "body": "Set up with the code from the server, add a code app as the backup, then a passkey so Face ID or your fingerprint is all it takes. Invite your partner from Settings, People. Settings, Security shows every device that's signed in and everything that happened.",
+        "tryIt": "/settings/security"
+      },
+      {
+        "id": "accounts",
+        "title": "Link accounts or upload a file",
+        "body": "Connect banks and cards through Plaid and brokerages through SnapTrade, all read-only, or upload a CSV or OFX file from Fidelity, E*TRADE or your bank. Everything syncs every few hours, and you'll get a push if a connection stops.",
+        "tryIt": "/settings/accounts"
+      },
+      {
+        "id": "spending",
+        "title": "Spending that sorts itself",
+        "body": "Transfers between your own accounts and card payments are left out. Merchants are cleaned up and categorized; fix one in two taps and the app remembers for next time.",
+        "tryIt": "/spending"
+      }
+    ]
+  },
+  {
     "version": "0.1.0",
     "title": "First look",
     "features": [
