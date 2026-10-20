@@ -111,8 +111,8 @@ def test_health_reports_the_database(site):
     assert ok.json() == {"status": "ok", "version": "1.2.3", "database": "not configured"}
 
 
-def test_household_is_empty_until_accounts_are_linked(site):
-    assert client(site).get("/api/household").json() == {"demo": False, "linked": False}
+def test_household_needs_a_database_and_sign_in(site):
+    assert client(site).get("/api/household").status_code == 503
 
 
 def test_demo_household_adds_up(site):

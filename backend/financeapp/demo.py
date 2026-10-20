@@ -160,10 +160,26 @@ def household(today: date | None = None) -> dict:
             },
         ],
         "transactions": transactions,
-        "accounts": {
-            "cash": [{"name": n, "cents": _cents(v)} for n, v in CASH],
-            "debts": [{"name": n, "cents": _cents(v)} for n, v in DEBTS],
+        "spending": {
+            "month_cents": sum(-t["amount_cents"] for t in transactions if not t.get("transfer")),
+            "last_month_same_day_cents": _cents(2_310),
+            "needs_review": 1,
         },
+        "accounts": {
+            "cash": [
+                {"id": i, "name": n, "type": "depository", "cents": _cents(v), "as_of": today.isoformat()}
+                for i, (n, v) in enumerate(CASH, 1)
+            ],
+            "investments": [
+                {"id": 10 + i, "name": a, "type": "investment", "cents": _cents(v), "as_of": today.isoformat()}
+                for i, (a, v) in enumerate(_by_account().items())
+            ],
+            "debts": [
+                {"id": 20 + i, "name": n, "type": "credit", "cents": _cents(v), "as_of": today.isoformat()}
+                for i, (n, v) in enumerate(DEBTS)
+            ],
+        },
+        "health": {"stale": [], "last_sync_ok": True},
         "holdings": [
             {
                 "symbol": s,
@@ -177,6 +193,111 @@ def household(today: date | None = None) -> dict:
         ],
         "allocation": [{"asset_class": k, "cents": v} for k, v in sorted(by_class.items(), key=lambda kv: -kv[1])],
         "projection": {"monthly_savings_cents": _cents(monthly_savings), "bands": bands},
+    }
+
+
+def _by_account() -> dict[str, float]:
+    totals: dict[str, float] = {}
+    for _, _, _, account, dollars, _ in HOLDINGS:
+        totals[account] = totals.get(account, 0) + dollars
+    return totals
+
+
+CATEGORY_NAMES = [
+    ("Paycheck", "income"),
+    ("Rent", "fixed"),
+    ("Utilities", "fixed"),
+    ("Insurance", "fixed"),
+    ("Subscriptions", "fixed"),
+    ("Groceries", "flexible"),
+    ("Dining out", "flexible"),
+    ("Shopping", "flexible"),
+    ("Transport", "flexible"),
+    ("Entertainment", "flexible"),
+    ("Transfer", "transfer"),
+    ("Uncategorized", "other"),
+]
+
+
+def categories() -> list[dict]:
+    return [{"id": i, "name": n, "kind": k} for i, (n, k) in enumerate(CATEGORY_NAMES, 1)]
+
+
+def connections() -> dict:
+    """The Settings → Accounts page in demo mode."""
+    today = datetime.now(UTC)
+    synced = today.replace(hour=6, minute=2, second=0, microsecond=0).isoformat()
+
+    def account(i: int, name: str, kind: str, cents: int, mask: str) -> dict:
+        return {
+            "id": i,
+            "name": name,
+            "display_name": f"{name} ••{mask}",
+            "type": kind,
+            "subtype": None,
+            "mask": mask,
+            "hidden": False,
+            "is_authoritative": True,
+            "owner_user_id": 0,
+            "balance_cents": cents,
+            "balance_date": today.date().isoformat(),
+            "statement_cents": None,
+            "statement_date": None,
+            "statement_diff_percent": None,
+        }
+
+    def connection(i: int, provider: str, institution: str, accounts: list[dict], status: str = "active") -> dict:
+        return {
+            "id": i,
+            "provider": provider,
+            "institution": institution,
+            "status": status,
+            "last_synced_at": synced,
+            "last_error": None,
+            "created_at": synced,
+            "accounts": accounts,
+        }
+
+    by_account = _by_account()
+    return {
+        "connections": [
+            connection(
+                1,
+                "plaid",
+                "Chase",
+                [
+                    account(1, "Chase checking", "depository", _cents(14_350), "4417"),
+                    account(2, "Chase Sapphire", "credit", _cents(860), "9012"),
+                ],
+            ),
+            connection(2, "plaid", "Ally", [account(3, "Ally savings", "depository", _cents(38_900), "2290")]),
+            connection(3, "plaid", "American Express", [account(4, "Amex Gold", "credit", _cents(2_140), "1008")]),
+            connection(
+                4,
+                "snaptrade",
+                "E*TRADE, Fidelity",
+                [
+                    account(5, "E*TRADE", "investment", _cents(by_account["E*TRADE"]), "6621"),
+                    account(6, "Fidelity IRA", "investment", _cents(by_account["Fidelity IRA"]), "3305"),
+                ],
+            ),
+            connection(
+                5,
+                "plaid",
+                "Fidelity NetBenefits",
+                [account(7, "Fidelity 401(k)", "investment", _cents(by_account["Fidelity 401(k)"]), "7781")],
+            ),
+            connection(
+                6,
+                "file",
+                "HealthEquity",
+                [account(8, "HealthEquity HSA", "investment", _cents(by_account["HealthEquity HSA"]), "0456")],
+            ),
+        ],
+        "revoked": [],
+        "providers": {"plaid": True, "snaptrade": True},
+        "people": [{"id": 0, "name": "Sample"}],
+        "sync": {"last_at": synced, "last_ok": True, "clean_days": 7, "running": False},
     }
 
 

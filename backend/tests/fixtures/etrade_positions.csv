@@ -1,0 +1,11 @@
+Account Summary
+Account,Net Account Value,Total Gain $,Total Gain %,Day's Gain Unrealized $,Day's Gain Unrealized %,Available For Withdrawal,Cash Purchasing Power
+Individual Brokerage -6621,"20,246.56",4012.00,24.72,120.00,0.60,"1,234.56","1,234.56"
+
+View Summary - All Positions
+Symbol,Last Price $,Change $,Change %,Quantity,Price Paid $,Day's Gain $,Total Gain $,Total Gain %,Value $
+AAPL,190.12,1.20,0.63,100,150.00,120.00,4012.00,26.75,19012.00
+CASH,,,,,,,,,"1,234.56"
+TOTAL,,,,,,,,,"20,246.56"
+
+Generated at Oct 19 2026 10:00 PM ET
