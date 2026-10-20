@@ -1,7 +1,8 @@
 "use client";
 
 import { Money } from "@/components/money";
-import { HouseholdPage } from "@/components/page";
+import { PiggyBank } from "lucide-react";
+import { HouseholdPage, Notice } from "@/components/page";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import type { Budget } from "@/lib/household";
@@ -17,7 +18,7 @@ function Group({ title, budgets }: { title: string; budgets: Budget[] }) {
           <Money cents={spent} /> of <Money cents={limit} />
         </span>
       </CardHeader>
-      <CardContent className="grid gap-5">
+      <CardContent className="grid grid-cols-1 gap-5">
         {budgets.map((b) => {
           const left = b.limit_cents - b.spent_cents;
           return (
@@ -50,12 +51,19 @@ function Group({ title, budgets }: { title: string; budgets: Budget[] }) {
 export default function BudgetPage() {
   return (
     <HouseholdPage title="Budget" subtitle="This month, drafted from your last six months of spending.">
-      {(h) => (
-        <div className="grid gap-4">
-          <Group title="Flexible" budgets={h.budgets.filter((b) => b.kind === "flexible")} />
-          <Group title="Fixed" budgets={h.budgets.filter((b) => b.kind === "fixed")} />
-        </div>
-      )}
+      {(h) =>
+        h.budgets.length === 0 ? (
+          <Notice icon={<PiggyBank className="size-5" />} title="Your budget is drafted in the next update">
+            It&apos;s built from your own spending: the typical month of each category over the last few months, split into bills and
+            everyday spending, ready to adjust. Meanwhile, Spending shows where it goes.
+          </Notice>
+        ) : (
+          <div className="grid grid-cols-1 gap-4">
+            <Group title="Flexible" budgets={h.budgets.filter((b) => b.kind === "flexible")} />
+            <Group title="Fixed" budgets={h.budgets.filter((b) => b.kind === "fixed")} />
+          </div>
+        )
+      }
     </HouseholdPage>
   );
 }

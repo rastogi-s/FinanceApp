@@ -1,6 +1,8 @@
 "use client";
 
-import { AlertTriangle, Link2 } from "lucide-react";
+import Link from "next/link";
+import { AlertTriangle, ChevronLeft, Link2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useHousehold, type LinkedHousehold } from "@/lib/household";
@@ -8,6 +10,19 @@ import { useHousehold, type LinkedHousehold } from "@/lib/household";
 export function PageTitle({ title, subtitle }: { title: string; subtitle?: React.ReactNode }) {
   return (
     <div className="mb-5">
+      <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">{title}</h1>
+      {subtitle && <p className="mt-1 text-sm text-muted-foreground">{subtitle}</p>}
+    </div>
+  );
+}
+
+/** A page inside Settings: the title with a way back. */
+export function SubPageTitle({ title, subtitle, back }: { title: string; subtitle?: React.ReactNode; back: string }) {
+  return (
+    <div className="mb-5">
+      <Link href={back} className="-ml-1 mb-2 inline-flex items-center gap-0.5 text-sm font-medium text-primary">
+        <ChevronLeft className="size-4" aria-hidden /> Settings
+      </Link>
       <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">{title}</h1>
       {subtitle && <p className="mt-1 text-sm text-muted-foreground">{subtitle}</p>}
     </div>
@@ -38,9 +53,16 @@ export function HouseholdPage({
         </Notice>
       )}
       {state.status === "ready" && !state.household.linked && (
-        <Notice icon={<Link2 className="size-5" />} title="No accounts linked yet">
-          Linking your bank, card and brokerage accounts arrives with sign-in in the next update. Until then the
-          app is running and ready.
+        <Notice
+          icon={<Link2 className="size-5" />}
+          title="No accounts yet"
+          action={
+            <Button asChild size="sm" className="mt-3">
+              <Link href="/settings/accounts">Add an account</Link>
+            </Button>
+          }
+        >
+          Link a bank, card or brokerage, or upload a file you downloaded. Your numbers show up here as soon as one is in.
         </Notice>
       )}
       {state.status === "ready" && state.household.linked && children(state.household)}
@@ -50,7 +72,7 @@ export function HouseholdPage({
 
 function LoadingCards() {
   return (
-    <div className="grid gap-4" aria-busy="true" aria-label="Loading">
+    <div className="grid grid-cols-1 gap-4" aria-busy="true" aria-label="Loading">
       <Skeleton className="h-40 rounded-xl" />
       <div className="grid grid-cols-2 gap-4">
         <Skeleton className="h-28 rounded-xl" />
@@ -61,7 +83,17 @@ function LoadingCards() {
   );
 }
 
-function Notice({ icon, title, children }: { icon: React.ReactNode; title: string; children: React.ReactNode }) {
+export function Notice({
+  icon,
+  title,
+  children,
+  action,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  children: React.ReactNode;
+  action?: React.ReactNode;
+}) {
   return (
     <Card>
       <CardContent className="flex gap-4 pt-5">
@@ -69,6 +101,7 @@ function Notice({ icon, title, children }: { icon: React.ReactNode; title: strin
         <div>
           <p className="font-medium">{title}</p>
           <p className="mt-1 text-sm text-muted-foreground">{children}</p>
+          {action}
         </div>
       </CardContent>
     </Card>

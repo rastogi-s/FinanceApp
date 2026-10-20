@@ -539,6 +539,7 @@ def commit_import(import_id: int, body: CommitIn, request: Request, who: Signed 
     allowed = {a.id: a for a in _account_candidates(db)}
     as_of = date.fromisoformat(imp.parsed["as_of"])
     totals = {"holdings": 0, "transactions": 0, "accounts": 0}
+    new_connections: dict[str, Connection] = {}
     for target in body.targets:
         if target.skip or not 0 <= target.index < len(imp.parsed["accounts"]):
             continue
@@ -551,9 +552,13 @@ def commit_import(import_id: int, body: CommitIn, request: Request, who: Signed 
         else:
             institution = (target.institution or fa["institution"] or "Uploaded").strip()[:120]
             name = (target.name or fa["name"] or institution).strip()[:120]
-            conn = Connection(provider="file", institution=institution, created_by=who.user.id, state={})
-            db.add(conn)
-            db.flush()
+            # Accounts from one file at one institution (Fidelity's file has them all) share one connection.
+            conn = new_connections.get(institution)
+            if conn is None:
+                conn = Connection(provider="file", institution=institution, created_by=who.user.id, state={})
+                db.add(conn)
+                db.flush()
+                new_connections[institution] = conn
             account = Account(
                 connection_id=conn.id,
                 external_id=fa["mask"] or f"file-{conn.id}",

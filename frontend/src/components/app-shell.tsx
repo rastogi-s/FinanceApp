@@ -4,7 +4,11 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useSyncExternalStore } from "react";
 import { ChartPie, Eye, EyeOff, House, PiggyBank, ReceiptText, Settings, TrendingUp } from "lucide-react";
+import { ReauthDialog, requestReauth } from "@/components/reauth";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Toaster } from "@/components/ui/toast";
+import { AuthProvider, isPublic, useAuth } from "@/lib/auth";
 import { useMeta } from "@/lib/household";
 import { cn } from "@/lib/utils";
 
@@ -53,16 +57,60 @@ function usePrivacy(): [boolean, () => void] {
 }
 
 export function AppShell({ children }: { children: React.ReactNode }) {
+  return (
+    <AuthProvider reauth={requestReauth}>
+      <Shell>{children}</Shell>
+      <ReauthDialog />
+      <Toaster />
+    </AuthProvider>
+  );
+}
+
+function Shell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const meta = useMeta();
-  const [privacy, togglePrivacy] = usePrivacy();
-  const active = (href: string) => (href === "/" ? pathname === "/" : pathname.startsWith(href));
+  const { state } = useAuth();
 
   useEffect(() => {
     if ("serviceWorker" in navigator && process.env.NODE_ENV === "production") {
       navigator.serviceWorker.register("/sw.js").catch(() => {});
     }
   }, []);
+
+  if (isPublic(pathname)) return <PublicShell>{children}</PublicShell>;
+  if (state.status !== "signed-in") return <Waiting />;
+  return <PrivateShell>{children}</PrivateShell>;
+}
+
+/** Sign-in, first-run setup and invitations: just the task, centered, no navigation. */
+function PublicShell({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex min-h-dvh flex-col items-center px-4 pt-[max(2.5rem,env(safe-area-inset-top))] pb-10 md:justify-center md:pt-10">
+      <div className="mb-8 flex items-center gap-2.5 text-lg font-semibold tracking-tight">
+        <Logo /> Finance
+      </div>
+      <main id="main" className="w-full max-w-md">
+        {children}
+      </main>
+    </div>
+  );
+}
+
+/** While checking who's signed in: the page's shape, never a flash of someone's numbers or an empty screen. */
+function Waiting() {
+  return (
+    <div className="mx-auto grid w-full max-w-3xl gap-4 px-4 pt-20" aria-busy="true" aria-label="Loading">
+      <Skeleton className="h-8 w-40 rounded-lg" />
+      <Skeleton className="h-40 rounded-xl" />
+      <Skeleton className="h-28 rounded-xl" />
+    </div>
+  );
+}
+
+function PrivateShell({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
+  const meta = useMeta();
+  const [privacy, togglePrivacy] = usePrivacy();
+  const active = (href: string) => (href === "/" ? pathname === "/" : pathname.startsWith(href));
 
   return (
     <div className="min-h-dvh md:grid md:grid-cols-[15rem_1fr]">
@@ -166,7 +214,14 @@ function Logo() {
   return (
     <svg viewBox="0 0 32 32" className="size-7" aria-hidden>
       <rect width="32" height="32" rx="9" fill="var(--primary)" />
-      <path d="M8 21.5 13.5 16l4 3.5L24 12" fill="none" stroke="var(--primary-foreground)" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" />
+      <path
+        d="M8 21.5 13.5 16l4 3.5L24 12"
+        fill="none"
+        stroke="var(--primary-foreground)"
+        strokeWidth="2.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </svg>
   );
 }
