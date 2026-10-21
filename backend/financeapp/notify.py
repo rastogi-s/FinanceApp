@@ -20,8 +20,10 @@ def configured(settings: Settings) -> bool:
     return bool(settings.ntfy_url or (settings.smtp_host and settings.alert_email))
 
 
-def _ntfy(settings: Settings, title: str, body: str, tags: str, priority: str) -> None:
+def _ntfy(settings: Settings, title: str, body: str, tags: str, priority: str, click: str | None = None) -> None:
     headers = {"Title": title, "Tags": tags, "Priority": priority}
+    if click:
+        headers["Click"] = click  # tapping the notification opens the app
     if settings.ntfy_token:
         headers["Authorization"] = f"Bearer {settings.ntfy_token}"
     r = httpx.post(settings.ntfy_url, content=body.encode(), headers=headers, timeout=10)
@@ -41,17 +43,19 @@ def _email(settings: Settings, title: str, body: str) -> None:
         smtp.send_message(msg)
 
 
-def deliver(settings: Settings, title: str, body: str, tags: str = "lock", priority: str = "high") -> str | None:
+def deliver(
+    settings: Settings, title: str, body: str, tags: str = "lock", priority: str = "high", click: str | None = None
+) -> str | None:
     """Sends on the first channel that works. Returns the channel it went out on (ntfy or email), or None."""
     if settings.ntfy_url:
         try:
-            _ntfy(settings, title, body, tags, priority)
+            _ntfy(settings, title, body, tags, priority, click)
             return "ntfy"
         except Exception as e:
             log.warning("ntfy alert failed (%s); trying email", type(e).__name__)
     if settings.smtp_host and settings.alert_email:
         try:
-            _email(settings, title, body)
+            _email(settings, title, body + (f"\n\n{click}" if click else ""))
             return "email"
         except Exception as e:
             log.warning("email alert failed (%s)", type(e).__name__)

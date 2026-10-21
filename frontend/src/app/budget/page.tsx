@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { CalendarClock, ChevronRight, History, Minus, PiggyBank, Plus, ShieldCheck, Sparkles, Trash2, Wallet } from "lucide-react";
+import { AIBudgetSheet } from "@/components/ai-budget-sheet";
 import { AddSheet, FREQUENCY_LABEL, LineSheet, PaycheckSheet } from "@/components/budget-sheets";
 import { Money } from "@/components/money";
 import { HouseholdPage, Notice } from "@/components/page";
@@ -34,6 +35,7 @@ function Budget() {
   const [editing, setEditing] = useState<BudgetLine | null>(null);
   const [adding, setAdding] = useState(false);
   const [paying, setPaying] = useState(false);
+  const [drafting, setDrafting] = useState(false);
 
   if (error)
     return (
@@ -209,9 +211,17 @@ function Budget() {
         </Card>
       )}
 
-      <Button variant="outline" className="justify-self-start" onClick={() => setAdding(true)}>
-        <Plus /> Add a category
-      </Button>
+      <div className="flex flex-wrap gap-2">
+        <Button variant="outline" onClick={() => setAdding(true)}>
+          <Plus /> Add a category
+        </Button>
+        <Button
+          variant="outline"
+          onClick={() => (demo ? toast("Drafting with AI is off while the app shows sample data.") : setDrafting(true))}
+        >
+          <Sparkles /> Draft with AI
+        </Button>
+      </div>
 
       <Savings data={data} onAdd={() => setPaying(true)} run={run} />
       <Emergency data={data} run={run} />
@@ -219,6 +229,12 @@ function Budget() {
 
       <LineSheet line={editing} budget={data} change={change} onClose={() => setEditing(null)} />
       <AddSheet open={adding} budget={data} onClose={() => setAdding(false)} onPick={pick} />
+      <AIBudgetSheet
+        open={drafting}
+        onOpenChange={setDrafting}
+        lines={data.lines}
+        save={(lines) => change("/api/budget", "PUT", { lines, source: "ai" })}
+      />
       <PaycheckSheet open={paying} budget={data} change={change} onClose={() => setPaying(false)} />
     </div>
   );
@@ -468,7 +484,7 @@ function Emergency({ data, run }: { data: BudgetState; run: Run }) {
   );
 }
 
-const SOURCE = { draft: "Drafted from spending", edit: "Edited", restore: "Brought back" } as const;
+const SOURCE = { draft: "Drafted from spending", edit: "Edited", restore: "Brought back", ai: "Drafted with AI" } as const;
 
 function Versions({ data, run }: { data: BudgetState; run: Run }) {
   const [open, setOpen] = useState(false);

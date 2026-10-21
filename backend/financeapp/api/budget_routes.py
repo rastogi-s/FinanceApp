@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
 
 from financeapp import budget, demo, paystub
-from financeapp.ai import documents, extract, reading
+from financeapp.ai import budgeting, documents, extract, reading
 from financeapp.ai.providers import ProviderError
 from financeapp.ai.service import AIUnavailable
 from financeapp.api.deps import Signed, audit, signed_in
@@ -42,6 +42,7 @@ class LineIn(BaseModel):
 
 class BudgetIn(BaseModel):
     lines: list[LineIn] = Field(max_length=200)
+    source: Literal["edit", "ai"] = "edit"  # "ai": lines picked from a Draft with AI suggestion
 
 
 @router.put("/budget")
@@ -55,7 +56,7 @@ def save_budget(body: BudgetIn, request: Request, who: Signed = Depends(signed_i
     kinds = dict(db.execute(select(Category.id, Category.kind).where(Category.id.in_(ids))).all())
     if any(kinds.get(i) not in budget.BUDGETED for i in ids):
         raise HTTPException(422, "Only bills and everyday spending categories can have a budget.")
-    v = budget.save_version(db, {line.category_id: line.limit_cents for line in body.lines}, "edit", who.user.id)
+    v = budget.save_version(db, {line.category_id: line.limit_cents for line in body.lines}, body.source, who.user.id)
     audit(db, request, "budget_saved", who.user.id, version=v.id, lines=len(body.lines))
     return budget.build(db)
 
@@ -70,6 +71,41 @@ def redraft(request: Request, who: Signed = Depends(signed_in)) -> dict:
         raise HTTPException(409, "There isn't a full month of spending to draft from yet.")
     audit(db, request, "budget_saved", who.user.id, version=v.id, source="draft")
     return budget.build(db)
+
+
+@router.get("/budget/ai")
+def ai_offer(request: Request, who: Signed = Depends(signed_in)) -> dict:
+    """What Draft with AI would send, to whom and at most what cost, before anything is sent."""
+    if who.demo:
+        return {
+            "available": False,
+            "problem": "Not available with sample data.",
+            "provider": None,
+            "model": None,
+            "max_cost": None,
+            "months": 0,
+            "categories": 0,
+            "stubs": 0,
+            "preview": None,
+        }
+    return budgeting.offer(db_of(request))
+
+
+@router.post("/budget/ai")
+def ai_suggest(request: Request, who: Signed = Depends(signed_in)) -> dict:
+    """A suggested budget, line by line. Nothing is saved: the page saves the lines the person picks."""
+    no_demo(who)
+    db = db_of(request)
+    try:
+        s = budgeting.suggest(request.app.state.db, db, who.user.id)
+    except AIUnavailable as e:
+        raise HTTPException(409, str(e)) from None
+    except ProviderError as e:
+        raise HTTPException(502, e.message) from None
+    except budgeting.NotABudget as e:
+        raise HTTPException(422, e.message) from None
+    audit(db, request, "budget_ai_suggested", who.user.id, model=s.model, lines=len(s.lines))
+    return {"summary": s.summary, "lines": s.lines, "model": s.model, "cost": s.cost}
 
 
 @router.post("/budget/versions/{version_id}/restore")

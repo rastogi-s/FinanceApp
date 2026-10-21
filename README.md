@@ -172,6 +172,10 @@ them. To restore one, bring the private key over for the moment you need it:
   preview before anything is saved. Spreadsheets are opened with hardened XML parsing and a zip-bomb limit, and
   pictures are re-encoded (which drops location and camera details). A file is only sent to AI after you've seen
   exactly what would go and said yes.
+- **Agents can only read.** The MCP server at `/mcp` has no tool that changes anything. Each agent gets its own key
+  (made by the owner after a fresh passkey or code, shown once, stored only as a SHA-256), revoking it locks that
+  agent out at once, browser cookies are never accepted there, a request a browser sends from another site is
+  refused, and keys are rate limited (wrong keys too, per address).
 
 ## Linking accounts
 
@@ -184,10 +188,36 @@ them. To restore one, bring the private key over for the moment you need it:
 ## AI
 
 Settings → AI takes Claude, OpenAI, Gemini, or any OpenAI-compatible server (Ollama, LM Studio, vLLM). Each job
-(for now, reading uploads the built-in readers don't know) goes to the provider and model you pick there. Models
+(reading uploads the built-in readers don't know, wording the morning brief) goes to the provider and model you pick
+there. Models
 with a known price are costed exactly; for others, type in the price or the app assumes a high one so the cap stops
 early. A local server is free and keeps everything at home: run Ollama with a vision model (`ollama pull
 qwen2.5vl:7b`) and add `http://<that machine>:11434/v1`.
+
+**Morning brief.** Turn it on in Settings → Alerts and pick a time (in the quiet-hours time zone). Each morning the
+app writes a few lines from the same numbers as Home: safe to spend, yesterday's spending, anything over or near its
+budget, net worth, big moves in your holdings and an upcoming payday. With AI set up for "Writing the morning brief"
+the AI words it from totals, categories and tickers only; if its wording uses any dollar amount that isn't one of the
+brief's own numbers, the app's wording is used instead. The phone only gets "Your morning brief is ready" (no
+amounts on a lock screen); the brief itself is on Home.
+
+**Agents (MCP).** Settings → Agents makes a key for any MCP-capable agent, so it can answer questions like "how much
+did we spend on dining this year?". The server is `https://<your app>/mcp` (Streamable HTTP, one JSON answer per
+request). With Claude Code on a machine in your tailnet:
+
+```sh
+claude mcp add --transport http finance https://<your app>/mcp --header "Authorization: Bearer <key>"
+```
+
+Claude Desktop and other apps that start servers from a config file can use `npx -y mcp-remote <url> --header
+"Authorization: Bearer <key>"`. The tools: overview, accounts, transactions, spending by category, budget,
+holdings, net worth history, alerts and the morning brief.
+
+**Draft with AI** (Budget) suggests a limit for each line from your spending by month, the budget as it stands
+(and which lines you changed by hand), your pay stubs, savings rate and savings goal. Only totals go, never
+merchants, names or accounts, and the sheet shows exactly what will be sent before anything is. Each suggestion
+comes with its reason; tick the ones you want and they're saved as a new budget version marked "Drafted with AI",
+so the old one is a tap away in History.
 
 Each account has an "authoritative" switch for when the same account comes in two ways (say, an upload and a
 link): only the authoritative one counts toward net worth. Enter a statement balance on any account to check the

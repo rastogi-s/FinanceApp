@@ -1,6 +1,6 @@
 [
   {
-    "version": "0.9.0",
+    "version": "0.11.0",
     "title": "Updates, right from the app",
     "features": [
       {
@@ -14,6 +14,36 @@
         "title": "Update now, safely",
         "body": "The owner can install a new version from the app. The server still does the work: it checks the new version's signature, backs up first, and goes back on its own if the new version doesn't start cleanly. The app never gets any control over the server.",
         "tryIt": "/settings"
+      }
+    ]
+  },
+  {
+    "version": "0.10.0",
+    "title": "A budget drafted with AI",
+    "features": [
+      {
+        "id": "ai-budget",
+        "title": "Draft with AI",
+        "body": "Budget has a Draft with AI button. It looks at your spending by month, the lines you changed by hand, your pay stubs and your savings goal, then suggests a limit for each line with the reason. Only totals are sent, and you see exactly what first. Tick the ones you want; the old budget stays in History.",
+        "tryIt": "/budget"
+      }
+    ]
+  },
+  {
+    "version": "0.8.0",
+    "title": "Mornings and agents",
+    "features": [
+      {
+        "id": "morning-brief",
+        "title": "A morning brief",
+        "body": "A few lines each morning: safe to spend, yesterday's spending, anything over budget, net worth and big moves. Your phone just says it's ready, with no amounts on the lock screen. Turn it on in Settings, Alerts. With AI set up, AI words it, checked against your own numbers.",
+        "tryIt": "/settings/alerts"
+      },
+      {
+        "id": "agents",
+        "title": "Ask your own AI",
+        "body": "Settings, Agents gives Claude Code, Claude Desktop or Cursor a read-only key, so you can ask things like \"how much did we spend on dining this year?\" Agents can look but never change anything, and a key can be revoked at any time.",
+        "tryIt": "/settings/agents"
       }
     ]
   },

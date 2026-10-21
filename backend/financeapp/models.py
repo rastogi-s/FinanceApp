@@ -286,7 +286,7 @@ class BudgetVersion(Base):
 
     __tablename__ = "budget_versions"
     id: Mapped[int] = mapped_column(primary_key=True)
-    source: Mapped[str] = mapped_column(String(16))  # draft | edit | restore
+    source: Mapped[str] = mapped_column(String(16))  # draft | edit | restore | ai
     created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     created_at: Mapped[datetime] = mapped_column(default=now)
 
@@ -457,3 +457,37 @@ class SecurityId(Base):
     ticker: Mapped[str | None] = mapped_column(String(40))
     cik: Mapped[int | None] = mapped_column(Integer)
     resolved_at: Mapped[datetime] = mapped_column(default=now)
+
+
+# ---- agents (the read-only MCP server) and the morning brief
+
+
+class AgentKey(Base):
+    """A key an AI agent uses to read the household's numbers over MCP. Only its SHA-256 is stored; the key itself
+    is shown once, when it's made. Keys can only read: the MCP server has no tools that change anything."""
+
+    __tablename__ = "agent_keys"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    label: Mapped[str] = mapped_column(String(80))
+    token_hash: Mapped[bytes] = mapped_column(LargeBinary(32), unique=True)
+    hint: Mapped[str] = mapped_column(String(8))  # the key's last 4 characters, to tell keys apart
+    created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    created_at: Mapped[datetime] = mapped_column(default=now)
+    last_used_at: Mapped[datetime | None]
+    uses: Mapped[int] = mapped_column(Integer, default=0)
+    revoked_at: Mapped[datetime | None]
+
+
+class Brief(Base):
+    """One morning brief: the numbers it was built from, and what it says."""
+
+    __tablename__ = "briefs"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    day: Mapped[date] = mapped_column(Date, unique=True)  # in the household's time zone
+    facts: Mapped[dict] = mapped_column(default=dict)
+    headline: Mapped[str] = mapped_column(String(200))
+    points: Mapped[dict] = mapped_column(default=dict)  # {"items": [...]}
+    written_by: Mapped[str] = mapped_column(String(80))  # "app", or the AI model that wrote it
+    channel: Mapped[str | None] = mapped_column(String(16))  # ntfy | email, when it was sent
+    created_at: Mapped[datetime] = mapped_column(default=now)
+    read_at: Mapped[datetime | None]

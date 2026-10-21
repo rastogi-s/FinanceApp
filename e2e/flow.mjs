@@ -237,6 +237,46 @@ try {
     await main().getByText("No AI yet").waitFor();
   });
 
+  let agentKey = "";
+  await check("agents-new-key", async () => {
+    await page.goto(BASE + "/settings/agents");
+    await main().getByText("No agents yet").waitFor();
+    await button("New key").click();
+    await page.getByLabel("Name").fill("Flow test");
+    await page.getByRole("dialog").getByRole("button", { name: "Make the key" }).click();
+    agentKey = (await page.getByTestId("agent-token").innerText()).trim();
+    if (!agentKey.startsWith("fa_agent_")) throw new Error("no key shown");
+    await page.getByRole("dialog").getByRole("button", { name: "Done" }).click();
+    await main().getByText("Flow test").waitFor();
+  });
+
+  // An agent asks over MCP and gets the same net worth as Home ($29,834.56 + $2,500.00).
+  await check("agents-mcp-answers", async () => {
+    const ask = (body, key = agentKey) =>
+      fetch(BASE + "/mcp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json, text/event-stream", Authorization: `Bearer ${key}` },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, ...body }),
+      });
+    if ((await ask({ method: "tools/list" }, "fa_agent_nope")).status !== 401) throw new Error("a wrong key got in");
+    const init = await (await ask({ method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "flow", version: "1" } } })).json();
+    if (init.result?.serverInfo?.name !== "financeapp") throw new Error("initialize: " + JSON.stringify(init));
+    const r = await (await ask({ method: "tools/call", params: { name: "overview", arguments: {} } })).json();
+    const net = r.result?.structuredContent?.net_worth;
+    if (Math.round(net) !== 32335) throw new Error("overview net worth: " + JSON.stringify(r).slice(0, 300));
+  });
+
+  await check("brief-write-now", async () => {
+    await page.goto(BASE + "/settings/alerts");
+    await main().getByText("Morning brief", { exact: true }).first().waitFor();
+    await button("Write today's now").click();
+    await main().getByText(/^Latest, /).waitFor();
+    await main().getByText(/Net worth is \$32,335/).waitFor();
+    await page.locator("nav:visible [data-tab=home]").click();
+    await page.waitForURL((u) => u.pathname === "/");
+    await main().getByText("Morning brief", { exact: true }).first().waitFor();
+  });
+
   await check("invite-partner", async () => {
     await page.goto(BASE + "/settings/people");
     await button("Invite someone").click();

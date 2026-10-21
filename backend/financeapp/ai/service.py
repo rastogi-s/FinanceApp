@@ -1,9 +1,9 @@
 """Running an AI task: which provider and model it goes to, whether the monthly cap allows it, and the usage log.
 
-Each task (reading uploads, for now) is routed to one provider and model the owner picked. Before a call the cost is
-estimated from the request's size and the reply's token limit; a call that could push the month over the cap is
-refused, not sent. After it, the real token counts are logged with their cost (in its own transaction, so a failed
-request is still counted).
+Each task (reading uploads, writing the morning brief) is routed to one provider and model the owner picked. Before
+a call the cost is estimated from the request's size and the reply's token limit; a call that could push the month
+over the cap is refused, not sent. After it, the real token counts are logged with their cost (in its own
+transaction, so a failed request is still counted).
 """
 
 from dataclasses import dataclass
@@ -36,6 +36,16 @@ TASKS = {
         "Reading uploads",
         "Statements, spreadsheets, screenshots and scanned pay stubs that the built-in readers don't know.",
         pictures=True,
+    ),
+    "daily_brief": Task(
+        "Writing the morning brief",
+        "Turns the morning's totals into a few plain sentences. Only totals, categories and tickers are sent.",
+        pictures=False,
+    ),
+    "plan_budget": Task(
+        "Drafting the budget",
+        "Suggests a limit for each budget line from your spending by month, pay stubs and savings goal (totals only).",
+        pictures=False,
     ),
 }
 

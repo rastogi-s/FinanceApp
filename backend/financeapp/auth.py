@@ -304,6 +304,13 @@ class RateLimiter:
                 self.hits = defaultdict(deque, {k: v for k, v in self.hits.items() if v})
             return True
 
+    def exceeded(self, key: str) -> bool:
+        """Whether `key` is at its limit, without counting this as a try."""
+        t = time.monotonic()
+        with self.lock:
+            q = self.hits.get(key)
+            return bool(q) and sum(1 for x in q if x >= t - self.window) >= self.limit
+
 
 def utc_iso(dt: datetime | None) -> str | None:
     return dt.isoformat() if dt else None
