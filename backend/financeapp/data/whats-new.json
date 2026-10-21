@@ -1,5 +1,17 @@
 [
   {
+    "version": "0.21.0",
+    "title": "Alerts that pop up",
+    "features": [
+      {
+        "id": "alert-priority",
+        "title": "Choose how loud each alert is",
+        "body": "Price, dip, budget and portfolio alerts now arrive as a banner with a sound, and on iPhone as Time Sensitive, so a Focus you allow them in won't hold them back. Before, they went out at normal priority and could land silently. Open any alert in Settings, Alerts to make it Pop up, Normal or Quiet. What's held over quiet hours still arrives in the morning as one normal message.",
+        "tryIt": "/settings/alerts"
+      }
+    ]
+  },
+  {
     "version": "0.20.0",
     "title": "Sort by what moved",
     "features": [

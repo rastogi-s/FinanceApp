@@ -25,6 +25,12 @@ Quiet hours (10 PM to 7 AM by default, in the household's time zone) hold alerts
 everything held goes out as one message. Security alerts (a new sign-in, a broken connection) never wait: they
 don't come through here.
 
+How loud. Each rule picks a priority, sent to ntfy as is: high (the default) shows a banner and, on an iPhone,
+comes through as Time Sensitive so a Focus mode can let it in; default shows a normal banner that a Focus can hold
+back; low arrives without a sound or banner. Several alerts at once go at the loudest of their priorities, except
+that what was held over quiet hours goes out no louder than default, so the morning roundup doesn't break through
+a Sleep Focus.
+
 Lock screens. Messages name a market price, a share of the budget or of the portfolio, never balances or dollar
 amounts of the household's own money.
 """
@@ -52,6 +58,8 @@ TREND_DAYS = 7  # a dip is only judged on a price and trend from the last week
 NOT_ADVICE = "Information only, not advice."
 MAX_ATTEMPTS = 3
 KEEP_DAYS = 180
+PRIORITIES = ("low", "default", "high")  # quietest first
+DEFAULT_PRIORITY = "high"
 QUIET_DEFAULTS = {"enabled": True, "start": "22:00", "end": "07:00", "timezone": "America/New_York"}
 
 
@@ -289,6 +297,20 @@ def evaluate(db: DbSession, kinds: set[str], companies: list[dict] | None = None
 # ---- sending
 
 
+def priority_of(rule: AlertRule | None) -> str:
+    p = (rule.params or {}).get("priority") if rule is not None else None
+    return p if p in PRIORITIES else DEFAULT_PRIORITY
+
+
+def loudest(db: DbSession, events: list[AlertEvent]) -> str:
+    ids = {e.rule_id for e in events if e.rule_id is not None}
+    rules = {r.id: r for r in db.scalars(select(AlertRule).where(AlertRule.id.in_(ids)))} if ids else {}
+    p = max((priority_of(rules.get(e.rule_id)) for e in events), key=PRIORITIES.index)
+    if any(e.status == "held" for e in events):
+        p = min(p, "default", key=PRIORITIES.index)
+    return p
+
+
 def send_pending(db: DbSession, settings: Settings, t: datetime | None = None) -> int:
     """Sends what's waiting, unless it's quiet hours (then it waits, marked held). Several at once go as one
     message. Returns how many alerts went out."""
@@ -313,7 +335,7 @@ def send_pending(db: DbSession, settings: Settings, t: datetime | None = None) -
         body = "\n".join(f"• {e.title}" for e in waiting[:8])
         if len(waiting) > 8:
             body += f"\n…and {len(waiting) - 8} more in the app."
-    channel = notify.deliver(settings, title, body, tags="bell", priority="default")
+    channel = notify.deliver(settings, title, body, tags="bell", priority=loudest(db, waiting))
     for e in waiting:
         e.attempts += 1
         if channel:
