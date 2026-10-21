@@ -60,6 +60,18 @@ class Settings(BaseSettings):
     smtp_password: str = ""
     alert_email: str = ""
 
+    # Live prices for holdings, every QUOTE_INTERVAL_MINUTES while US markets are open. Only ticker symbols are sent.
+    # auto: Finnhub when FINNHUB_API_KEY is set (free key at https://finnhub.io), and Yahoo Finance's public chart
+    # data for anything Finnhub doesn't have (mutual funds) or when there's no key. Or: finnhub | yahoo | off.
+    quotes_provider: str = "auto"
+    finnhub_api_key: str = ""
+    quote_interval_minutes: int = 15
+
+    # Look-through exposure reads funds' holdings from the SEC, which asks every program to say who is asking with a
+    # contact email. Empty means the owner's sign-in email is used. Set LOOKTHROUGH_ENABLED=false to never ask.
+    sec_contact_email: str = ""
+    lookthrough_enabled: bool = True
+
     @property
     def allowed_host_list(self) -> list[str]:
         return [h.strip() for h in self.allowed_hosts.split(",") if h.strip()]

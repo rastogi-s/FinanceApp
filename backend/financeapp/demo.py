@@ -430,3 +430,270 @@ def budget(today: date | None = None) -> dict:
             if k in ("fixed", "flexible")
         ],
     }
+
+
+# ---- portfolio, holding detail and alerts (Phase 3)
+
+# What sits inside the sample funds (percent of each fund), roughly as their filings say.
+S_AND_P = [
+    ("NVDA", "NVIDIA Corp", 7.6), ("MSFT", "Microsoft Corp", 6.8), ("AAPL", "Apple Inc.", 6.5),
+    ("AMZN", "Amazon.com, Inc.", 3.9), ("GOOGL", "Alphabet Inc.", 3.8), ("META", "Meta Platforms, Inc.", 2.9),
+    ("AVGO", "Broadcom Inc.", 2.6), ("TSLA", "Tesla, Inc.", 2.0), ("BRK.B", "Berkshire Hathaway Inc.", 1.6),
+    ("JPM", "JPMorgan Chase & Co.", 1.5), ("LLY", "Eli Lilly and Company", 1.3), ("V", "Visa Inc.", 1.1),
+    ("MA", "Mastercard Inc.", 0.9), ("XOM", "Exxon Mobil Corp", 0.9), ("COST", "Costco Wholesale Corp", 0.9),
+    ("WMT", "Walmart Inc.", 0.9), ("NFLX", "Netflix, Inc.", 0.8), ("UNH", "UnitedHealth Group Inc.", 0.8),
+    ("HD", "The Home Depot, Inc.", 0.7), ("PG", "Procter & Gamble Co.", 0.7),
+]  # fmt: skip
+INTERNATIONAL = [
+    ("TSM", "Taiwan Semiconductor Manufacturing", 2.6), (None, "Tencent Holdings Ltd", 1.2),
+    ("ASML", "ASML Holding NV", 1.0), (None, "Samsung Electronics Co Ltd", 0.9), ("SAP", "SAP SE", 0.8),
+    (None, "Nestle SA", 0.6), ("NVO", "Novo Nordisk A/S", 0.6), ("TM", "Toyota Motor Corp", 0.6),
+    ("AZN", "AstraZeneca PLC", 0.6), ("SHOP", "Shopify Inc.", 0.5),
+]  # fmt: skip
+SAMPLE_FUNDS = {
+    # symbol: (holdings, share of the fund in stocks, number of holdings, constituents)
+    "VTI": ("Vanguard Total Stock Market Index Fund", 99.9, 3612, [(s, n, round(w * 0.86, 2)) for s, n, w in S_AND_P]),
+    "FXAIX": ("Fidelity 500 Index Fund", 99.7, 504, S_AND_P),
+    "VXUS": ("Vanguard Total International Stock Index Fund", 99.2, 8541, INTERNATIONAL),
+    "BND": ("Vanguard Total Bond Market Index Fund", 0.0, 11203, []),
+}
+
+
+def _sample_exposure(today: date) -> dict:
+    total = sum(h[4] for h in HOLDINGS)
+    as_of = (today.replace(day=1) - timedelta(days=45)).replace(day=1) - timedelta(days=1)  # a quarter-end, about
+    companies: dict[str, dict] = {}
+
+    def add(symbol: str | None, name: str, dollars: float, via: str) -> None:
+        key = symbol or name
+        c = companies.setdefault(key, {"key": key, "symbol": symbol, "name": name, "cents": 0.0, "sources": {}})
+        c["cents"] += dollars * 100
+        c["sources"][via] = c["sources"].get(via, 0.0) + dollars * 100
+
+    funds = []
+    for symbol, name, cls, _account, dollars, _ in HOLDINGS:
+        if symbol in SAMPLE_FUNDS:
+            fname, equity, count, rows = SAMPLE_FUNDS[symbol]
+            for s, n, w in rows:
+                add(s, n, dollars * w / 100, symbol)
+            funds.append(
+                {
+                    "symbol": symbol,
+                    "name": fname,
+                    "cents": _cents(dollars),
+                    "percent": round(dollars / total * 100, 3),
+                    "status": "ok",
+                    "error": None,
+                    "proxy_of": None,
+                    "as_of": as_of.isoformat(),
+                    "holdings": count,
+                    "equity_percent": equity,
+                    "top": [{"symbol": s, "name": n, "weight_percent": w} for s, n, w in rows[:10]],
+                }
+            )
+        elif cls == "US stocks":
+            add(symbol, name, dollars, "direct")
+
+    def pct(cents: float) -> float:
+        return round(cents / (total * 100) * 100, 3)
+
+    rows = sorted(companies.values(), key=lambda c: -c["cents"])
+    return {
+        "total_cents": _cents(total),
+        "companies": [
+            {
+                "key": c["key"],
+                "symbol": c["symbol"],
+                "name": c["name"],
+                "cents": round(c["cents"]),
+                "percent": pct(c["cents"]),
+                "direct_percent": pct(c["sources"].get("direct", 0.0)),
+                "sources": sorted(
+                    ({"symbol": s, "cents": round(v), "percent": pct(v)} for s, v in c["sources"].items()),
+                    key=lambda s: -s["cents"],
+                ),
+            }
+            for c in rows
+        ],
+        "funds": funds,
+        "looked_through_percent": round(sum(h[4] for h in HOLDINGS if h[0] in SAMPLE_FUNDS) / total * 100, 1),
+        "other_percent": round(sum(h[4] for h in HOLDINGS if h[2] == "Cash") / total * 100, 3),
+        "oldest_as_of": as_of.isoformat(),
+    }
+
+
+def portfolio(today: date | None = None) -> dict:
+    today = today or datetime.now(UTC).date()
+    total = sum(h[4] for h in HOLDINGS)
+    by_symbol: dict[str, dict] = {}
+    for symbol, name, cls, account, dollars, _ in HOLDINGS:
+        row = by_symbol.setdefault(
+            symbol, {"symbol": symbol, "name": name, "asset_class": cls, "value_cents": 0, "accounts": []}
+        )
+        row["value_cents"] += _cents(dollars)
+        row["accounts"].append({"account": account, "value_cents": _cents(dollars)})
+    rows = sorted(by_symbol.values(), key=lambda r: -r["value_cents"])
+    for r in rows:
+        r["percent"] = round(r["value_cents"] / _cents(total) * 100, 2)
+    return {
+        "total_cents": _cents(total),
+        "positions": rows,
+        "top5_percent": round(sum(r["value_cents"] for r in rows[:5]) / _cents(total) * 100, 1),
+        "largest": rows[0]["symbol"],
+        "exposure": _sample_exposure(today),
+        "prices_as_of": datetime.combine(today, datetime.min.time(), UTC).replace(hour=19, minute=45).isoformat(),
+        "market_open": False,
+        "sources": {"quotes": "yahoo", "lookthrough": True, "fundamentals": False},
+    }
+
+
+SAMPLE_PRICES = {"VTI": 318.40, "VXUS": 71.20, "AAPL": 339.50, "MSFT": 512.30, "FXAIX": 268.06, "BND": 74.10}
+
+
+def security(symbol: str, range_: str, today: date | None = None) -> dict:
+    """A holding's detail page with a made-up but steady price history."""
+    today = today or datetime.now(UTC).date()
+    held = [h for h in HOLDINGS if h[0] == symbol]
+    price = SAMPLE_PRICES.get(symbol, 100.0)
+    rng = random.Random(f"{SEED}:{symbol}:{range_}")  # noqa: S311 - sample data, not security
+    steps, seconds = {
+        "1d": (78, 300),
+        "5d": (65, 1800),
+        "1m": (22, 86400),
+        "6m": (126, 86400),
+        "1y": (252, 86400),
+        "5y": (260, 604800),
+    }[range_]
+    end = int(datetime.combine(today, datetime.min.time(), UTC).replace(hour=20).timestamp())
+    drift = {"1d": 0.0004, "5d": 0.001, "1m": 0.002, "6m": 0.004, "1y": 0.006, "5y": 0.012}[range_]
+    points, p = [], price
+    for i in range(steps):
+        points.append([end - i * seconds, round(p, 2)])
+        p = p / (1 + drift * rng.uniform(-0.6, 1.4) + rng.gauss(0, drift * 1.6))
+    points.reverse()
+    change = next((h[5] for h in held), 0.4)
+    fund = next((f for f in _sample_exposure(today)["funds"] if f["symbol"] == symbol), None)
+    exposure = next((c for c in _sample_exposure(today)["companies"] if c["symbol"] == symbol), None)
+    total = sum(h[4] for h in HOLDINGS)
+    value = sum(h[4] for h in held)
+    is_fund = symbol in SAMPLE_FUNDS
+    return {
+        "symbol": symbol,
+        "name": held[0][1] if held else symbol,
+        "type": "ETF" if is_fund else "EQUITY",
+        "is_fund": is_fund,
+        "exchange": "NasdaqGS" if not is_fund else "NYSEArca",
+        "currency": "USD",
+        "price": price,
+        "previous_close": round(price / (1 + change / 100), 2),
+        "change_percent": change,
+        "price_at": end,
+        "range": range_,
+        "points": points,
+        "stats": {
+            "day_low": round(price * 0.991, 2),
+            "day_high": round(price * 1.006, 2),
+            "year_low": round(price * 0.78, 2),
+            "year_high": round(price * 1.03, 2),
+            "volume": 41_250_000 if not is_fund else 3_870_000,
+            "dividend_yield": 1.31 if is_fund else 0.44,
+        },
+        "position": {
+            "quantity": round(value / price, 3),
+            "value_cents": _cents(value),
+            "cost_basis_cents": _cents(value * 0.74),
+            "gain_cents": _cents(value * 0.26),
+            "gain_percent": 35.14,
+            "percent_of_portfolio": round(value / total * 100, 2),
+            "accounts": [
+                {"account": h[3], "quantity": round(h[4] / price, 3), "value_cents": _cents(h[4])} for h in held
+            ],
+            "as_of": today.isoformat(),
+        }
+        if held
+        else None,
+        "exposure": exposure,
+        "fund": fund,
+        "rules": [r for r in alerts()["rules"] if r["params"].get("symbol") == symbol],
+        "market_data": True,
+        "sources": {"quotes": "yahoo", "lookthrough": True, "fundamentals": False},
+    }
+
+
+def alerts() -> dict:
+    """Settings → Alerts in demo mode."""
+    at = datetime.now(UTC)
+    return {
+        "rules": [
+            {
+                "id": 1,
+                "kind": "budget",
+                "params": {"category_id": None, "percent": 90},
+                "enabled": True,
+                "summary": "Everyday spending reaches 90% of its budget",
+                "triggered": False,
+            },
+            {
+                "id": 2,
+                "kind": "concentration",
+                "params": {"percent": 10},
+                "enabled": True,
+                "summary": "Any one company reaches 10% of your portfolio",
+                "triggered": False,
+            },
+            {
+                "id": 3,
+                "kind": "price",
+                "params": {"symbol": "AAPL", "above": 350},
+                "enabled": True,
+                "summary": "AAPL goes above $350.00",
+                "triggered": False,
+            },
+            {
+                "id": 4,
+                "kind": "price",
+                "params": {"symbol": "VTI", "move_percent": 3},
+                "enabled": True,
+                "summary": "VTI moves 3% or more in a day",
+                "triggered": False,
+            },
+        ],
+        "events": [
+            {
+                "id": "a1",
+                "kind": "budget",
+                "title": "Dining out is at 93% of its budget",
+                "body": "Sent to your phone.",
+                "at": (at - timedelta(hours=3)).isoformat(),
+                "status": "sent",
+                "channel": "ntfy",
+                "read": False,
+            },
+            {
+                "id": "a2",
+                "kind": "price",
+                "title": "AAPL is up 1.35% today",
+                "body": "AAPL is at $339.50.",
+                "at": (at - timedelta(hours=5)).isoformat(),
+                "status": "sent",
+                "channel": "ntfy",
+                "read": False,
+            },
+            {
+                "id": "a3",
+                "kind": "concentration",
+                "title": "NVDA is 5.2% of your portfolio",
+                "body": "Counting what's inside your funds.",
+                "at": (at - timedelta(days=4)).isoformat(),
+                "status": "sent",
+                "channel": "ntfy",
+                "read": True,
+            },
+        ],
+        "quiet": {"enabled": True, "start": "22:00", "end": "07:00", "timezone": "America/New_York"},
+        "channels": {"ntfy": True, "email": False},
+        "symbols": sorted({h[0] for h in HOLDINGS if h[2] != "Cash"}),
+        "categories": [
+            {"id": i, "name": n} for i, (n, k) in enumerate(CATEGORY_NAMES, 1) if k in ("fixed", "flexible")
+        ],
+    }

@@ -256,4 +256,10 @@ def _run(database: Database, settings: Settings, trigger: str, only: list[int] |
         r.ok = all_ok
         r.summary = {"connections": results, "transfer_pairs": pairs, "categorized": changed}
         db.add(AuditEvent(action="sync", detail={"trigger": trigger, "ok": all_ok, "connections": len(ids)}))
-        return r
+    try:
+        from financeapp import alerts
+
+        alerts.check(database, settings, {"budget", "concentration"})
+    except Exception:  # an alert problem never fails the sync
+        log.exception("checking alerts after the sync failed")
+    return r

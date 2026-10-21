@@ -9,15 +9,16 @@ arrive in a later phase, and until then that part is null and the Plan page says
 from collections import defaultdict
 from datetime import UTC, date, datetime, timedelta
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
 
-from financeapp import budget
-from financeapp.models import Account, Balance, Category, Connection, HoldingSnapshot, SyncRun, Transaction
+from financeapp import alerts, budget, portfolio
+from financeapp.models import Account, AlertEvent, Balance, Category, Connection, SyncRun, Transaction, now
 from financeapp.sync import today
 
 HISTORY_DAYS = 90
 TRANSACTION_DAYS = 62  # always reaches back to the start of last month
+ALERT_DAYS = 7  # unread alerts on Home
 ASSET = {"depository", "investment", "other"}
 DEBT = {"credit", "loan"}
 
@@ -65,14 +66,18 @@ def net_worth_history(db: DbSession, accounts: list[Account], end: date) -> list
     return history
 
 
+def counted(db: DbSession) -> list[Account]:
+    """The accounts that count: not hidden, and the authoritative source of each real account."""
+    return list(db.scalars(select(Account).where(Account.hidden.is_(False), Account.is_authoritative.is_(True))))
+
+
 def build(db: DbSession) -> dict:
-    accounts = list(db.scalars(select(Account).where(Account.hidden.is_(False), Account.is_authoritative.is_(True))))
+    accounts = counted(db)
     if not accounts:
         return {"demo": False, "linked": False}
     end = today()
     history = net_worth_history(db, accounts, end)
     net = history[-1]["cents"] if history else 0
-    yesterday = history[-2]["cents"] if len(history) > 1 else net
 
     latest_balance = {}
     for a in accounts:
@@ -93,44 +98,39 @@ def build(db: DbSession) -> dict:
     investments = [account_row(a) for a in accounts if a.type == "investment"]
     debts = [account_row(a) for a in accounts if a.type in DEBT]
 
-    # Holdings: each account's most recent snapshot.
-    holdings = []
-    invest_ids = [a.id for a in accounts if a.type == "investment"]
+    # Holdings: each account's most recent snapshot, at live prices when there are newer ones (portfolio.py).
     names = {a.id: display_name(a) for a in accounts}
-    for aid in invest_ids:
-        last = db.scalar(select(func.max(HoldingSnapshot.date)).where(HoldingSnapshot.account_id == aid))
-        if last is None:
-            continue
-        prev = db.scalar(
-            select(func.max(HoldingSnapshot.date)).where(HoldingSnapshot.account_id == aid, HoldingSnapshot.date < last)
-        )
-        prev_prices = (
-            {
-                h.symbol: h.price
-                for h in db.scalars(
-                    select(HoldingSnapshot).where(HoldingSnapshot.account_id == aid, HoldingSnapshot.date == prev)
-                )
-            }
-            if prev
-            else {}
-        )
-        for h in db.scalars(
-            select(HoldingSnapshot).where(HoldingSnapshot.account_id == aid, HoldingSnapshot.date == last)
+    positions = portfolio.positions(db, accounts)
+    holdings = [
+        {
+            "symbol": p.symbol,
+            "name": p.name,
+            "asset_class": p.asset_class,
+            "account": names[p.account_id],
+            "account_id": p.account_id,
+            "quantity": float(p.quantity),
+            "price": float(p.price),
+            "value_cents": p.value_cents,
+            "change_today_percent": p.change_today_percent,
+            "cost_basis_cents": p.cost_basis_cents,
+            "as_of": p.as_of.isoformat(),
+            "live": p.price_as_of is not None,
+        }
+        for p in positions
+    ]
+    moved = portfolio.live_change_by_account(positions)
+    for row in investments:
+        b = latest_balance[row["id"]]
+        # Live prices move the balance only when it's from the same day as the holdings they revalue.
+        if (
+            moved.get(row["id"])
+            and b
+            and b.date.isoformat() == next((h["as_of"] for h in holdings if h["account_id"] == row["id"]), None)
         ):
-            before = prev_prices.get(h.symbol)
-            change = float((h.price - before) / before * 100) if before else 0.0
-            holdings.append(
-                {
-                    "symbol": h.symbol,
-                    "name": h.name,
-                    "asset_class": h.asset_class,
-                    "account": names[aid],
-                    "value_cents": h.value_cents,
-                    "change_today_percent": round(change, 2),
-                    "cost_basis_cents": h.cost_basis_cents,
-                    "as_of": last.isoformat(),
-                }
-            )
+            row["cents"] += moved[row["id"]]
+            net += moved[row["id"]]
+            if history:
+                history[-1] = {**history[-1], "cents": history[-1]["cents"] + moved[row["id"]]}
 
     allocation: dict[str, int] = defaultdict(int)
     holdings_by_account: dict[str, int] = defaultdict(int)
@@ -141,6 +141,8 @@ def build(db: DbSession) -> dict:
         if holdings_by_account.get(row["name"], 0) == 0 and row["cents"]:
             allocation["Other investments"] += row["cents"]
     allocation["Cash"] += sum(r["cents"] for r in cash)
+
+    yesterday = history[-2]["cents"] if len(history) > 1 else net
 
     # Transactions and spending.
     categories = {c.id: c for c in db.scalars(select(Category))}
@@ -195,7 +197,16 @@ def build(db: DbSession) -> dict:
         "net_worth": {"cents": net, "change_today_cents": net - yesterday, "history": history},
         "spending": {"month_cents": spent_month, "last_month_same_day_cents": spent_last, "needs_review": review},
         **budget.for_household(budget.build(db)),
-        "alerts": [],
+        "alerts": [
+            alerts.event_json(e)
+            for e in db.scalars(
+                select(AlertEvent)
+                .where(AlertEvent.read_at.is_(None), AlertEvent.fired_at > now() - timedelta(days=ALERT_DAYS))
+                .order_by(AlertEvent.fired_at.desc())
+                .limit(5)
+            )
+        ],
+        "prices_as_of": (lambda t: t.isoformat() if t else None)(portfolio.prices_as_of(positions)),
         "transactions": transactions,
         "accounts": {"cash": cash, "investments": investments, "debts": debts},
         "holdings": holdings,
