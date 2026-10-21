@@ -17,6 +17,7 @@ from financeapp.models import Category, Transaction
 
 PAGE = 100
 Kind = Literal["out", "in", "transfer", "review"]
+Sort = Literal["newest", "oldest", "largest", "smallest", "merchant"]
 
 
 class Filters(BaseModel):
@@ -30,6 +31,7 @@ class Filters(BaseModel):
     max_cents: int | None = Field(None, ge=0, le=10**13)
     start: date | None = None
     end: date | None = None
+    sort: Sort = "newest"
     offset: int = Field(0, ge=0, le=100_000)
 
     @model_validator(mode="after")
@@ -43,6 +45,29 @@ class Filters(BaseModel):
 
 def _pattern(text: str) -> str:
     return "%" + text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+
+
+# Largest and smallest go by size, either direction, the same as the amount filter.
+_ORDER = {
+    "newest": [Transaction.date.desc()],
+    "oldest": [Transaction.date.asc()],
+    "largest": [func.abs(Transaction.amount_cents).desc(), Transaction.date.desc()],
+    "smallest": [func.abs(Transaction.amount_cents).asc(), Transaction.date.desc()],
+    "merchant": [func.lower(Transaction.merchant).asc(), Transaction.date.desc()],
+}
+
+
+def _sample_key(sort: str):
+    """The same orders as _ORDER, for demo rows (sorted() is stable, so apply the tie-break first)."""
+    if sort == "oldest":
+        return lambda r: r["date"], False
+    if sort == "largest":
+        return lambda r: abs(r["amount_cents"]), True
+    if sort == "smallest":
+        return lambda r: abs(r["amount_cents"]), False
+    if sort == "merchant":
+        return lambda r: r["merchant"].lower(), False
+    return lambda r: r["date"], True
 
 
 def search(db: DbSession, f: Filters) -> dict:
@@ -98,11 +123,7 @@ def search(db: DbSession, f: Filters) -> dict:
         ).where(*where)
     ).one()
     rows = db.scalars(
-        select(Transaction)
-        .where(*where)
-        .order_by(Transaction.date.desc(), Transaction.id.desc())
-        .offset(f.offset)
-        .limit(PAGE)
+        select(Transaction).where(*where).order_by(*_ORDER[f.sort], Transaction.id.desc()).offset(f.offset).limit(PAGE)
     ).all()
 
     def row(t: Transaction) -> dict:
@@ -162,6 +183,9 @@ def search_sample(rows: list[dict], categories: list[dict], f: Filters) -> dict:
         )
 
     hits = [dict(r, category_id=by_name.get(r["category"])) for r in rows if keep(r)]
+    hits.sort(key=lambda r: r["date"], reverse=True)
+    key, reverse = _sample_key(f.sort)
+    hits.sort(key=key, reverse=reverse)
     page = hits[f.offset : f.offset + PAGE]
     return {
         "transactions": page,

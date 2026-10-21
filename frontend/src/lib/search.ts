@@ -11,7 +11,11 @@ export type Filters = {
   range: Range;
   start: string; // yyyy-mm-dd, for a custom range
   end: string;
+  sort: Sort;
 };
+
+/** "" is newest first, the usual order. */
+export type Sort = "" | "oldest" | "largest" | "smallest" | "merchant";
 
 export type Range = "" | "month" | "last-month" | "3-months" | "year" | "custom";
 
@@ -35,6 +39,17 @@ export const RANGES: { id: Range; label: string }[] = [
   { id: "custom", label: "Pick dates" },
 ];
 
+export const SORTS: { id: Sort; label: string; chip: string }[] = [
+  { id: "", label: "Newest", chip: "Newest first" },
+  { id: "oldest", label: "Oldest", chip: "Oldest first" },
+  { id: "largest", label: "Largest", chip: "Largest first" },
+  { id: "smallest", label: "Smallest", chip: "Smallest first" },
+  { id: "merchant", label: "A to Z", chip: "A to Z" },
+];
+
+/** Sorted by date, the list reads best split into days; by anything else, one list with the date on each row. */
+export const byDate = (f: Filters) => f.sort === "" || f.sort === "oldest";
+
 export const KINDS: { id: Filters["kind"]; label: string }[] = [
   { id: "", label: "All" },
   { id: "out", label: "Money out" },
@@ -42,7 +57,7 @@ export const KINDS: { id: Filters["kind"]; label: string }[] = [
   { id: "transfer", label: "Transfers" },
 ];
 
-export const EMPTY: Filters = { q: "", categories: [], accounts: [], kind: "", min: "", max: "", range: "", start: "", end: "" };
+export const EMPTY: Filters = { q: "", categories: [], accounts: [], kind: "", min: "", max: "", range: "", start: "", end: "", sort: "" };
 
 const iso = (d: Date) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -77,6 +92,7 @@ export function cents(text: string): number | null {
 export function fromParams(p: URLSearchParams): Filters {
   const kind = p.get("kind") ?? (p.get("review") ? "review" : "");
   const range = p.get("range") ?? "";
+  const sort = p.get("sort") ?? "";
   return {
     q: (p.get("q") ?? "").slice(0, 100),
     categories: p.getAll("category").filter((c) => c === "none" || /^\d{1,9}$/.test(c)),
@@ -90,6 +106,7 @@ export function fromParams(p: URLSearchParams): Filters {
     range: (RANGES.some((r) => r.id === range) ? range : "") as Range,
     start: /^\d{4}-\d{2}-\d{2}$/.test(p.get("start") ?? "") ? p.get("start")! : "",
     end: /^\d{4}-\d{2}-\d{2}$/.test(p.get("end") ?? "") ? p.get("end")! : "",
+    sort: (SORTS.some((s) => s.id === sort) ? sort : "") as Sort,
   };
 }
 
@@ -105,6 +122,7 @@ export function toParams(f: Filters): URLSearchParams {
   if (f.range) p.set("range", f.range);
   if (f.range === "custom" && f.start) p.set("start", f.start);
   if (f.range === "custom" && f.end) p.set("end", f.end);
+  if (f.sort) p.set("sort", f.sort);
   return p;
 }
 
@@ -122,11 +140,12 @@ export function toQuery(f: Filters, offset = 0): string {
   const { start, end } = dates(f);
   if (start) p.set("start", start);
   if (end) p.set("end", end);
+  if (f.sort) p.set("sort", f.sort);
   if (offset) p.set("offset", String(offset));
   return p.toString();
 }
 
-/** How many filters are set in the sheet (the search box and the quick chips don't count). */
+/** How many filters are set in the sheet (the search box, the quick chips and the sort don't count). */
 export function sheetCount(f: Filters): number {
   return (
     (f.categories.length ? 1 : 0) +

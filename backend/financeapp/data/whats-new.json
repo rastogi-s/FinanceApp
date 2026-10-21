@@ -1,5 +1,23 @@
 [
   {
+    "version": "0.20.0",
+    "title": "Sort by what moved",
+    "features": [
+      {
+        "id": "holdings-movers-sort",
+        "title": "Biggest gainers and losers today",
+        "body": "Holdings on Portfolio can sort by what went up most today or what went down most, by percent or by dollars, and by your best or worst total return since you bought. Each row shows its move with an up or down arrow, and the app remembers your choice.",
+        "tryIt": "/portfolio"
+      },
+      {
+        "id": "spending-budget-sort",
+        "title": "Sort transactions and budget categories",
+        "body": "In Spending, open Filters to list transactions oldest first, largest first, smallest first or A to Z. On Budget, sort categories by how much of the limit is used, what's left or what you spent.",
+        "tryIt": "/spending"
+      }
+    ]
+  },
+  {
     "version": "0.19.0",
     "title": "Savings that add up",
     "features": [

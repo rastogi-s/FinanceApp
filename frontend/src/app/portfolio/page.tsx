@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { type ReactNode, useMemo, useState } from "react";
-import { ArrowDownRight, ArrowUpRight, ChevronDown, ChevronRight, Info, Layers, RefreshCw, Search, X } from "lucide-react";
+import { ArrowDown, ArrowDownRight, ArrowUp, ArrowUpRight, ChevronDown, ChevronRight, Info, Layers, Minus, RefreshCw, Search, X } from "lucide-react";
 import { ExposureGraph } from "@/components/exposure-graph";
 import { Money } from "@/components/money";
 import { HouseholdPage } from "@/components/page";
@@ -298,13 +298,49 @@ function ExposureRow({ c, rank, open, toggle }: { c: Company; rank: number; open
   );
 }
 
-type Sort = "value" | "today" | "gain" | "name";
-const SORTS: { id: Sort; label: string }[] = [
-  { id: "value", label: "Biggest" },
-  { id: "today", label: "Movers" },
-  { id: "gain", label: "Gainers" },
-  { id: "name", label: "A to Z" },
+type Sort =
+  | "value"
+  | "up"
+  | "down"
+  | "up-cents"
+  | "down-cents"
+  | "today"
+  | "gain"
+  | "loss"
+  | "gain-cents"
+  | "loss-cents"
+  | "name";
+type SortOption = { id: Sort; label: string; needsCost?: boolean };
+const SORT_GROUPS: { label: string; options: SortOption[] }[] = [
+  {
+    label: "Today",
+    options: [
+      { id: "up", label: "Up most today" },
+      { id: "down", label: "Down most today" },
+      { id: "up-cents", label: "Up most today, $" },
+      { id: "down-cents", label: "Down most today, $" },
+      { id: "today", label: "Biggest moves today" },
+    ],
+  },
+  {
+    label: "Since you bought",
+    options: [
+      { id: "gain", label: "Best total return", needsCost: true },
+      { id: "loss", label: "Worst total return", needsCost: true },
+      { id: "gain-cents", label: "Most gained, $", needsCost: true },
+      { id: "loss-cents", label: "Most lost, $", needsCost: true },
+    ],
+  },
+  {
+    label: "Other",
+    options: [
+      { id: "value", label: "Largest" },
+      { id: "name", label: "A to Z" },
+    ],
+  },
 ];
+const SORTS = SORT_GROUPS.flatMap((g) => g.options);
+const SORT_KEY = "holdings-sort";
 type View = "combined" | "account";
 const VIEW_KEY = "holdings-view";
 
@@ -347,13 +383,53 @@ function combine(holdings: Holding[]): Group[] {
   });
 }
 
+/** What a holding gained or lost today, in cents: its value now less its value at yesterday's close. */
+const dayCents = (x: Group | Holding): number =>
+  "parts" in x ? x.parts.reduce((s, p) => s + dayCents(p), 0) : x.change_today_percent > -100
+      ? x.value_cents - x.value_cents / (1 + x.change_today_percent / 100)
+      : 0;
+
+const gainCents = (x: { value_cents: number; cost_basis_cents?: number | null }) =>
+  x.cost_basis_cents ? x.value_cents - x.cost_basis_cents : null;
+
 function sorter(sort: Sort) {
-  return (a: Group | Holding, b: Group | Holding) => {
-    if (sort === "name") return a.symbol.localeCompare(b.symbol);
-    if (sort === "today") return Math.abs(b.change_today_percent) - Math.abs(a.change_today_percent);
-    if (sort === "gain") return (gain(b) ?? -Infinity) - (gain(a) ?? -Infinity);
-    return b.value_cents - a.value_cents;
+  // Holdings without a cost basis go last whichever way the list runs.
+  const known = (v: number | null, dir: 1 | -1) => (v == null ? -Infinity : dir * v);
+  const key = (x: Group | Holding): number => {
+    switch (sort) {
+      case "up":
+        return x.change_today_percent;
+      case "down":
+        return -x.change_today_percent;
+      case "up-cents":
+        return dayCents(x);
+      case "down-cents":
+        return -dayCents(x);
+      case "today":
+        return Math.abs(x.change_today_percent);
+      case "gain":
+        return known(gain(x), 1);
+      case "loss":
+        return known(gain(x), -1);
+      case "gain-cents":
+        return known(gainCents(x), 1);
+      case "loss-cents":
+        return known(gainCents(x), -1);
+      default:
+        return x.value_cents;
+    }
   };
+  return (a: Group | Holding, b: Group | Holding) =>
+    sort === "name" ? a.symbol.localeCompare(b.symbol) : key(b) - key(a) || b.value_cents - a.value_cents;
+}
+
+function savedSort(): Sort {
+  try {
+    const saved = localStorage.getItem(SORT_KEY);
+    return SORTS.find((x) => x.id === saved)?.id ?? "value";
+  } catch {
+    return "value";
+  }
 }
 
 function savedView(): View {
@@ -371,7 +447,8 @@ function Holdings({ holdings }: { holdings: Holding[] }) {
   const classes = useMemo(() => [...new Set(holdings.map((x) => x.asset_class))].sort(), [holdings]);
   // The search, sort and filters stay put for as long as the app is open, however you come back to Portfolio.
   const [q, setQ] = useRemembered("holdings-q", "", { always: true, valid: (v) => typeof v === "string" });
-  const [sort, setSort] = useRemembered<Sort>("holdings-sort", "value", {
+  // The sort also lasts across visits: someone who wants losers first wants them first tomorrow too.
+  const [chosen, setChosen] = useRemembered<Sort>("holdings-sort", savedSort, {
     always: true,
     valid: (v) => SORTS.some((s) => s.id === v),
   });
@@ -388,6 +465,7 @@ function Holdings({ holdings }: { holdings: Holding[] }) {
   const investments = useMemo(() => new Set(holdings.map((x) => x.symbol)).size, [holdings]);
   const shared = investments < holdings.length; // something sits in more than one account
   const hasGain = holdings.some((x) => x.cost_basis_cents);
+  const sort = !hasGain && SORTS.find((x) => x.id === chosen)?.needsCost ? "value" : chosen;
   const needle = q.trim().toLowerCase();
   const matching = holdings.filter(
     (x) =>
@@ -414,9 +492,22 @@ function Holdings({ holdings }: { holdings: Holding[] }) {
       // storage blocked: the choice lasts until the page closes
     }
   };
-  const change = (x: Group | Holding) => (
-    <Change percent={sort === "gain" ? (gain(x) ?? 0) * 100 : x.change_today_percent} label={sort === "gain" ? "total" : undefined} />
-  );
+  const setSort = (v: Sort) => {
+    setChosen(v);
+    try {
+      localStorage.setItem(SORT_KEY, v);
+    } catch {
+      // storage blocked: the choice lasts until the page closes
+    }
+  };
+  const totalSort = ["gain", "loss", "gain-cents", "loss-cents"].includes(sort);
+  const dollars = sort.endsWith("-cents");
+  const change = (x: Group | Holding) =>
+    totalSort ? (
+      <Change percent={(gain(x) ?? 0) * 100} cents={dollars ? (gainCents(x) ?? undefined) : undefined} label="total" missing={gain(x) == null} />
+    ) : (
+      <Change percent={x.change_today_percent} cents={dollars ? dayCents(x) : undefined} label="today" />
+    );
 
   return (
     <Card className="md:col-span-2">
@@ -462,12 +553,18 @@ function Holdings({ holdings }: { holdings: Holding[] }) {
           {holdings.length > 3 && (
             <>
               <SearchBox value={q} onChange={setQ} label="Search holdings" placeholder="Ticker or name" />
-              <div className="grid grid-cols-2 gap-2 sm:flex">
+              <div className="grid grid-cols-1 gap-2 sm:flex">
                 <Select aria-label="Sort holdings" value={sort} onChange={(e) => setSort(e.target.value as Sort)} className="rounded-full">
-                  {SORTS.filter((x) => x.id !== "gain" || hasGain).map((x) => (
-                    <option key={x.id} value={x.id}>
-                      {x.label}
-                    </option>
+                  {SORT_GROUPS.map((g) => (
+                    <optgroup key={g.label} label={g.label}>
+                      {g.options
+                        .filter((x) => !x.needsCost || hasGain)
+                        .map((x) => (
+                          <option key={x.id} value={x.id}>
+                            {x.label}
+                          </option>
+                        ))}
+                    </optgroup>
                   ))}
                 </Select>
                 {accounts.length > 1 && (
@@ -707,11 +804,24 @@ function SearchBox({
   );
 }
 
-function Change({ percent, label }: { percent: number; label?: string }) {
+const signedMoney = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", signDisplay: "exceptZero" });
+
+/** A move with its direction spelled out by an arrow and a sign, not only by its color. */
+function Change({ percent, cents, label, missing }: { percent: number; cents?: number; label: string; missing?: boolean }) {
+  if (missing) return <p className="text-xs text-muted-foreground">No cost basis</p>;
+  const dir = Math.round(percent * 100) > 0 ? "up" : Math.round(percent * 100) < 0 ? "down" : "flat";
+  const Icon = dir === "up" ? ArrowUp : dir === "down" ? ArrowDown : Minus;
   return (
-    <p className={cn("text-xs tabular-nums", percent > 0 ? "text-positive" : percent < 0 ? "text-negative" : "text-muted-foreground")}>
-      {percent > 0 ? "+" : ""}
-      {percent.toFixed(2)}%{label && ` ${label}`}
+    <p
+      className={cn(
+        "flex items-center justify-end gap-0.5 text-xs tabular-nums",
+        dir === "up" ? "text-positive" : dir === "down" ? "text-negative" : "text-muted-foreground",
+      )}
+    >
+      <Icon className="size-3 shrink-0" aria-hidden />
+      <span className="sr-only">{dir === "flat" ? "Unchanged" : dir === "up" ? "Up" : "Down"} </span>
+      {cents !== undefined && <span>{signedMoney.format(Math.round(cents) / 100)} · </span>}
+      {Math.abs(percent).toFixed(2)}%<span className="sr-only"> {label}</span>
     </p>
   );
 }

@@ -22,6 +22,7 @@ import { Money, formatMoney } from "@/components/money";
 import { HouseholdPage, Notice } from "@/components/page";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Select } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
@@ -49,6 +50,7 @@ function Budget() {
   const [adding, setAdding] = useState(false);
   const [paying, setPaying] = useState(false);
   const [drafting, setDrafting] = useState(false);
+  const [sort, setSort] = useState<LineSort>(savedSort);
 
   if (error)
     return (
@@ -177,8 +179,37 @@ function Budget() {
 
       {data.forecast && <MonthEnd data={data} onPick={setEditing} />}
 
+      {data.lines.length > 3 && (
+        <div className="-mb-1 flex items-center justify-between gap-3 px-1">
+          <h2 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">Categories</h2>
+          <Select
+            aria-label="Sort categories"
+            value={sort}
+            onChange={(e) => {
+              const v = e.target.value as LineSort;
+              setSort(v);
+              try {
+                localStorage.setItem(SORT_KEY, v);
+              } catch {
+                // storage blocked: the choice lasts until the page closes
+              }
+            }}
+            className="h-9 rounded-full pr-9 text-sm md:h-9"
+          >
+            {LINE_SORTS.map((x) => (
+              <option key={x.id} value={x.id}>
+                {x.label}
+              </option>
+            ))}
+          </Select>
+        </div>
+      )}
+
       {(["flexible", "fixed"] as const).map((kind) => {
-        const lines = data.lines.filter((l) => l.kind === kind);
+        const lines = sortLines(
+          data.lines.filter((l) => l.kind === kind),
+          sort,
+        );
         return lines.length ? <Group key={kind} title={kind === "fixed" ? "Bills" : "Everyday"} lines={lines} month={data.month} onPick={setEditing} /> : null;
       })}
 
@@ -253,6 +284,42 @@ function Budget() {
       <PaycheckSheet open={paying} budget={data} change={change} onClose={() => setPaying(false)} />
     </div>
   );
+}
+
+type LineSort = "usual" | "used" | "spent" | "least-left" | "most-left" | "name";
+const LINE_SORTS: { id: LineSort; label: string }[] = [
+  { id: "usual", label: "Usual order" },
+  { id: "used", label: "Most used" },
+  { id: "least-left", label: "Least left" },
+  { id: "most-left", label: "Most left" },
+  { id: "spent", label: "Most spent" },
+  { id: "name", label: "A to Z" },
+];
+const SORT_KEY = "budget-sort";
+
+function savedSort(): LineSort {
+  try {
+    const saved = localStorage.getItem(SORT_KEY);
+    return LINE_SORTS.find((x) => x.id === saved)?.id ?? "usual";
+  } catch {
+    return "usual";
+  }
+}
+
+/** "Usual order" keeps the server's order; a category with no limit counts as fully used. */
+function sortLines(lines: BudgetLine[], sort: LineSort): BudgetLine[] {
+  const used = (l: BudgetLine) => (l.limit_cents ? l.spent_cents / l.limit_cents : l.spent_cents ? 1e9 : 0);
+  const left = (l: BudgetLine) => l.limit_cents - l.spent_cents;
+  const by: Record<LineSort, ((a: BudgetLine, b: BudgetLine) => number) | null> = {
+    usual: null,
+    used: (a, b) => used(b) - used(a),
+    spent: (a, b) => b.spent_cents - a.spent_cents,
+    "least-left": (a, b) => left(a) - left(b),
+    "most-left": (a, b) => left(b) - left(a),
+    name: (a, b) => a.category.localeCompare(b.category),
+  };
+  const f = by[sort];
+  return f ? [...lines].sort((a, b) => f(a, b) || a.category.localeCompare(b.category)) : lines;
 }
 
 function Group({ title, lines, month, onPick }: { title: string; lines: BudgetLine[]; month: string; onPick: (l: BudgetLine) => void }) {
