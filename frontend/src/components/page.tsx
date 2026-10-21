@@ -1,11 +1,13 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { AlertTriangle, ChevronLeft, Link2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useHousehold, type LinkedHousehold } from "@/lib/household";
+import { cameFrom } from "@/lib/nav";
 
 export function PageTitle({ title, subtitle }: { title: string; subtitle?: React.ReactNode }) {
   return (
@@ -16,13 +18,32 @@ export function PageTitle({ title, subtitle }: { title: string; subtitle?: React
   );
 }
 
+/**
+ * "< Portfolio" and the like. When you came from that page it goes back in history, so the page comes back
+ * scrolled where you left it with its search and filters intact; otherwise it opens the page afresh.
+ */
+export function BackLink({ href, children }: { href: string; children: React.ReactNode }) {
+  const router = useRouter();
+  return (
+    <Link
+      href={href}
+      onClick={(e) => {
+        if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || !cameFrom(href)) return;
+        e.preventDefault();
+        router.back();
+      }}
+      className="-ml-1 mb-2 inline-flex items-center gap-0.5 text-sm font-medium text-primary"
+    >
+      <ChevronLeft className="size-4" aria-hidden /> {children}
+    </Link>
+  );
+}
+
 /** A page inside Settings: the title with a way back. */
 export function SubPageTitle({ title, subtitle, back }: { title: string; subtitle?: React.ReactNode; back: string }) {
   return (
     <div className="mb-5">
-      <Link href={back} className="-ml-1 mb-2 inline-flex items-center gap-0.5 text-sm font-medium text-primary">
-        <ChevronLeft className="size-4" aria-hidden /> Settings
-      </Link>
+      <BackLink href={back}>Settings</BackLink>
       <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">{title}</h1>
       {subtitle && <p className="mt-1 text-sm text-muted-foreground">{subtitle}</p>}
     </div>

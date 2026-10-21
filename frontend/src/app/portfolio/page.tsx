@@ -15,6 +15,7 @@ import { toast } from "@/components/ui/toast";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { type Holding, type LinkedHousehold, resetHousehold, useApi } from "@/lib/household";
+import { useRemembered } from "@/lib/nav";
 import { type Company, type Portfolio, asOf, hasDetail, holdingHref, percent } from "@/lib/portfolio";
 import { cn } from "@/lib/utils";
 
@@ -182,9 +183,9 @@ function Largest({ p }: { p: Portfolio }) {
 }
 
 function RealExposure({ p }: { p: Portfolio }) {
-  const [all, setAll] = useState(false);
-  const [open, setOpen] = useState<string | null>(null);
-  const [q, setQ] = useState("");
+  const [all, setAll] = useRemembered("exposure-all", false);
+  const [open, setOpen] = useRemembered<string | null>("exposure-open", null);
+  const [q, setQ] = useRemembered("exposure-q", "");
   const e = p.exposure;
   const ranked = useMemo(() => e.companies.map((c, i) => ({ c, rank: i + 1 })), [e.companies]);
   const needle = q.trim().toLowerCase();
@@ -366,12 +367,12 @@ function savedView(): View {
 const shares = new Intl.NumberFormat("en-US", { maximumFractionDigits: 3 });
 
 function Holdings({ holdings }: { holdings: Holding[] }) {
-  const [q, setQ] = useState("");
-  const [sort, setSort] = useState<Sort>("value");
-  const [account, setAccount] = useState("");
-  const [assetClass, setAssetClass] = useState("");
+  const [q, setQ] = useRemembered("holdings-q", "");
+  const [sort, setSort] = useRemembered<Sort>("holdings-sort", "value");
+  const [account, setAccount] = useRemembered("holdings-account", "");
+  const [assetClass, setAssetClass] = useRemembered("holdings-class", "");
   const [view, setView] = useState<View>(savedView); // only rendered in the browser, once the household has loaded
-  const [open, setOpen] = useState<string | null>(null);
+  const [open, setOpen] = useRemembered<string | null>("holdings-open", null);
   const accounts = useMemo(() => [...new Set(holdings.map((x) => x.account))].sort(), [holdings]);
   const classes = useMemo(() => [...new Set(holdings.map((x) => x.asset_class))].sort(), [holdings]);
   const investments = useMemo(() => new Set(holdings.map((x) => x.symbol)).size, [holdings]);
