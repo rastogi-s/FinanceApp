@@ -187,7 +187,7 @@ export default function AlertsPage() {
                       </span>
                     </button>
                     {r.triggered && <Badge variant="warning">Triggered</Badge>}
-                    <Switch checked={r.enabled} onCheckedChange={(v) => toggle(r, v)} label={`${r.summary}: ${r.enabled ? "on" : "off"}`} />
+                    <Switch checked={r.enabled} onCheckedChange={(v) => toggle(r, v)} label={r.summary} hideLabel />
                   </li>
                 );
               })}
