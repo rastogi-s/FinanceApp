@@ -44,6 +44,14 @@ export default function Portfolio() {
               <CardHeader>
                 <CardTitle>Holdings</CardTitle>
               </CardHeader>
+              {holdings.length === 0 && (
+                <CardContent>
+                  <p className="text-sm text-muted-foreground">
+                    No holdings yet. They appear after the next sync of an investment account, or upload a positions file
+                    in Settings → Accounts.
+                  </p>
+                </CardContent>
+              )}
               <ul className="divide-y pb-2">
                 {holdings.map((x) => (
                   <li key={x.symbol + x.account} className="flex items-center gap-3 px-5 py-3.5">
