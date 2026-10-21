@@ -2,10 +2,23 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { CalendarClock, ChevronRight, History, Minus, PiggyBank, Plus, ShieldCheck, Sparkles, Trash2, Wallet } from "lucide-react";
+import {
+  CalendarClock,
+  CalendarRange,
+  ChevronRight,
+  History,
+  Minus,
+  PiggyBank,
+  Plus,
+  ShieldCheck,
+  Sparkles,
+  Trash2,
+  TrendingUp,
+  Wallet,
+} from "lucide-react";
 import { AIBudgetSheet } from "@/components/ai-budget-sheet";
 import { AddSheet, FREQUENCY_LABEL, LineSheet, PaycheckSheet } from "@/components/budget-sheets";
-import { Money } from "@/components/money";
+import { Money, formatMoney } from "@/components/money";
 import { HouseholdPage, Notice } from "@/components/page";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -14,7 +27,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { toast } from "@/components/ui/toast";
 import { useAuth } from "@/lib/auth";
-import { type BudgetLine, type BudgetState, type SavingsMonth, monthName, useBudget } from "@/lib/budget";
+import { type BudgetLine, type BudgetState, type Forecast, type SavingsMonth, monthName, useBudget } from "@/lib/budget";
 import { cn } from "@/lib/utils";
 
 const short = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
@@ -162,9 +175,11 @@ function Budget() {
         </Card>
       </div>
 
+      {data.forecast && <MonthEnd data={data} onPick={setEditing} />}
+
       {(["flexible", "fixed"] as const).map((kind) => {
         const lines = data.lines.filter((l) => l.kind === kind);
-        return lines.length ? <Group key={kind} title={kind === "fixed" ? "Bills" : "Everyday"} lines={lines} onPick={setEditing} /> : null;
+        return lines.length ? <Group key={kind} title={kind === "fixed" ? "Bills" : "Everyday"} lines={lines} month={data.month} onPick={setEditing} /> : null;
       })}
 
       {data.unbudgeted.length > 0 && (
@@ -240,7 +255,7 @@ function Budget() {
   );
 }
 
-function Group({ title, lines, onPick }: { title: string; lines: BudgetLine[]; onPick: (l: BudgetLine) => void }) {
+function Group({ title, lines, month, onPick }: { title: string; lines: BudgetLine[]; month: string; onPick: (l: BudgetLine) => void }) {
   const spent = lines.reduce((s, b) => s + b.spent_cents, 0);
   const limit = lines.reduce((s, b) => s + b.limit_cents, 0);
   return (
@@ -260,7 +275,7 @@ function Group({ title, lines, onPick }: { title: string; lines: BudgetLine[]; o
               type="button"
               onClick={() => onPick(b)}
               className="rounded-xl px-3 py-2.5 text-left transition-colors hover:bg-muted/50"
-              aria-label={`${b.category}: ${b.limit_cents ? Math.round((b.spent_cents / b.limit_cents) * 100) : 0}% used. Change limit`}
+              aria-label={`${b.category}: ${b.limit_cents ? Math.round((b.spent_cents / b.limit_cents) * 100) : 0}% used.${b.forecast ? ` ${outlookText(b, b.forecast)}` : ""} Change limit`}
             >
               <div className="mb-1.5 flex items-baseline justify-between gap-3 text-sm">
                 <span className="font-medium">{b.category}</span>
@@ -283,10 +298,119 @@ function Group({ title, lines, onPick }: { title: string; lines: BudgetLine[]; o
                 max={b.limit_cents}
                 label={`${b.category} budget used`}
                 tone={b.kind === "fixed" ? "bill" : "budget"}
+                projected={b.forecast && b.forecast.status !== "over" ? b.forecast.projected_cents : undefined}
               />
+              {b.forecast && <Outlook line={b} f={b.forecast} month={month} />}
             </button>
           );
         })}
+      </CardContent>
+    </Card>
+  );
+}
+
+/** The month-end line under a category's bar. */
+function Outlook({ line, f, month }: { line: BudgetLine; f: Forecast; month: string }) {
+  if (f.status === "over") return null;
+  if (line.kind === "fixed") {
+    if (!f.due.length && f.status !== "heading_over") return null;
+    const next = f.due[0];
+    return (
+      <p className={cn("mt-1.5 text-xs", f.status === "heading_over" ? "text-warning" : "text-muted-foreground")}>
+        {f.status === "heading_over" ? (
+          <>
+            On track to spend <Money cents={f.projected_cents} />, <Money cents={f.over_cents} /> over
+          </>
+        ) : (
+          <>
+            <Money cents={f.due_cents} /> still to come
+            {next && ` · ${next.merchant}${f.due.length > 1 ? ` and ${f.due.length - 1} more` : ""}, ${dayOf(month, next.day)}`}
+          </>
+        )}
+      </p>
+    );
+  }
+  return (
+    <p className={cn("mt-1.5 flex items-center gap-1 text-xs", f.status === "heading_over" ? "text-warning" : "text-muted-foreground")}>
+      {f.status === "heading_over" && <TrendingUp className="size-3.5 shrink-0" aria-hidden />}
+      <span>
+        On track to spend <Money cents={f.projected_cents} />
+        {f.status === "heading_over" ? (
+          <>
+            , <Money cents={f.over_cents} /> over
+          </>
+        ) : f.status === "close" ? (
+          ", just under"
+        ) : null}
+      </span>
+    </p>
+  );
+}
+
+function outlookText(line: BudgetLine, f: Forecast): string {
+  if (f.status === "over") return "";
+  if (f.status === "heading_over")
+    return `On track to spend ${formatMoney(f.projected_cents)} by month-end, ${formatMoney(f.over_cents)} over.`;
+  if (line.kind === "fixed") return f.due_cents ? `${formatMoney(f.due_cents)} still to come this month.` : "";
+  return `On track to spend ${formatMoney(f.projected_cents)} by month-end.`;
+}
+
+function dayOf(month: string, day: number): string {
+  return short.format(new Date(`${month.slice(0, 8)}${String(day).padStart(2, "0")}`));
+}
+
+/** Where the month is heading: the categories on pace to go over, or a calm "on track". */
+function MonthEnd({ data, onPick }: { data: BudgetState; onPick: (l: BudgetLine) => void }) {
+  const f = data.forecast!;
+  const over = data.lines.filter((l) => f.heading_over.includes(l.category_id));
+  const days = `${f.days_left} day${f.days_left === 1 ? "" : "s"}`;
+  return (
+    <Card className={cn(over.length > 0 && "border-warning/40")}>
+      <CardHeader>
+        <CardTitle>By month-end</CardTitle>
+        <CalendarRange className="size-4 text-muted-foreground" aria-hidden />
+      </CardHeader>
+      <CardContent className="grid grid-cols-1 gap-3">
+        {over.length ? (
+          <>
+            <p className="text-sm">
+              <span className="font-medium">
+                {over.length === 1 ? `${over[0]!.category} is` : `${over.length} categories are`} on pace to go over
+              </span>{" "}
+              <span className="text-muted-foreground">with {days} to go. Slowing down now keeps it in budget.</span>
+            </p>
+            <ul className="grid grid-cols-1 gap-1">
+              {over.map((l) => (
+                <li key={l.category_id}>
+                  <button
+                    type="button"
+                    onClick={() => onPick(l)}
+                    className="flex w-full items-center gap-3 rounded-xl bg-warning/10 px-3 py-2.5 text-left text-sm transition-colors hover:bg-warning/15"
+                  >
+                    <TrendingUp className="size-4 shrink-0 text-warning" aria-hidden />
+                    <span className="min-w-0 flex-1 truncate font-medium">{l.category}</span>
+                    <span className="text-muted-foreground">
+                      <Money cents={l.forecast!.projected_cents} /> of <Money cents={l.limit_cents} />
+                    </span>
+                    <span className="font-medium text-warning">
+                      <Money cents={l.forecast!.over_cents} signed />
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </>
+        ) : (
+          <p className="text-sm">
+            <span className="font-medium">Everything&apos;s on track.</span>{" "}
+            <span className="text-muted-foreground">
+              At this pace you&apos;ll spend about <Money cents={f.projected_cents} /> of <Money cents={f.limit_cents} /> this month.
+            </span>
+          </p>
+        )}
+        <p className="text-xs text-muted-foreground">
+          Bills still to come are counted once. Everyday spending follows this month&apos;s pace, leaning on a usual month early on.
+        </p>
       </CardContent>
     </Card>
   );

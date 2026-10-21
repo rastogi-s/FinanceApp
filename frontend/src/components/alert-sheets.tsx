@@ -20,7 +20,7 @@ export type Rule = {
 
 export type RuleIn =
   | { kind: "price"; symbol: string; above?: number; below?: number; move_percent?: number }
-  | { kind: "budget"; category_id: number | null; percent: number }
+  | { kind: "budget"; category_id: number | null; percent?: number; forecast?: boolean }
   | { kind: "concentration"; percent: number };
 
 export const KIND_ICON = { price: TrendingUp, budget: PiggyBank, concentration: ChartPie } as const;
@@ -110,7 +110,9 @@ function RuleForm({
     return "";
   });
   const [category, setCategory] = useState<string>(p.category_id != null ? String(p.category_id) : "");
-  const [budgetPct, setBudgetPct] = useState<string>(rule?.kind === "budget" ? String(p.percent) : "90");
+  const [budgetPct, setBudgetPct] = useState<string>(
+    rule?.kind === "budget" ? (p.forecast ? "forecast" : String(p.percent)) : "90",
+  );
   const [concPct, setConcPct] = useState<string>(rule?.kind === "concentration" ? String(p.percent) : "10");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -125,7 +127,10 @@ function RuleForm({
       if (!Number.isFinite(n) || n <= 0) return setError(mode === "move_percent" ? "Enter a percentage, like 3." : "Enter a price, like 600.");
       body = { kind, symbol: symbol.trim().toUpperCase(), [mode]: n };
     } else if (kind === "budget") {
-      body = { kind, category_id: category ? Number(category) : null, percent: Number(budgetPct) };
+      body =
+        budgetPct === "forecast"
+          ? { kind, category_id: category ? Number(category) : null, forecast: true }
+          : { kind, category_id: category ? Number(category) : null, percent: Number(budgetPct) };
     } else {
       const n = Number(concPct.replace(/[%\s]/g, ""));
       if (!Number.isFinite(n) || n < 1 || n > 100) return setError("Pick a share between 1% and 100%.");
@@ -238,7 +243,7 @@ function RuleForm({
         <>
           <Field id="rule-category" label="Budget">
             <Select value={category} onChange={(e) => setCategory(e.target.value)}>
-              <option value="">Everyday spending, all together</option>
+              <option value="">{budgetPct === "forecast" ? "Every category, each on its own" : "Everyday spending, all together"}</option>
               {categories.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.name}
@@ -246,11 +251,21 @@ function RuleForm({
               ))}
             </Select>
           </Field>
-          <Field id="rule-budget-pct" label="When it reaches" hint="Once a month at most." error={error}>
+          <Field
+            id="rule-budget-pct"
+            label="When it"
+            hint={
+              budgetPct === "forecast"
+                ? "A heads-up while there's still time to slow down. Once a month per category at most."
+                : "Once a month at most."
+            }
+            error={error}
+          >
             <Select value={budgetPct} onChange={(e) => setBudgetPct(e.target.value)}>
+              <option value="forecast">Is on pace to go over by month-end</option>
               {[50, 75, 80, 90, 100].map((n) => (
                 <option key={n} value={n}>
-                  {n === 100 ? "100% (the whole budget)" : `${n}% of the budget`}
+                  {n === 100 ? "Reaches 100% (the whole budget)" : `Reaches ${n}% of the budget`}
                 </option>
               ))}
             </Select>

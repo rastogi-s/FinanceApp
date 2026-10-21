@@ -54,10 +54,13 @@ class PriceRule(BaseModel):
 
 class BudgetRule(BaseModel):
     kind: Literal["budget"]
-    category_id: int | None = None  # None: the whole everyday budget
-    percent: int = Field(ge=10, le=200)
+    category_id: int | None = None  # None: the whole everyday budget (for a heads-up: every category on its own)
+    percent: int = Field(default=90, ge=10, le=200)
+    forecast: bool = False  # a heads-up when it's on pace to go over by month-end, instead of a percent
 
     def params(self) -> dict:
+        if self.forecast:
+            return {"category_id": self.category_id, "forecast": True}
         return {"category_id": self.category_id, "percent": self.percent}
 
 
@@ -102,6 +105,10 @@ def describe(r: AlertRule, categories: dict[int, str]) -> str:
         if "below" in p:
             return f"{p['symbol']} goes below {alerts.money(p['below'])}"
         return f"{p['symbol']} moves {alerts.percent(p['move_percent'])} or more in a day"
+    if r.kind == "budget" and p.get("forecast"):
+        if p.get("category_id") is None:
+            return "Any category is on pace to go over its budget"
+        return f"{categories.get(p['category_id'], 'A category')} is on pace to go over its budget"
     if r.kind == "budget":
         name = "Everyday spending" if p.get("category_id") is None else categories.get(p["category_id"], "A category")
         return f"{name} reaches {p['percent']}% of its budget"

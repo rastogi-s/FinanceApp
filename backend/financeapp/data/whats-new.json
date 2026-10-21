@@ -1,5 +1,17 @@
 [
   {
+    "version": "0.11.0",
+    "title": "A heads-up before a budget goes over",
+    "features": [
+      {
+        "id": "budget-forecast",
+        "title": "Where the month is heading",
+        "body": "Each budget line now says where it's heading by month-end, like \"on track to spend $520, $70 over\". Bills that haven't come yet are counted once at their usual amount; everyday spending follows this month's pace. When a category is on pace to go over, your phone gets a heads-up, once a month per category, with no amounts on the lock screen.",
+        "tryIt": "/budget"
+      }
+    ]
+  },
+  {
     "version": "0.10.0",
     "title": "A budget drafted with AI",
     "features": [

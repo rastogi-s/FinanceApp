@@ -6,13 +6,15 @@ Rules and their params
                  {"symbol": "VOO", "move_percent": 3}: a day's move of at least 3% either way
   budget         {"category_id": 12, "percent": 90}: a category reaches 90% of its monthly limit; category_id null
                  means the whole everyday budget
+                 {"category_id": null, "forecast": true}: a heads-up when a category is on pace to go over its limit
+                 by the end of the month (forecast.py); category_id null means each category on its own
   concentration  {"percent": 10}: any one company reaches 10% of everything invested, counting what's inside funds
                  (look-through, when the fund's holdings are known)
 
 No repeats. A rule fires when its condition becomes true and re-arms only after it has clearly stopped being true:
 a price back across its line by 1%, a company back under its limit by a point. A budget alert can fire once a
-month and a daily move once a day. Every alert carries a dedup key that the database keeps unique, so even two
-copies of the app checking at once can't save or send the same alert twice.
+month (a heads-up once a month per category) and a daily move once a day. Every alert carries a dedup key that
+the database keeps unique, so even two copies of the app checking at once can't save or send the same alert twice.
 
 Quiet hours (10 PM to 7 AM by default, in the household's time zone) hold alerts back, and when they end
 everything held goes out as one message. Security alerts (a new sign-in, a broken connection) never wait: they
@@ -139,6 +141,26 @@ def budget_hits(rule: AlertRule, state: dict, today: date) -> list[Hit]:
     return [Hit(month.isoformat()[:7], used >= float(p["percent"]), False, title, days)]
 
 
+def forecast_hits(rule: AlertRule, state: dict, today: date) -> list[Hit]:
+    """One hit per category: on when it's heading over (not already over: the plain budget rule says that)."""
+    cid = rule.params.get("category_id")
+    month = today.replace(day=1)
+    hits = []
+    for line in state["lines"]:
+        f = line.get("forecast")
+        if not f or line["limit_cents"] <= 0 or (cid is not None and line["category_id"] != cid):
+            continue
+        share = f["projected_cents"] / line["limit_cents"] * 100 - 100
+        left = f["days_left"]
+        hits.append(
+            Hit(f"{month.isoformat()[:7]}:{line['category_id']}", f["status"] == "heading_over", False,
+                f"{line['category']} is on pace to go over budget",
+                f"At this pace it ends {month.strftime('%B')} about {percent(max(round(share), 1))} over. "
+                f"{left} day{'s' if left != 1 else ''} left to slow down.")
+        )  # fmt: skip
+    return hits
+
+
 def concentration_hits(rule: AlertRule, companies: list[dict]) -> list[Hit]:
     limit = float(rule.params["percent"])
     hits = []
@@ -199,7 +221,8 @@ def evaluate(db: DbSession, kinds: set[str], companies: list[dict] | None = None
         if r.kind == "price":
             hits = price_hits(r, live.get(r.params.get("symbol")), t)
         elif r.kind == "budget" and budget_state is not None:
-            hits = budget_hits(r, budget_state, t.astimezone(zone(quiet_hours(db)["timezone"])).date())
+            day = t.astimezone(zone(quiet_hours(db)["timezone"])).date()
+            hits = (forecast_hits if r.params.get("forecast") else budget_hits)(r, budget_state, day)
         elif r.kind == "concentration" and companies is not None:
             hits = concentration_hits(r, companies)
         else:

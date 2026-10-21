@@ -8,7 +8,7 @@ import random
 import statistics
 from datetime import UTC, date, datetime, timedelta
 
-from financeapp import plan
+from financeapp import forecast, plan
 
 SEED = 20261019
 
@@ -301,6 +301,7 @@ def empty() -> dict:
     return {"demo": False, "linked": False}
 
 
+PACE = {"Groceries": 0.5, "Dining out": 1.0, "Shopping": 0.8, "Transport": 0.9, "Entertainment": 0.3}  # of usual
 TYPICAL = {"Groceries": 840, "Dining out": 410, "Shopping": 360, "Transport": 270, "Entertainment": 180}
 SAVINGS = [  # month offset, gross, taxes, deductions, spending (dollars): the last full month is 31.4%
     (-6, 18_000, 4_300, 600, 8_310),
@@ -330,6 +331,24 @@ def budget(today: date | None = None) -> dict:
         }
         for name, kind, limit, share in BUDGET
     ]
+    days = forecast.days_in(month_start)
+    left = days - today.day + 1
+    for b in lines:
+        due = []
+        if b["category"] == "Utilities":
+            due = [{"merchant": "City Power & Light", "cents": b["limit_cents"] - b["spent_cents"],
+                    "day": min(days, max(today.day + 3, 24))}]  # fmt: skip
+        pace = round(b["typical_cents"] * PACE.get(b["category"], 0) * left / days)
+        projected = b["spent_cents"] + sum(d["cents"] for d in due) + pace
+        b["forecast"] = {
+            "projected_cents": projected,
+            "over_cents": max(projected - b["limit_cents"], 0),
+            "status": forecast.status(projected, b["spent_cents"], b["limit_cents"], b["kind"]),
+            "due_cents": sum(d["cents"] for d in due),
+            "due": due,
+            "pace_cents": pace,
+            "days_left": left,
+        }
     flexible_left = sum(b["limit_cents"] - b["spent_cents"] for b in lines if b["kind"] == "flexible")
 
     def month(offset: int) -> date:
@@ -369,6 +388,7 @@ def budget(today: date | None = None) -> dict:
         "lines": lines,
         "unbudgeted": [{"category_id": 12, "category": "Uncategorized", "kind": "other", "spent_cents": _cents(38)}],
         "safe_to_spend": {"cents": flexible_left - _cents(38), "days_left": (next_month - today).days},
+        "forecast": forecast.summary(lines),
         "savings_rate": history[-1],
         "savings_history": history,
         "emergency": {
@@ -710,6 +730,14 @@ def alerts() -> dict:
                 "params": {"category_id": None, "percent": 90},
                 "enabled": True,
                 "summary": "Everyday spending reaches 90% of its budget",
+                "triggered": False,
+            },
+            {
+                "id": 5,
+                "kind": "budget",
+                "params": {"category_id": None, "forecast": True},
+                "enabled": True,
+                "summary": "Any category is on pace to go over its budget",
                 "triggered": False,
             },
             {

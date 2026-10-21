@@ -12,6 +12,19 @@ export type BudgetLine = {
   limit_cents: number;
   spent_cents: number;
   typical_cents: number;
+  /** Where this category is heading by month-end; null while it's too early to say. */
+  forecast?: Forecast | null;
+};
+export type Forecast = {
+  projected_cents: number;
+  over_cents: number;
+  status: "on_track" | "close" | "heading_over" | "over";
+  /** Once-a-month charges that haven't come yet. */
+  due_cents: number;
+  due: { merchant: string; cents: number; day: number }[];
+  /** What the everyday pace adds for the days still to come. */
+  pace_cents: number;
+  days_left: number;
 };
 export type SavingsMonth = {
   month: string;
@@ -57,6 +70,7 @@ export type BudgetState = {
   lines: BudgetLine[];
   unbudgeted: { category_id: number | null; category: string; kind: string; spent_cents: number }[];
   safe_to_spend: { cents: number; days_left: number } | null;
+  forecast: { projected_cents: number; limit_cents: number; heading_over: number[]; days_left: number } | null;
   savings_rate: SavingsMonth | null;
   savings_history: SavingsMonth[];
   emergency: { months: number; monthly_cents: number; target_cents: number; have_cents: number };
