@@ -209,6 +209,63 @@ def test_fetch_finnhub_then_yahoo():
     assert quotes.fetch(Settings(quotes_provider="off"), ["VOO"], client=mock(handler)) == {}
 
 
+def test_last_close_day():
+    et = quotes.ET
+    assert quotes.last_close_day(datetime(2026, 10, 21, 12, 0, tzinfo=et)) == date(2026, 10, 20)  # Wed, open
+    assert quotes.last_close_day(datetime(2026, 10, 21, 16, 5, tzinfo=et)) == date(2026, 10, 21)  # after the close
+    assert quotes.last_close_day(datetime(2026, 10, 19, 9, 0, tzinfo=et)) == date(2026, 10, 16)  # Monday: Friday's
+    assert quotes.last_close_day(datetime(2026, 10, 25, 20, 0, tzinfo=et)) == date(2026, 10, 23)  # Sunday
+
+
+def year_of_closes(through: date, last: float) -> dict:
+    """250 trading days rising from 100 to `last`, plus a bar for the next day (still trading)."""
+    days = []
+    d = through
+    while len(days) < 250:
+        if d.weekday() < 5:
+            days.append(d)
+        d -= timedelta(days=1)
+    days.reverse()
+    days.append(through + timedelta(days=1))
+    stamps = [int(datetime.combine(x, datetime.min.time(), quotes.ET).replace(hour=9, minute=30).timestamp())
+              for x in days]  # fmt: skip
+    closes = [100 + (last - 100) * i / 249 for i in range(250)] + [1.0]
+    closes[10] = None  # Yahoo leaves gaps
+    meta = {"currency": "USD", "fiftyTwoWeekHigh": 160.0, "fiftyTwoWeekLow": 95.0}
+    return {"chart": {"result": [{"meta": meta, "timestamp": stamps, "indicators": {"quote": [{"close": closes}]}}]}}
+
+
+@needs_db
+def test_trends_once_a_day(client):
+    calls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request.url.path)
+        assert request.url.params["range"] == "1y" and request.url.params["interval"] == "1d"
+        if request.url.path.endswith("/BRK-B"):
+            return httpx.Response(404)
+        return httpx.Response(200, json=year_of_closes(date(2026, 10, 20), 150))
+
+    t = datetime(2026, 10, 21, 12, 0, tzinfo=quotes.ET)
+    with db_of(client).session() as db:
+        seed(db, [("VOO", "Funds", 10, 140), ("BRK.B", "Stocks", 1, 400), ("CASH", "Cash", 1, 5)])
+        for s in ("VOO", "BRK.B"):
+            db.add(Quote(symbol=s, price=Decimal("140"), source="yahoo", as_of=t))
+    assert quotes.refresh_trends(db_of(client), t, client=mock(handler)) == 2
+    with db_of(client).session() as db:
+        voo = db.get(Quote, "VOO")
+        assert voo.trend_as_of == date(2026, 10, 20)  # not the 21st, still trading
+        assert voo.year_high == Decimal("160") and voo.year_low == Decimal("95")
+        assert voo.average_200 is not None and voo.average_50 is not None
+        assert float(voo.average_50) == pytest.approx(150 - 50 / 249 * 49 / 2, abs=0.01)
+        brk = db.get(Quote, "BRK.B")
+        assert brk.trend_as_of == date(2026, 10, 20) and brk.year_high is None  # no history: not asked again today
+    assert quotes.refresh_trends(db_of(client), t, client=mock(handler)) == 0
+    assert len(calls) == 2
+    after_close = datetime(2026, 10, 21, 16, 10, tzinfo=quotes.ET)
+    assert quotes.refresh_trends(db_of(client), after_close, client=mock(handler)) == 2
+
+
 @needs_db
 def test_live_prices_move_holdings_and_net_worth(client):
     with db_of(client).session() as db:

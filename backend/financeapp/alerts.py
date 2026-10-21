@@ -1,9 +1,13 @@
-"""Alert rules: price, budget and concentration. Checked after every price update and every sync, sent by ntfy push
+"""Alert rules: price, dip, budget and concentration. Checked after every price update and every sync, sent by ntfy push
 with email as the fallback (notify.py).
 
 Rules and their params
   price          {"symbol": "VOO", "above": 600} or {"symbol": "VOO", "below": 500}: the price crosses a line;
                  {"symbol": "VOO", "move_percent": 3}: a day's move of at least 3% either way
+  dip            {"symbol": "VOO", "from_high_percent": 10}: the price is 10% or more under its 52-week high, and
+                 again at 20%, 30%...; {"symbol": "VOO", "below_average": 200}: the price drops under its 200-day
+                 (or 50-day) average. symbol null means every stock and fund held. Facts about the price, worded
+                 as information: the app never says whether to buy.
   budget         {"category_id": 12, "percent": 90}: a category reaches 90% of its monthly limit; category_id null
                  means the whole everyday budget
                  {"category_id": null, "forecast": true}: a heads-up when a category is on pace to go over its limit
@@ -12,7 +16,8 @@ Rules and their params
                  (look-through, when the fund's holdings are known)
 
 No repeats. A rule fires when its condition becomes true and re-arms only after it has clearly stopped being true:
-a price back across its line by 1%, a company back under its limit by a point. A budget alert can fire once a
+a price back across its line by 1%, a company back under its limit by a point, a dip back within 3 points of
+the 52-week high's line. A budget alert can fire once a
 month (a heads-up once a month per category) and a daily move once a day. Every alert carries a dedup key that
 the database keeps unique, so even two copies of the app checking at once can't save or send the same alert twice.
 
@@ -41,6 +46,10 @@ from financeapp.models import AlertEvent, AlertRule, AuditEvent, Preference, now
 log = logging.getLogger("financeapp")
 REARM_PRICE = 0.01  # back across the line by 1%
 REARM_POINTS = 1.0  # back under a concentration limit by 1 point
+REARM_DIP = 3.0  # back within 7% of the 52-week high, after a "10% under" alert
+DIP_MAX = 90  # the deepest "under its 52-week high" step
+TREND_DAYS = 7  # a dip is only judged on a price and trend from the last week
+NOT_ADVICE = "Information only, not advice."
 MAX_ATTEMPTS = 3
 KEEP_DAYS = 180
 QUIET_DEFAULTS = {"enabled": True, "start": "22:00", "end": "07:00", "timezone": "America/New_York"}
@@ -56,6 +65,7 @@ class Hit:
     rearm: bool
     title: str = ""
     body: str = ""
+    silent: bool = False  # becomes true without an alert (a smaller step of a dip passed on the way down)
 
 
 def money(dollars: float) -> str:
@@ -117,6 +127,46 @@ def price_hits(rule: AlertRule, quote, t: datetime) -> list[Hit]:
         return [Hit(day.isoformat(), abs(change) >= float(p["move_percent"]), False,
                     f"{s} is {word} {percent(abs(change))} today", f"{s} is at {money(price)}.")]  # fmt: skip
     return []
+
+
+def dip_hits(rule: AlertRule, live: dict, held: set[str], t: datetime) -> list[Hit]:
+    p = rule.params
+    symbols = [p["symbol"]] if p.get("symbol") else sorted(held)
+    keys = (rule.state or {}).get("keys", {})
+    hits = []
+    for s in symbols:
+        q = live.get(s)
+        if q is None or q.trend_as_of is None or t - q.as_of > timedelta(days=TREND_DAYS):
+            continue
+        price = float(q.price)
+        if "from_high_percent" in p and q.year_high:
+            high = float(q.year_high)
+            under = (high - price) / high * 100
+            step = float(p["from_high_percent"])
+            steps = [step * i for i in range(1, int(DIP_MAX // step) + 1)]
+            deepest = max((x for x in steps if under >= x), default=None)
+            for x in steps:
+                key = f"{s}:{x:g}"
+                # Only the deepest step reached sends anything: a fall straight through 10% and 20% is one alert.
+                silent = deepest is not None and x < deepest and not keys.get(key, {}).get("on")
+                hits.append(
+                    Hit(key, under >= x, under < x - REARM_DIP,
+                        f"{s} is {percent(round(under))} under its 52-week high",
+                        f"{s} is at {money(price)}; its 52-week high is {money(high)}. {NOT_ADVICE}", silent)
+                )  # fmt: skip
+        elif "below_average" in p:
+            days = int(p["below_average"])
+            avg = q.average_200 if days == 200 else q.average_50
+            if not avg:
+                continue
+            line = float(avg)
+            under = (line - price) / line * 100
+            hits.append(
+                Hit(s, price < line, price > line * (1 + REARM_PRICE), f"{s} dropped under its {days}-day average",
+                    f"{s} is at {money(price)}, {percent(max(under, 0.1))} under its {days}-day average of "
+                    f"{money(line)}. {NOT_ADVICE}")
+            )  # fmt: skip
+    return hits
 
 
 def budget_hits(rule: AlertRule, state: dict, today: date) -> list[Hit]:
@@ -186,6 +236,8 @@ def fire(db: DbSession, rule: AlertRule, hits: list[Hit]) -> int:
         k = keys.get(h.key, {"on": False, "n": 0})
         if k["on"] and h.rearm:
             k = {"on": False, "n": k["n"]}
+        elif not k["on"] and h.on and h.silent:
+            k = {"on": True, "n": k["n"]}
         elif not k["on"] and h.on:
             k = {"on": True, "n": k["n"] + 1}
             stmt = insert(AlertEvent).values(
@@ -202,7 +254,7 @@ def fire(db: DbSession, rule: AlertRule, hits: list[Hit]) -> int:
                 fired += 1
         keys[h.key] = k
     # Only the most recent keys matter for budgets and daily moves; keep the state small.
-    if rule.kind != "concentration" and len(keys) > 40:
+    if rule.kind in ("price", "budget") and len(keys) > 40:
         keys = dict(sorted(keys.items())[-40:])
     rule.state = {"keys": keys}
     return fired
@@ -214,12 +266,15 @@ def evaluate(db: DbSession, kinds: set[str], companies: list[dict] | None = None
     (built once by the caller), so a check with nothing to look at is skipped rather than seen as 'all clear'."""
     t = t or now()
     rules = list(db.scalars(select(AlertRule).where(AlertRule.enabled.is_(True), AlertRule.kind.in_(kinds))))
-    price_symbols = {r.params.get("symbol") for r in rules if r.kind == "price"}
-    live = quotes.latest(db, {s for s in price_symbols if s})
+    held = quotes.holding_symbols(db) if any(r.kind == "dip" and not r.params.get("symbol") for r in rules) else set()
+    watched = {r.params.get("symbol") for r in rules if r.kind in ("price", "dip")} | held
+    live = quotes.latest(db, {s for s in watched if s})
     fired = 0
     for r in rules:
         if r.kind == "price":
             hits = price_hits(r, live.get(r.params.get("symbol")), t)
+        elif r.kind == "dip":
+            hits = dip_hits(r, live, held, t)
         elif r.kind == "budget" and budget_state is not None:
             day = t.astimezone(zone(quiet_hours(db)["timezone"])).date()
             hits = (forecast_hits if r.params.get("forecast") else budget_hits)(r, budget_state, day)

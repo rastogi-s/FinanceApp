@@ -15,7 +15,7 @@ import { Switch } from "@/components/ui/switch";
 import { toast } from "@/components/ui/toast";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { type Alert, resetHousehold, useApi } from "@/lib/household";
+import { type Alert, KIND_DOT, resetHousehold, useApi } from "@/lib/household";
 import { cn } from "@/lib/utils";
 
 type Quiet = { enabled: boolean; start: string; end: string; timezone: string };
@@ -103,7 +103,7 @@ export default function AlertsPage() {
 
   return (
     <>
-      <SubPageTitle title="Alerts" back="/settings" subtitle="Prices, budgets and how concentrated you are, sent to your phone." />
+      <SubPageTitle title="Alerts" back="/settings" subtitle="Prices, dips, budgets and how concentrated you are, sent to your phone." />
       {!s && !error && (
         <div className="grid grid-cols-1 gap-4" aria-busy="true" aria-label="Loading">
           <Skeleton className="h-28 rounded-xl" />
@@ -163,7 +163,7 @@ export default function AlertsPage() {
             </CardHeader>
             {s.rules.length === 0 && (
               <CardContent>
-                <p className="text-sm text-muted-foreground">No alerts yet. Add one for a price, a budget, or any one company getting too big.</p>
+                <p className="text-sm text-muted-foreground">No alerts yet. Add one for a price, a dip, a budget, or any one company getting too big.</p>
               </CardContent>
             )}
             <ul className="divide-y pb-2">
@@ -177,7 +177,13 @@ export default function AlertsPage() {
                     <button className="min-w-0 flex-1 text-left" onClick={() => !guard() && setEditing(r)}>
                       <span className={cn("block text-sm font-medium", !r.enabled && "text-muted-foreground")}>{r.summary}</span>
                       <span className="block text-xs text-muted-foreground">
-                        {r.kind === "price" ? "Checked every 15 minutes while markets are open" : r.kind === "budget" ? "Checked after every sync" : "Checked with every price update"}
+                        {r.kind === "price"
+                          ? "Checked every 15 minutes while markets are open"
+                          : r.kind === "dip"
+                            ? "Checked with every price update, against yesterday's trends"
+                            : r.kind === "budget"
+                              ? "Checked after every sync"
+                              : "Checked with every price update"}
                       </span>
                     </button>
                     {r.triggered && <Badge variant="warning">Triggered</Badge>}
@@ -200,7 +206,7 @@ export default function AlertsPage() {
                 <ul className="divide-y">
                   {s.events.map((e) => (
                     <li key={e.id} className="flex items-start gap-3 py-3">
-                      <span className={cn("mt-1.5 size-2 shrink-0 rounded-full", e.kind === "budget" ? "bg-warning" : e.kind === "price" ? "bg-chart-2" : "bg-chart-4")} aria-hidden />
+                      <span className={cn("mt-1.5 size-2 shrink-0 rounded-full", KIND_DOT[e.kind])} aria-hidden />
                       <div className="min-w-0 flex-1">
                         <p className="text-sm font-medium">{e.title}</p>
                         <p className="text-xs text-muted-foreground">

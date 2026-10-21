@@ -83,6 +83,68 @@ def test_daily_move_only_counts_today(client, sent):
         assert e.title == "AAPL is down 4% today"
 
 
+def set_trend(db, symbol: str, high: float, avg200: float | None = None, day: date = date(2026, 10, 20)) -> None:
+    q = db.get(Quote, symbol)
+    q.year_high, q.trend_as_of = Decimal(str(high)), day
+    q.average_200 = Decimal(str(avg200)) if avg200 else None
+    db.flush()
+
+
+@needs_db
+def test_dip_from_high_steps_down_once_each(client, sent):
+    with db_of(client).session() as db:
+        db.execute(delete(AlertRule))  # not the starter rules
+        db.add(AlertRule(kind="dip", params={"symbol": "VOO", "from_high_percent": 10}, enabled=True, state={}))
+        set_quote(db, "VOO", 95)
+        assert alerts.evaluate(db, {"dip"}, t=NOON) == 0  # no trend yet: nothing to judge
+        set_trend(db, "VOO", 100)
+        assert alerts.evaluate(db, {"dip"}, t=NOON) == 0  # 5% under
+        set_quote(db, "VOO", 75)
+        assert alerts.evaluate(db, {"dip"}, t=NOON) == 1  # straight through 10% and 20%: one alert, for 25%
+        set_quote(db, "VOO", 88)
+        assert alerts.evaluate(db, {"dip"}, t=NOON) == 0  # recovering isn't news
+        set_quote(db, "VOO", 70)
+        assert alerts.evaluate(db, {"dip"}, t=NOON) == 1  # 30%
+        set_quote(db, "VOO", 95)
+        alerts.evaluate(db, {"dip"}, t=NOON)  # back within 7%: every step re-armed
+        set_quote(db, "VOO", 89)
+        assert alerts.evaluate(db, {"dip"}, t=NOON) == 1
+        titles = [e.title for e in db.scalars(select(AlertEvent).order_by(AlertEvent.id))]
+        assert titles == [
+            "VOO is 25% under its 52-week high",
+            "VOO is 30% under its 52-week high",
+            "VOO is 11% under its 52-week high",
+        ]
+        body = db.scalar(select(AlertEvent)).body
+        assert body == "VOO is at $75.00; its 52-week high is $100.00. Information only, not advice."
+        # A trend from weeks ago isn't used.
+        set_quote(db, "VOO", 50, at=NOON - timedelta(days=10))
+        assert alerts.evaluate(db, {"dip"}, t=NOON) == 0
+
+
+@needs_db
+def test_dip_below_average_for_everything_held(client, sent, monkeypatch):
+    monkeypatch.setattr(alerts.quotes, "holding_symbols", lambda db: {"VTI", "AAPL"})
+    with db_of(client).session() as db:
+        db.execute(delete(AlertRule))
+        db.add(AlertRule(kind="dip", params={"symbol": None, "below_average": 200}, enabled=True, state={}))
+        set_quote(db, "VTI", 290)
+        set_trend(db, "VTI", 320, avg200=300)
+        set_quote(db, "AAPL", 250)
+        set_trend(db, "AAPL", 260, avg200=230)
+        set_quote(db, "MSFT", 100)  # not held
+        set_trend(db, "MSFT", 200, avg200=150)
+        assert alerts.evaluate(db, {"dip"}, t=NOON) == 1
+        set_quote(db, "VTI", 301)
+        assert alerts.evaluate(db, {"dip"}, t=NOON) == 0  # not 1% over yet: not re-armed
+        set_quote(db, "VTI", 299)
+        assert alerts.evaluate(db, {"dip"}, t=NOON) == 0
+        e = db.scalar(select(AlertEvent))
+        assert e.title == "VTI dropped under its 200-day average"
+        assert e.body == "VTI is at $290.00, 3.3% under its 200-day average of $300.00. Information only, not advice."
+        assert "buy" not in (e.title + e.body).lower()
+
+
 @needs_db
 def test_budget_rule_once_a_month(client, sent):
     state = {
@@ -177,7 +239,7 @@ def test_starter_rules_and_check_after_budget(client, home, sent, monkeypatch):
     r = client.get("/api/alerts")
     assert r.status_code == 200
     kinds = sorted(x["kind"] for x in r.json()["rules"])
-    assert kinds == ["budget", "budget", "concentration"]  # from the migrations
+    assert kinds == ["budget", "budget", "concentration", "dip", "dip"]  # from the migrations
     assert "Any category is on pace to go over its budget" in [x["summary"] for x in r.json()["rules"]]
     monkeypatch.setattr(budget, "today", lambda: date(2026, 10, 21))
     assert alerts.check(db_of(client), client.app.state.settings, {"budget", "concentration"}) == 0
@@ -193,6 +255,10 @@ def test_rules_api(client, home, sent):
         {"kind": "price", "symbol": "VOO"},
         {"kind": "budget", "category_id": None, "percent": 5},
         {"kind": "concentration", "percent": 0},
+        {"kind": "dip", "symbol": None},
+        {"kind": "dip", "from_high_percent": 10, "below_average": 200},
+        {"kind": "dip", "below_average": 100},
+        {"kind": "dip", "symbol": "not a ticker", "from_high_percent": 10},
         {"kind": "email-everyone"},
     ]
     for rule in bad:

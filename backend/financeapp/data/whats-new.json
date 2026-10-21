@@ -1,5 +1,29 @@
 [
   {
+    "version": "0.16.0",
+    "title": "One row per investment, and a nudge when prices dip",
+    "features": [
+      {
+        "id": "combined-holdings",
+        "title": "The same fund in several accounts shows once",
+        "body": "Portfolio holdings now show each investment once with its total. Tap one marked with a number of accounts to see how much sits in each, with shares and gain. Prefer to see each account on its own? Switch to By account.",
+        "tryIt": "/portfolio"
+      },
+      {
+        "id": "dip-alerts",
+        "title": "Dip alerts",
+        "body": "Get a note on your phone when anything you hold falls 10% under its 52-week high (and again at 20%, 30%), or drops under its 200-day average. They're facts about the price, not advice. Change them or add your own in Settings, Alerts.",
+        "tryIt": "/settings/alerts"
+      },
+      {
+        "id": "moving-averages",
+        "title": "50- and 200-day averages",
+        "body": "A holding's Key numbers now show its 50- and 200-day averages and how far today's price is above or under each.",
+        "tryIt": "/portfolio"
+      }
+    ]
+  },
+  {
     "version": "0.15.0",
     "title": "Find anything you spent",
     "features": [

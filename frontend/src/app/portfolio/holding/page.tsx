@@ -243,6 +243,14 @@ function StatsCard({ s }: { s: Security }) {
   if (t.day_low && t.day_high) rows.push(["Today's range", `${price.format(t.day_low)} – ${price.format(t.day_high)}`]);
   if (s.previous_close) rows.push(["Previous close", price.format(s.previous_close)]);
   if (t.volume) rows.push(["Volume", compactNumber(t.volume)]);
+  for (const [days, avg] of [
+    [50, t.average_50],
+    [200, t.average_200],
+  ] as const) {
+    if (!avg) continue;
+    const vs = s.price ? ((s.price - avg) / avg) * 100 : null;
+    rows.push([`${days}-day average`, `${price.format(avg)}${vs == null ? "" : ` · now ${Math.abs(vs).toFixed(1)}% ${vs >= 0 ? "above" : "under"}`}`]);
+  }
   if (t.market_cap) rows.push(["Market value", `$${compactNumber(t.market_cap)}`]);
   if (t.pe) rows.push(["P/E (trailing)", t.pe.toFixed(1)]);
   if (t.eps) rows.push(["Earnings a share", price.format(t.eps)]);

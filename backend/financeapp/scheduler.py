@@ -1,7 +1,8 @@
 """The background work, in a thread inside the app (no extra container): the sync every SYNC_INTERVAL_HOURS, live
-prices every QUOTE_INTERVAL_MINUTES while markets are open (each followed by a check of the price and concentration
-alerts), funds' holdings for look-through once a week, the morning brief at the time the owner picked, and whether a
-newer version is out every few hours.
+prices every QUOTE_INTERVAL_MINUTES while markets are open (each followed by a check of the price, dip and
+concentration alerts; after the close, a year of daily prices for the dip alerts' trends), funds' holdings for
+look-through once a week, the morning brief at the time the owner picked, and whether a newer version is out every
+few hours.
 
 It checks every minute whether each is due, from what's saved in the database, so restarts and updates don't cause
 extra runs, and the sync's own database lock means two copies of the app never sync at once. It also clears out
@@ -56,7 +57,8 @@ class Scheduler:
             if run is not None:
                 log.info("scheduled sync finished: %s", "ok" if run.ok else "with problems")
         if quotes.refresh(self.database, self.settings) is not None:
-            alerts.check(self.database, self.settings, {"price", "concentration"})
+            quotes.refresh_trends(self.database, now())  # once a day after the close; a no-op the rest of the time
+            alerts.check(self.database, self.settings, {"price", "dip", "concentration"})
         else:
             # Held alerts go out when quiet hours end, even if no new prices came in.
             with self.database.session() as db:
