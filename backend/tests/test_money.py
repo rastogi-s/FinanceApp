@@ -221,7 +221,7 @@ class FakePlaid:
                             "name": "Brokerage",
                             "type": "investment",
                             "mask": "6621",
-                            "balances": {"current": 19012},
+                            "balances": {"current": 20012},  # vested shares only, as Plaid reports it
                         },
                     ]
                 },
@@ -238,9 +238,21 @@ class FakePlaid:
                             "institution_price": 190.12,
                             "institution_value": 19012,
                             "cost_basis": 15000,
-                        }
+                        },
+                        {
+                            "account_id": "brk",
+                            "security_id": "s2",
+                            "quantity": 30,
+                            "vested_quantity": 10,
+                            "institution_price": 100,
+                            "institution_value": 3000,
+                            "vested_value": 1000,
+                        },
                     ],
-                    "securities": [{"security_id": "s1", "ticker_symbol": "AAPL", "name": "Apple", "type": "equity"}],
+                    "securities": [
+                        {"security_id": "s1", "ticker_symbol": "AAPL", "name": "Apple", "type": "equity"},
+                        {"security_id": "s2", "ticker_symbol": "NTAP", "name": "NetApp", "type": "equity"},
+                    ],
                 },
             )
         if path == "/transactions/sync":
@@ -334,8 +346,8 @@ def test_linking_and_syncing_plaid(client, home, plaid):
         assert stored.state["cursor"] == "c2"
 
     h = client.get("/api/household").json()
-    assert h["net_worth"]["cents"] == 500025 - 86010 + 1901200
-    assert [x["symbol"] for x in h["holdings"]] == ["AAPL"]
+    assert h["net_worth"]["cents"] == 500025 - 86010 + 1901200 + 100000  # vested shares only
+    assert {x["symbol"]: x["value_cents"] for x in h["holdings"]} == {"AAPL": 1901200, "NTAP": 100000}
     by_id = {t["merchant"]: t for t in h["transactions"]}
     assert by_id["Trader Joe's"]["category"] == "Groceries" and by_id["Trader Joe's"]["amount_cents"] == -5420
     assert by_id["CHASE CARD PAYMENT"]["transfer"] and by_id["PAYMENT"]["transfer"]
