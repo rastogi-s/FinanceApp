@@ -36,10 +36,35 @@ def sources(request: Request, db: DbSession) -> dict:
     }
 
 
+# The Portfolio page shows the top 100 companies (the most the graph draws); the rest are found by searching.
+TOP_COMPANIES = 100
+
+
+def light(exposure: dict) -> dict:
+    """Look-through for the page: thousands of companies is megabytes, and the page shows the largest only."""
+    return {**exposure, "companies": exposure["companies"][:TOP_COMPANIES], "company_count": len(exposure["companies"])}
+
+
+def trends(db: DbSession, symbols: set[str]) -> dict:
+    """Each held symbol's year range, 50- and 200-day averages and last month of closes, for the holdings table."""
+    out = {}
+    for s, q in quotes.latest(db, symbols).items():
+        out[s] = {
+            "previous_close": float(q.previous_close) if q.previous_close else None,
+            "year_low": float(q.year_low) if q.year_low else None,
+            "year_high": float(q.year_high) if q.year_high else None,
+            "average_50": float(q.average_50) if q.average_50 else None,
+            "average_200": float(q.average_200) if q.average_200 else None,
+            "closes": q.closes or [],
+        }
+    return out
+
+
 @router.get("/portfolio")
 def get_portfolio(request: Request, who: Signed = Depends(signed_in)) -> dict:
     if who.demo:
-        return demo.portfolio()
+        p = demo.portfolio()
+        return {**p, "exposure": light(p["exposure"])}
     db = db_of(request)
     accounts = household.counted(db)
     names = {a.id: household.display_name(a) for a in accounts}
@@ -47,11 +72,31 @@ def get_portfolio(request: Request, who: Signed = Depends(signed_in)) -> dict:
     as_of = portfolio.prices_as_of(ps)
     return {
         **portfolio.combined(ps, names),
-        "exposure": lookthrough.exposure(db, accounts),
+        "exposure": light(lookthrough.exposure(db, accounts, ps)),
+        "trends": trends(db, {p.symbol for p in ps if quotes.quotable(p.symbol, p.asset_class)}),
         "prices_as_of": as_of.isoformat() if as_of else None,
         "market_open": quotes.market_open(now()),
         "sources": sources(request, db),
     }
+
+
+@router.get("/portfolio/companies")
+def find_companies(
+    request: Request, q: str = Query(min_length=1, max_length=60), who: Signed = Depends(signed_in)
+) -> dict:
+    """Search every company you own, directly or through funds, by ticker or name. Each keeps its overall rank."""
+    if who.demo:
+        companies = demo.portfolio()["exposure"]["companies"]
+    else:
+        db = db_of(request)
+        companies = lookthrough.exposure(db, household.counted(db))["companies"]
+    needle = q.strip().lower()
+    found = [
+        {**c, "rank": i + 1}
+        for i, c in enumerate(companies)
+        if (c["symbol"] or "").lower().startswith(needle) or needle in c["name"].lower()
+    ]
+    return {"companies": found[:50], "count": len(found)}
 
 
 @router.post("/portfolio/refresh")
@@ -140,7 +185,7 @@ def detail(
             "as_of": max(p.as_of for p in mine).isoformat(),
         }
 
-    look = lookthrough.exposure(db, accounts) if mine or db.get(Fund, symbol) else None
+    look = lookthrough.exposure(db, accounts, ps) if mine or db.get(Fund, symbol) else None
     company = next((c for c in (look or {}).get("companies", []) if c["symbol"] == symbol), None)
     fund = next((f for f in (look or {}).get("funds", []) if f["symbol"] == symbol), None)
     categories = dict(db.execute(select(Category.id, Category.name)).all())

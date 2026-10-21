@@ -1,5 +1,8 @@
 "use client";
 
+import { useEffect, useState } from "react";
+import { api } from "@/lib/api";
+
 export type Position = {
   symbol: string;
   name: string;
@@ -37,7 +40,8 @@ export type FundRow = {
 
 export type Exposure = {
   total_cents: number;
-  companies: Company[];
+  companies: Company[]; // the largest only (up to 100); search finds the rest
+  company_count: number;
   funds: FundRow[];
   looked_through_percent: number;
   other_percent: number;
@@ -46,12 +50,23 @@ export type Exposure = {
 
 export type Sources = { quotes: "finnhub" | "yahoo" | "off"; lookthrough: boolean; fundamentals: boolean };
 
+/** A held symbol's year range, moving averages and last month of daily closes (oldest first). */
+export type Trend = {
+  previous_close: number | null;
+  year_low: number | null;
+  year_high: number | null;
+  average_50: number | null;
+  average_200: number | null;
+  closes: number[];
+};
+
 export type Portfolio = {
   total_cents: number;
   positions: Position[];
   top5_percent: number;
   largest: string | null;
   exposure: Exposure;
+  trends?: Record<string, Trend>;
   prices_as_of: string | null;
   market_open: boolean;
   sources: Sources;
@@ -140,4 +155,57 @@ export function hasDetail(symbol: string | null | undefined, assetClass?: string
 const shortDate = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" });
 export function asOf(iso: string) {
   return shortDate.format(new Date(`${iso}T12:00:00`));
+}
+
+// Kept between visits like the household, so coming back to Portfolio shows the last numbers at once while fresh
+// ones load. Started by the page before the household arrives, so the two load side by side.
+const FRESH_MS = 60_000;
+let shown: Portfolio | null = null;
+let pending: Promise<Portfolio> | null = null;
+let fetchedAt = 0;
+let generation = 0; // a fetch that started before forgetPortfolio() is never kept
+const watchers = new Set<(p: Portfolio) => void>();
+
+export function loadPortfolio(force = false): Promise<Portfolio> {
+  if (pending && !force) return pending;
+  if (!force && shown && Date.now() - fetchedAt < FRESH_MS) return Promise.resolve(shown);
+  const p = api<Portfolio>("/api/portfolio");
+  const started = generation;
+  pending = p;
+  p.then(
+    (d) => {
+      if (started !== generation) return;
+      shown = d;
+      fetchedAt = Date.now();
+      watchers.forEach((w) => w(d));
+    },
+    () => {},
+  ).finally(() => {
+    if (pending === p) pending = null;
+  });
+  return p;
+}
+
+/** Forget it (signing out, after a sync or an import). */
+export function forgetPortfolio() {
+  generation += 1;
+  shown = null;
+  pending = null;
+}
+
+/** The portfolio: the last one shown straight away, then the fresh one. */
+export function usePortfolio(): { data: Portfolio | null; reload: () => void } {
+  const [data, setData] = useState<Portfolio | null>(shown);
+  useEffect(() => {
+    watchers.add(setData);
+    // Set from the result too: the fetch the page started may have finished before this watcher was added.
+    loadPortfolio().then(setData, () => {}); // the page shows what it has; the household shows any problem
+    const again = () => void loadPortfolio(true).catch(() => {});
+    window.addEventListener("app-refresh", again);
+    return () => {
+      watchers.delete(setData);
+      window.removeEventListener("app-refresh", again);
+    };
+  }, []);
+  return { data, reload: () => void loadPortfolio(true).catch(() => {}) };
 }

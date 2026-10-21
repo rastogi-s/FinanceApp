@@ -1,5 +1,23 @@
 [
   {
+    "version": "0.22.0",
+    "title": "Holdings as a table, and a faster Portfolio",
+    "features": [
+      {
+        "id": "holdings-table",
+        "title": "Holdings as a table",
+        "body": "Holdings on Portfolio now show as a table you can scroll sideways, with the ticker and name pinned on the left: price, today's change, a one-month trend line, value, day gain, total gain, shares, cost, weight, the 52-week range and how far the price is from its 50- and 200-day averages. Tap a column heading to sort, or a row for its chart and details. The list view is one tap away and now shows each price too.",
+        "tryIt": "/portfolio"
+      },
+      {
+        "id": "portfolio-faster",
+        "title": "Portfolio loads faster",
+        "body": "Your real exposure, largest positions and the connections graph now open in a moment instead of after a long wait, and stay ready when you come back. Searching for a company still finds every one you own through your funds.",
+        "tryIt": "/portfolio"
+      }
+    ]
+  },
+  {
     "version": "0.21.0",
     "title": "Alerts that pop up",
     "features": [

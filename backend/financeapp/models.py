@@ -389,6 +389,7 @@ class Quote(Base):
     average_50: Mapped[Decimal | None]
     average_200: Mapped[Decimal | None]
     trend_as_of: Mapped[date | None]  # the trading day of the last close counted
+    closes: Mapped[list | None] = mapped_column(JSONB)  # a month of daily closes, oldest first (the sparkline)
 
 
 class AlertRule(Base):

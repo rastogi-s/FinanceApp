@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
+import { forgetPortfolio } from "@/lib/portfolio";
 
 export type Budget = { category: string; category_id?: number; kind: "fixed" | "flexible"; limit_cents: number; spent_cents: number };
 export type Transaction = {
@@ -101,6 +102,7 @@ function refreshIfStale() {
 /** Forget the household so the next page shows fresh numbers (after a sync, an import or a recategorize). */
 export function resetHousehold(reload = false) {
   cached = null;
+  forgetPortfolio();
   if (reload) listeners.forEach((l) => l());
 }
 

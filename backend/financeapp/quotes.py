@@ -218,6 +218,9 @@ def last_close_day(t: datetime) -> date:
     return d
 
 
+SPARK_DAYS = 22  # about a month of trading days
+
+
 def _average(closes: list[Decimal], n: int) -> Decimal | None:
     return (sum(closes[-n:]) / n).quantize(Decimal("0.0001")) if len(closes) >= n else None
 
@@ -254,6 +257,7 @@ def yahoo_trend(client: httpx.Client, symbol: str, through: date) -> dict | None
         "average_50": _average(closes, 50),
         "average_200": _average(closes, 200),
         "trend_as_of": days[-1][0],
+        "closes": [float(c) for c in closes[-SPARK_DAYS:]],
     }
 
 
