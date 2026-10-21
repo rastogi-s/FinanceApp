@@ -11,8 +11,16 @@
 #   ./update.sh --backup            only make a backup
 #   ./update.sh --restore FILE KEY  restore a backup (KEY is the private age key kept off the server)
 #
-# Run it from the folder with docker-compose.yml and .env. For hands-off updates, install the systemd timer in
-# deploy/systemd (see README). Needs: docker with compose, age, and cosign (unless VERIFY_SIGNATURE=false in .env).
+# Run it from the folder with docker-compose.yml and .env. Needs: docker with compose, age, and cosign (unless
+# VERIFY_SIGNATURE=false in .env).
+#
+# The server files (this script, docker-compose.yml, env.example and the systemd units) ship inside the signed image,
+# so each update refreshes them from the image whose signature it just checked.
+#
+# "Update now" in the app: run as root once (sudo ./update.sh) and it installs financeapp-update.path, which runs this
+# script when the app leaves a request in update-request/. That folder is the only thing the app can write to; it
+# reads how the update went from update-status/, which it can't write to. The request is deleted, never read: this
+# script installs the latest signed release or nothing, whoever asked.
 set -Eeuo pipefail
 umask 077
 cd "$(dirname "$(readlink -f "$0")")"
@@ -20,13 +28,35 @@ cd "$(dirname "$(readlink -f "$0")")"
 BACKUP_DIR=${BACKUP_DIR:-backups}
 KEEP_BACKUPS=${KEEP_BACKUPS:-14}
 HEALTH_TIMEOUT=${HEALTH_TIMEOUT:-180}
+REQUEST_DIR=update-request
+STATUS_DIR=update-status
+APP_UID=10001 # the app's user in the image (see Dockerfile)
+UNITS=(financeapp-update.service financeapp-update.timer financeapp-update.path)
 SIGNER='^https://github\.com/rastogi-s/(FinanceApp|financeapp)/\.github/workflows/release\.yml@refs/(heads/main|tags/v.+)$'
 ISSUER=https://token.actions.githubusercontent.com
 
 say() { printf '%s  %s\n' "$(date '+%F %T')" "$*"; }
 die() {
   say "ERROR: $*" >&2
+  report failed "${CURRENT:-}" "${NEW:-}"
   exit 1
+}
+
+# How the update is going, for the app (update-status/status.json). Only for updates, not --check, --backup or
+# --restore. finish() reports the last word, after which nothing more is written.
+REPORT=false
+clean() { printf '%s' "$1" | tr -cd '0-9A-Za-z.-' | head -c 40; }
+report() { # state [from] [to]
+  $REPORT && [ -d "$STATUS_DIR" ] && [ -w "$STATUS_DIR" ] || return 0
+  local tmp
+  tmp=$(mktemp "$STATUS_DIR/.status.XXXXXX")
+  printf '{"state":"%s","from":"%s","to":"%s","at":"%s"}\n' "$1" "$(clean "${2:-}")" "$(clean "${3:-}")" \
+    "$(date -u +%FT%TZ)" >"$tmp"
+  chmod 644 "$tmp" && mv -f "$tmp" "$STATUS_DIR/status.json"
+}
+finish() {
+  report "$@"
+  REPORT=false
 }
 
 # .env is read as data, never executed.
@@ -57,8 +87,22 @@ fi
 # .env is the one source of truth for what runs: a value exported in the shell would silently override it.
 unset FINANCEAPP_IMAGE FINANCEAPP_VERSION
 
+UPDATING=false
+case "${1:-}" in
+  "" | [0-9]*)
+    UPDATING=true
+    # Take any "Update now" request first, before the lock: this run is the answer to it, and a request left behind
+    # while another update holds the lock would only start this again. rm -r never follows a planted symlink.
+    rm -rf -- "${REQUEST_DIR:?}/request"
+    ;;
+esac
+
 exec 9>.update.lock
 flock -n 9 || die "another update is already running"
+if $UPDATING; then
+  REPORT=true
+  trap 'finish failed "${CURRENT:-}" "${NEW:-}"' ERR
+fi
 
 IMAGE=$(env_get FINANCEAPP_IMAGE)
 IMAGE=${IMAGE:-ghcr.io/rastogi-s/financeapp}
@@ -73,6 +117,78 @@ running_version() {
   if [ -n "$id" ]; then
     docker inspect -f '{{ index .Config.Labels "org.opencontainers.image.version" }}' "$id" 2>/dev/null || true
   fi
+}
+
+# Copies the server files out of an image without running it. Older images don't carry them; then nothing changes.
+# The compose file in use before is kept as docker-compose.yml.prev, for going back.
+sync_server_files() { # image
+  local cid tmp f mode changed=""
+  COMPOSE_CHANGED=false
+  tmp=$(mktemp -d .server.XXXXXX)
+  cid=$(docker create "$1")
+  if ! docker cp "$cid:/app/server/." "$tmp/" >/dev/null 2>&1; then
+    docker rm -f "$cid" >/dev/null
+    rm -rf "$tmp"
+    return 0
+  fi
+  docker rm -f "$cid" >/dev/null
+  for f in docker-compose.yml update.sh env.example "${UNITS[@]}"; do
+    if [ ! -f "$tmp/$f" ] || cmp -s "$tmp/$f" "$f"; then continue; fi
+    [ "$f" = docker-compose.yml ] && [ -f "$f" ] && cp -p "$f" "$f.prev"
+    mode=644
+    [ "$f" = update.sh ] && mode=755
+    # A new file moved into place: this script, already running, keeps reading its old copy.
+    install -m "$mode" "$tmp/$f" "$f.new" && mv -f "$f.new" "$f"
+    changed="$changed $f"
+  done
+  rm -rf "$tmp"
+  [ -z "$changed" ] || say "Updated the server files from the image:$changed"
+  [[ $changed == *docker-compose.yml* ]] && COMPOSE_CHANGED=true
+  return 0
+}
+
+# Sets up the two folders shared with the app and, as root with systemd, the units for this folder. Says what's
+# missing otherwise. Writes update-status/agent.json so the app knows whether "Update now" will be heard.
+setup_in_app_updates() {
+  local dir=$PWD u tmp changed=false in_app=false nightly=false
+  mkdir -p "$STATUS_DIR" "$REQUEST_DIR"
+  # The app reads this folder (mounted read-only) but must never write to it: it belongs to whoever runs this.
+  [ ! -O "$STATUS_DIR" ] || chmod 755 "$STATUS_DIR"
+  if [ "$(id -u)" = 0 ]; then
+    chown "$APP_UID:$APP_UID" "$REQUEST_DIR"
+    chmod 700 "$REQUEST_DIR"
+    if [ -d /run/systemd/system ] && [[ $dir =~ ^[A-Za-z0-9/._-]+$ ]]; then
+      for u in "${UNITS[@]}"; do
+        [ -f "$u" ] || continue
+        tmp=$(mktemp .unit.XXXXXX)
+        sed "s|/opt/financeapp|$dir|g" "$u" >"$tmp"
+        if cmp -s "$tmp" "/etc/systemd/system/$u"; then
+          rm -f "$tmp"
+        else
+          install -m 644 "$tmp" "/etc/systemd/system/$u" && rm -f "$tmp"
+          changed=true
+        fi
+      done
+      if $changed; then
+        systemctl daemon-reload
+        ! systemctl is-active --quiet financeapp-update.path || systemctl restart financeapp-update.path
+      fi
+      if [ -f /etc/systemd/system/financeapp-update.path ] && ! systemctl is-enabled --quiet financeapp-update.path; then
+        systemctl enable --now --quiet financeapp-update.path
+        say "Turned on \"Update now\" in the app (financeapp-update.path)."
+      fi
+    fi
+  fi
+  if command -v systemctl >/dev/null; then
+    systemctl is-enabled --quiet financeapp-update.path 2>/dev/null &&
+      [ "$(stat -c %u "$REQUEST_DIR")" = "$APP_UID" ] && in_app=true
+    systemctl is-enabled --quiet financeapp-update.timer 2>/dev/null && nightly=true
+  fi
+  [ -w "$STATUS_DIR" ] || return 0
+  tmp=$(mktemp "$STATUS_DIR/.agent.XXXXXX")
+  printf '{"in_app":%s,"nightly":%s}\n' "$in_app" "$nightly" >"$tmp"
+  chmod 644 "$tmp" && mv -f "$tmp" "$STATUS_DIR/agent.json"
+  $in_app || say "To update from the app too, run this once: sudo ./update.sh"
 }
 
 verify_signature() {
@@ -156,23 +272,36 @@ esac
 TARGET=latest
 [[ ${1:-} =~ ^[0-9] ]] && TARGET=$1
 CURRENT=$(running_version)
+NEW=""
+report checking "$CURRENT"
 
 say "Fetching $IMAGE:$TARGET"
 docker pull -q "$IMAGE:$TARGET" >/dev/null || die "couldn't pull $IMAGE:$TARGET (is the server logged in to ghcr.io? see README)"
 NEW=$(image_version "$IMAGE:$TARGET")
 [ -n "$NEW" ] || die "$IMAGE:$TARGET has no version label"
 
-if [ "$NEW" = "$CURRENT" ]; then
-  say "Already on $CURRENT. Nothing to do."
+if [ "${1:-}" = "--check" ]; then
+  if [ "$NEW" = "$CURRENT" ]; then say "Already on $CURRENT. Nothing to do."; else say "Update available: ${CURRENT:-nothing running} -> $NEW"; fi
   exit 0
 fi
-if [ "${1:-}" = "--check" ]; then
-  say "Update available: ${CURRENT:-nothing running} -> $NEW"
+if [ "$NEW" = "$CURRENT" ]; then
+  # Still bring the server files and the in-app updates setup up to date, from the image that's running.
+  sync_server_files "$IMAGE:$NEW"
+  setup_in_app_updates
+  if $COMPOSE_CHANGED; then
+    docker compose --progress quiet up -d --wait --wait-timeout "$HEALTH_TIMEOUT" app
+    say "Restarted $CURRENT with the new docker-compose.yml."
+  fi
+  say "Already on $CURRENT. Nothing to do."
+  finish current "$CURRENT" "$NEW"
   exit 0
 fi
 
 verify_signature "$IMAGE:$TARGET"
 docker tag "$IMAGE:$TARGET" "$IMAGE:$NEW"
+sync_server_files "$IMAGE:$NEW"
+setup_in_app_updates
+report installing "$CURRENT" "$NEW"
 
 LAST_BACKUP=""
 if [ -n "$CURRENT" ]; then
@@ -185,6 +314,8 @@ say "Starting $NEW (was ${CURRENT:-nothing})"
 env_set FINANCEAPP_VERSION "$NEW"
 if docker compose --progress quiet up -d --wait --wait-timeout "$HEALTH_TIMEOUT" app && healthy "$NEW"; then
   say "Updated to $NEW. It's healthy on http://127.0.0.1:$APP_PORT"
+  finish "done" "$CURRENT" "$NEW"
+  rm -f docker-compose.yml.prev
   # Keep this version and the one before it (for going back); remove older ones.
   docker image ls "$IMAGE" --format '{{.Tag}}' | grep -vxF -e "$NEW" -e "${CURRENT:-$NEW}" -e latest -e '<none>' |
     xargs -r -I{} docker image rm "$IMAGE:{}" >/dev/null 2>&1 || true
@@ -199,7 +330,11 @@ if [ -z "$CURRENT" ]; then
 fi
 say "Going back to $CURRENT"
 env_set FINANCEAPP_VERSION "$CURRENT"
+if $COMPOSE_CHANGED && [ -f docker-compose.yml.prev ]; then
+  mv -f docker-compose.yml.prev docker-compose.yml
+fi
 if ! { docker compose --progress quiet up -d --wait --wait-timeout "$HEALTH_TIMEOUT" app && healthy "$CURRENT"; }; then
   die "$CURRENT didn't come back healthy either. The backup from before the update is $LAST_BACKUP"
 fi
+finish rolled_back "$CURRENT" "$NEW"
 die "update to $NEW failed and $CURRENT is running again. If $NEW changed the database, restore $LAST_BACKUP with ./update.sh --restore"

@@ -124,6 +124,9 @@ jobs:
           cp .env.example release/env.example
           cp deploy/systemd/* release/
           (cd release && sha256sum -- * > SHA256SUMS.txt)
+          # The app reads this to show a new version's notes before it's installed (updates.py). Not a server file,
+          # so not in SHA256SUMS.txt.
+          cp backend/financeapp/data/whats-new.json release/
       - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           tag_name: ${{ env.TAG }}

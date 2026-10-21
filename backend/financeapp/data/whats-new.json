@@ -1,6 +1,6 @@
 [
   {
-    "version": "0.11.0",
+    "version": "0.12.0",
     "title": "A heads-up before a budget goes over",
     "features": [
       {
@@ -8,6 +8,24 @@
         "title": "Where the month is heading",
         "body": "Each budget line now says where it's heading by month-end, like \"on track to spend $520, $70 over\". Bills that haven't come yet are counted once at their usual amount; everyday spending follows this month's pace. When a category is on pace to go over, your phone gets a heads-up, once a month per category, with no amounts on the lock screen.",
         "tryIt": "/budget"
+      }
+    ]
+  },
+  {
+    "version": "0.11.0",
+    "title": "Updates, right from the app",
+    "features": [
+      {
+        "id": "update-check",
+        "title": "Know when there's a new version",
+        "body": "A small card tells you when a new version is out, with what's in it, and Settings shows the version you're on and when it last looked. Tap Not now and it waits for the next one.",
+        "tryIt": "/settings"
+      },
+      {
+        "id": "update-now",
+        "title": "Update now, safely",
+        "body": "The owner can install a new version from the app. The server still does the work: it checks the new version's signature, backs up first, and goes back on its own if the new version doesn't start cleanly. The app never gets any control over the server.",
+        "tryIt": "/settings"
       }
     ]
   },

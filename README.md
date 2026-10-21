@@ -71,7 +71,7 @@ On a small Linux VM (Debian or Ubuntu):
 
    ```bash
    sudo mkdir -p /opt/financeapp && sudo chown $USER /opt/financeapp && cd /opt/financeapp
-   for f in docker-compose.yml update.sh env.example financeapp-update.service financeapp-update.timer SHA256SUMS.txt; do
+   for f in docker-compose.yml update.sh env.example financeapp-update.service financeapp-update.timer financeapp-update.path SHA256SUMS.txt; do
      curl -fsSLO https://github.com/rastogi-s/FinanceApp/releases/latest/download/$f
    done
    sha256sum -c SHA256SUMS.txt && chmod +x update.sh
@@ -80,7 +80,7 @@ On a small Linux VM (Debian or Ubuntu):
 3. `cp env.example .env && chmod 600 .env`, then fill it in. Make the backup key **on your own computer**:
    `age-keygen -o finance-backup.key`, put the printed public key in `BACKUP_AGE_RECIPIENT`, and keep
    `finance-backup.key` in your password manager, not on the server.
-4. `./update.sh`, which installs the latest release and checks it is healthy.
+4. `sudo ./update.sh`, which installs the latest release, checks it is healthy, and sets up "Update now" in the app.
 5. `sudo tailscale serve --bg --https=443 http://127.0.0.1:8080`, then add the `*.ts.net` name it prints to
    `ALLOWED_HOSTS` in `.env`, set `HSTS=true`, and run `docker compose up -d`.
 6. Open that address on your phone. It asks for the **setup code**, which the app prints in its log on first
@@ -104,15 +104,22 @@ backup of the database, starts the new version, waits for `/health` to report it
 previous version if it doesn't. `./update.sh --check` only reports whether there is an update, and
 `./update.sh 1.4.2` installs a specific version, which is also how to go back.
 
-For hands-off updates every night around 4 AM:
+Each update also refreshes `update.sh`, `docker-compose.yml`, `env.example` and the systemd units from inside
+the image whose signature it just checked, so the server files never fall behind.
+
+**From the app.** Settings shows when a new version is out (the app asks GitHub every few hours) with its notes,
+and the owner gets an **Update now** button. Run `sudo ./update.sh` once to turn it on: it installs
+`financeapp-update.path`, a systemd unit that runs `update.sh` when the app asks. The app still never touches
+Docker. It can only leave an empty file in `update-request/`, which `update.sh` deletes without reading before
+installing the latest signed release (or nothing), and it can only read `update-status/` to show how it went.
+`UPDATE_CHECK=false` in `.env` stops the check.
+
+**Every night around 4 AM**, hands-off:
 
 ```bash
-sudo cp /opt/financeapp/financeapp-update.* /etc/systemd/system/
-sudo systemctl enable --now financeapp-update.timer
-journalctl -u financeapp-update      # what happened
+sudo systemctl enable --now financeapp-update.timer   # sudo ./update.sh installed it
+journalctl -u financeapp-update                        # what happened, for either way of updating
 ```
-
-The app itself never touches Docker; it only shows what's new after an update.
 
 ### Backups
 

@@ -72,6 +72,13 @@ class Settings(BaseSettings):
     sec_contact_email: str = ""
     lookthrough_enabled: bool = True
 
+    # Updates (see updates.py). The app asks GitHub for the latest release every few hours; UPDATE_CHECK=false never
+    # asks. "Update now" leaves a request in the first folder for the server's updater; the updater reports back in
+    # the second, which the app only reads. Both are mounted by docker-compose.yml.
+    update_check: bool = True
+    update_request_dir: Path = Path("/app/update-request")
+    update_status_dir: Path = Path("/app/update-status")
+
     @property
     def allowed_host_list(self) -> list[str]:
         return [h.strip() for h in self.allowed_hosts.split(",") if h.strip()]
