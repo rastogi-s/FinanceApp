@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { ChevronRight, LifeBuoy, Pencil, RotateCcw, Scissors, Telescope, TrendingUp } from "lucide-react";
+import { ChevronRight, Landmark, LifeBuoy, Pencil, RotateCcw, Scissors, Telescope, TrendingUp } from "lucide-react";
 import { PlanChart } from "@/components/plan-chart";
 import { Money, formatMoney } from "@/components/money";
 import { Notice, PageTitle } from "@/components/page";
@@ -152,6 +152,7 @@ function PlanView({ p, onSaved }: { p: Linked; onSaved: (p: PlanState) => void }
           seen any pay yet.
         </Notice>
         <Emergency e={i.emergency} />
+        <TaxesLink />
         <Ideas p={p} s={s} />
         <About open={aboutOpen} onOpenChange={setAboutOpen} p={p} save={save} saving={saving} askSavings />
       </div>
@@ -385,6 +386,7 @@ function PlanView({ p, onSaved }: { p: Linked; onSaved: (p: PlanState) => void }
 
       <Ideas p={p} s={s} />
       <Emergency e={i.emergency} />
+      <TaxesLink />
       <About open={aboutOpen} onOpenChange={setAboutOpen} p={p} save={save} saving={saving} />
     </div>
   );
@@ -676,6 +678,25 @@ function Emergency({ e }: { e: PlanInputs["emergency"] }) {
           <p className="text-xs text-muted-foreground">
             <Money cents={e.have_cents} /> of <Money cents={e.target_cents} />
           </p>
+        </CardContent>
+      </Card>
+    </Link>
+  );
+}
+
+function TaxesLink() {
+  return (
+    <Link href="/taxes" className="block">
+      <Card className="transition-colors hover:bg-muted/40">
+        <CardHeader>
+          <CardTitle>Taxes this year</CardTitle>
+          <Landmark className="size-4 text-muted-foreground" aria-hidden />
+        </CardHeader>
+        <CardContent className="flex items-center gap-3">
+          <p className="flex-1 text-sm">
+            What you&apos;ll owe or get back at filing time, from your pay stubs and accounts, and what to change on your W-4.
+          </p>
+          <ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden />
         </CardContent>
       </Card>
     </Link>

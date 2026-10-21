@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRef, useState } from "react";
-import { Check, ChevronRight, FileUp } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, FileUp } from "lucide-react";
 import { type AIOffer, AIOfferCard, shrinkPicture } from "@/components/ai-offer";
 import { Money, formatMoney } from "@/components/money";
 import { Button } from "@/components/ui/button";
@@ -278,6 +278,18 @@ const FREQUENCIES = [
 ] as const;
 export const FREQUENCY_LABEL: Record<string, string> = Object.fromEntries(FREQUENCIES);
 
+export type StubDetail = { this: Partial<Record<string, number>>; ytd: Partial<Record<string, number>> };
+const SPLIT = [
+  ["federal", "Federal income tax"],
+  ["state", "State income tax"],
+  ["social_security", "Social Security"],
+  ["medicare", "Medicare"],
+  ["retirement", "Pre-tax 401(k)"],
+  ["hsa", "HSA"],
+] as const;
+type SplitKey = (typeof SPLIT)[number][0];
+const BLANK_SPLIT = Object.fromEntries(SPLIT.map(([k]) => [k, ""])) as Record<SplitKey, string>;
+
 type Read = {
   date: string | null;
   period_start: string | null;
@@ -288,6 +300,7 @@ type Read = {
   savings_cents: number | null;
   net_cents: number | null;
   employer_match_cents: number | null;
+  detail?: StubDetail;
   warnings: string[];
 };
 type ReadAnswer = Read | { ai_offer: AIOffer };
@@ -323,6 +336,10 @@ function PaycheckForm({
         }
       : { gross: "", taxes: "", savings: "", net: "", match: "" },
   );
+  // For the Taxes page: the stub's taxes by kind (typed or read), and its year-to-date column when read.
+  const [split, setSplit] = useState<Record<SplitKey, string>>(BLANK_SPLIT);
+  const [readDetail, setReadDetail] = useState<StubDetail | null>(null);
+  const [splitOpen, setSplitOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [reading, setReading] = useState(false);
   const [read, setRead] = useState<{ name: string; warnings: string[] } | null>(null);
@@ -354,6 +371,10 @@ function PaycheckForm({
         net: amount(r.net_cents),
         match: r.employer_match_cents ? dollars(r.employer_match_cents) : "",
       });
+      setReadDetail(r.detail ?? null);
+      setSplit(
+        Object.fromEntries(SPLIT.map(([k]) => [k, r.detail?.this[k] !== undefined ? dollars(r.detail.this[k]!) : ""])) as Record<SplitKey, string>,
+      );
       if (r.date) setDate(r.date);
       if (r.frequency) setFrequency(r.frequency);
       setPeriod({ start: r.period_start, end: r.period_end });
@@ -373,7 +394,12 @@ function PaycheckForm({
     net: parseDollars(values.net),
     match: parseDollars(values.match || "0"),
   };
-  const complete = Object.values(cents).every((v) => v !== null && v >= 0) && (cents.gross ?? 0) > 0;
+  const splitCents = Object.fromEntries(SPLIT.map(([k]) => [k, split[k].trim() ? parseDollars(split[k]) : undefined])) as Record<
+    SplitKey,
+    number | null | undefined
+  >;
+  const splitBad = Object.values(splitCents).some((v) => v === null || (v !== undefined && v < 0));
+  const complete = Object.values(cents).every((v) => v !== null && v >= 0) && (cents.gross ?? 0) > 0 && !splitBad;
   const other = complete ? cents.gross! - cents.taxes! - cents.savings! - cents.net! : null;
 
   const save = async () => {
@@ -392,6 +418,10 @@ function PaycheckForm({
         savings_cents: cents.savings,
         net_cents: cents.net,
         employer_match_cents: cents.match,
+        detail: {
+          this: { ...readDetail?.this, ...Object.fromEntries(Object.entries(splitCents).filter(([, v]) => v !== undefined)) },
+          ytd: readDetail?.ytd ?? {},
+        },
       });
       toast("Pay stub saved. The savings rate now uses gross pay.");
       onClose();
@@ -515,6 +545,39 @@ function PaycheckForm({
       {field("savings", "Saved before pay", "401(k), HSA and ESPP contributions.")}
       {field("net", "Take-home pay", "What landed in the bank.")}
       {field("match", "Employer match (optional)", "Only counted if you turn it on under the savings rate.")}
+      <div className="rounded-2xl border">
+        <button
+          type="button"
+          aria-expanded={splitOpen}
+          onClick={() => setSplitOpen(!splitOpen)}
+          className="flex w-full items-center gap-3 px-4 py-3 text-left"
+        >
+          <span className="min-w-0 flex-1">
+            <span className="block text-sm font-medium">Taxes by kind (optional)</span>
+            <span className="block text-xs text-muted-foreground">
+              {Object.values(splitCents).some((v) => v !== undefined)
+                ? "Filled in. The Taxes page uses these exact numbers."
+                : "Federal, state, Social Security, Medicare. Without them, the Taxes page splits the total by the usual rates."}
+            </span>
+          </span>
+          <ChevronDown className={cn("size-4 shrink-0 text-muted-foreground transition-transform", splitOpen && "rotate-180")} aria-hidden />
+        </button>
+        {splitOpen && (
+          <div className="grid grid-cols-2 gap-3 px-4 pb-4">
+            {SPLIT.map(([key, label]) => (
+              <Field key={key} id={`pay-split-${key}`} label={label} error={splitCents[key] === null ? "Type an amount." : null}>
+                <Input
+                  inputMode="decimal"
+                  autoComplete="off"
+                  placeholder="0.00"
+                  value={split[key]}
+                  onChange={(e) => setSplit((v) => ({ ...v, [key]: e.target.value }))}
+                />
+              </Field>
+            ))}
+          </div>
+        )}
+      </div>
       {other !== null && (
         <p
           className={cn("rounded-xl px-4 py-3 text-sm", other < 0 ? "bg-negative/10 text-negative" : "bg-muted text-muted-foreground")}

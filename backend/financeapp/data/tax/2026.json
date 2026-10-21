@@ -1,0 +1,442 @@
+{
+  "year": 2026,
+  "checked": "2026-10-21",
+  "federal": {
+    "sources": [
+      {
+        "title": "IRS Rev. Proc. 2025-32 (2026 brackets, standard deduction, capital gains breakpoints)",
+        "url": "https://www.irs.gov/pub/irs-drop/rp-25-32.pdf"
+      },
+      {
+        "title": "SSA: 2026 Social Security wage base",
+        "url": "https://www.ssa.gov/oact/cola/cbb.html"
+      },
+      {
+        "title": "IRS Notice 2025-67 (2026 401(k) limits)",
+        "url": "https://www.irs.gov/pub/irs-drop/n-25-67.pdf"
+      },
+      {
+        "title": "IRS Form 8959 (Additional Medicare Tax) and Form 8960 (Net Investment Income Tax)",
+        "url": "https://www.irs.gov/forms-pubs/about-form-8960"
+      },
+      {
+        "title": "IRS: Child Tax Credit",
+        "url": "https://www.irs.gov/credits-deductions/individuals/child-tax-credit"
+      },
+      {
+        "title": "IRS Form 1040-ES (estimated tax, safe harbor)",
+        "url": "https://www.irs.gov/forms-pubs/about-form-1040-es"
+      }
+    ],
+    "standard_deduction": {
+      "single": 16100,
+      "mfj": 32200,
+      "mfs": 16100,
+      "hoh": 24150
+    },
+    "brackets": {
+      "single": [
+        [
+          12400,
+          0.1
+        ],
+        [
+          50400,
+          0.12
+        ],
+        [
+          105700,
+          0.22
+        ],
+        [
+          201775,
+          0.24
+        ],
+        [
+          256225,
+          0.32
+        ],
+        [
+          640600,
+          0.35
+        ],
+        [
+          null,
+          0.37
+        ]
+      ],
+      "mfj": [
+        [
+          24800,
+          0.1
+        ],
+        [
+          100800,
+          0.12
+        ],
+        [
+          211400,
+          0.22
+        ],
+        [
+          403550,
+          0.24
+        ],
+        [
+          512450,
+          0.32
+        ],
+        [
+          768700,
+          0.35
+        ],
+        [
+          null,
+          0.37
+        ]
+      ],
+      "mfs": [
+        [
+          12400,
+          0.1
+        ],
+        [
+          50400,
+          0.12
+        ],
+        [
+          105700,
+          0.22
+        ],
+        [
+          201775,
+          0.24
+        ],
+        [
+          256225,
+          0.32
+        ],
+        [
+          384350,
+          0.35
+        ],
+        [
+          null,
+          0.37
+        ]
+      ],
+      "hoh": [
+        [
+          17700,
+          0.1
+        ],
+        [
+          67450,
+          0.12
+        ],
+        [
+          105700,
+          0.22
+        ],
+        [
+          201750,
+          0.24
+        ],
+        [
+          256200,
+          0.32
+        ],
+        [
+          640600,
+          0.35
+        ],
+        [
+          null,
+          0.37
+        ]
+      ]
+    },
+    "capital_gains": {
+      "single": [
+        [
+          49450,
+          0.0
+        ],
+        [
+          545500,
+          0.15
+        ],
+        [
+          null,
+          0.2
+        ]
+      ],
+      "mfj": [
+        [
+          98900,
+          0.0
+        ],
+        [
+          613700,
+          0.15
+        ],
+        [
+          null,
+          0.2
+        ]
+      ],
+      "mfs": [
+        [
+          49450,
+          0.0
+        ],
+        [
+          306850,
+          0.15
+        ],
+        [
+          null,
+          0.2
+        ]
+      ],
+      "hoh": [
+        [
+          66200,
+          0.0
+        ],
+        [
+          579600,
+          0.15
+        ],
+        [
+          null,
+          0.2
+        ]
+      ]
+    },
+    "capital_loss_limit": {
+      "single": 3000,
+      "mfj": 3000,
+      "mfs": 1500,
+      "hoh": 3000
+    },
+    "niit": {
+      "rate": 0.038,
+      "threshold": {
+        "single": 200000,
+        "mfj": 250000,
+        "mfs": 125000,
+        "hoh": 200000
+      }
+    },
+    "social_security": {
+      "rate": 0.062,
+      "wage_base": 184500
+    },
+    "medicare": {
+      "rate": 0.0145,
+      "additional_rate": 0.009,
+      "additional_threshold": {
+        "single": 200000,
+        "mfj": 250000,
+        "mfs": 125000,
+        "hoh": 200000
+      },
+      "withholding_threshold": 200000
+    },
+    "child_tax_credit": {
+      "per_child": 2200,
+      "other_dependent": 500,
+      "phaseout_start": {
+        "single": 200000,
+        "mfj": 400000,
+        "mfs": 200000,
+        "hoh": 200000
+      },
+      "phaseout_per_1000": 50
+    },
+    "supplemental_withholding_rate": 0.22,
+    "limits": {
+      "401k": 24500,
+      "401k_catch_up": 8000,
+      "hsa_self": 4400,
+      "hsa_family": 8750
+    },
+    "estimated_due_dates": [
+      "2026-04-15",
+      "2026-06-15",
+      "2026-09-15",
+      "2027-01-15"
+    ],
+    "safe_harbor": {
+      "current_year": 0.9,
+      "prior_year": 1.0,
+      "prior_year_high_income": 1.1,
+      "high_income_agi": {
+        "single": 150000,
+        "mfj": 150000,
+        "mfs": 75000,
+        "hoh": 150000
+      }
+    },
+    "penalty_floor": 1000
+  },
+  "states": {
+    "NC": {
+      "name": "North Carolina",
+      "sources": [
+        {
+          "title": "N.C. Gen. Stat. 105-153.7 (individual income tax rate: 3.99% for 2026)",
+          "url": "https://www.ncleg.gov/EnactedLegislation/Statutes/HTML/BySection/Chapter_105/GS_105-153.7.html"
+        },
+        {
+          "title": "N.C. Gen. Stat. 105-153.5 (standard deduction and child deduction)",
+          "url": "https://www.ncleg.gov/EnactedLegislation/Statutes/HTML/BySection/Chapter_105/GS_105-153.5.html"
+        },
+        {
+          "title": "NCDOR: North Carolina child deduction",
+          "url": "https://www.ncdor.gov/taxes-forms/individual-income-tax/north-carolina-child-deduction"
+        },
+        {
+          "title": "NCDOR: individual income tax (NC-4 withholding, NC-40 estimated payments)",
+          "url": "https://www.ncdor.gov/taxes-forms/individual-income-tax"
+        }
+      ],
+      "rate": 0.0399,
+      "standard_deduction": {
+        "single": 12750,
+        "mfj": 25500,
+        "mfs": 12750,
+        "hoh": 19125
+      },
+      "child_deduction": {
+        "mfj": [
+          [
+            40000,
+            3000
+          ],
+          [
+            60000,
+            2500
+          ],
+          [
+            80000,
+            2000
+          ],
+          [
+            100000,
+            1500
+          ],
+          [
+            120000,
+            1000
+          ],
+          [
+            140000,
+            500
+          ],
+          [
+            null,
+            0
+          ]
+        ],
+        "hoh": [
+          [
+            30000,
+            3000
+          ],
+          [
+            45000,
+            2500
+          ],
+          [
+            60000,
+            2000
+          ],
+          [
+            75000,
+            1500
+          ],
+          [
+            90000,
+            1000
+          ],
+          [
+            105000,
+            500
+          ],
+          [
+            null,
+            0
+          ]
+        ],
+        "single": [
+          [
+            20000,
+            3000
+          ],
+          [
+            30000,
+            2500
+          ],
+          [
+            40000,
+            2000
+          ],
+          [
+            50000,
+            1500
+          ],
+          [
+            60000,
+            1000
+          ],
+          [
+            70000,
+            500
+          ],
+          [
+            null,
+            0
+          ]
+        ],
+        "mfs": [
+          [
+            20000,
+            3000
+          ],
+          [
+            30000,
+            2500
+          ],
+          [
+            40000,
+            2000
+          ],
+          [
+            50000,
+            1500
+          ],
+          [
+            60000,
+            1000
+          ],
+          [
+            70000,
+            500
+          ],
+          [
+            null,
+            0
+          ]
+        ]
+      },
+      "supplemental_withholding_rate": 0.0409,
+      "penalty_floor": 1000,
+      "notes": [
+        "North Carolina starts from federal adjusted gross income and taxes capital gains and dividends at the same flat rate as wages.",
+        "North Carolina's itemized deductions differ from federal ones (mortgage interest and property tax together are capped at $20,000). Type your own amount if you itemize."
+      ]
+    }
+  }
+}

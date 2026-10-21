@@ -54,6 +54,29 @@ def test_reads_an_adp_style_stub():
         "savings_cents": 60_000,  # 401(k) + HSA; medical is an "other deduction"
         "net_cents": 265_100,
         "employer_match_cents": 22_500,
+        "detail": {
+            "this": {
+                "federal": 54_000,
+                "social_security": 27_900,
+                "medicare": 6_525,
+                "state": 19_075,
+                "state_other": 5_400,  # CA SDI isn't income tax
+                "retirement": 45_000,
+                "hsa": 15_000,
+                "benefits": 12_000,  # medical, taken before tax
+            },
+            "ytd": {
+                "gross": 8_550_000,
+                "federal": 1_026_000,
+                "social_security": 530_100,
+                "medicare": 123_975,
+                "state": 362_425,
+                "state_other": 102_600,
+                "retirement": 855_000,
+                "hsa": 285_000,
+                "benefits": 228_000,
+            },
+        },
         "warnings": [],
     }
 
@@ -67,6 +90,25 @@ def test_reads_a_gusto_style_stub_with_a_tax_total():
         15_000,
         232_050,
     )
+
+
+def test_roth_rsu_and_taxable_wage_lines_are_sorted_out():
+    rows = [
+        *GUSTO[:3],
+        [(50, "RSU Vest"), (350, "1,000.00"), (450, "12,000.00")],
+        [(50, "Federal Taxable Wages"), (350, "3,850.00"), (450, "70,000.00")],  # a wage total, not a tax
+        *GUSTO[3:],
+    ]
+    stub = paystub.read(pdf(rows))
+    assert stub.taxes_cents == 52_950
+    assert stub.detail == {
+        "stock": 100_000,
+        "federal": 30_000,
+        "social_security": 18_600,
+        "medicare": 4_350,
+        "roth": 15_000,
+    }
+    assert stub.ytd == {"gross": 5_700_000, "stock": 1_200_000}
 
 
 def test_frequency_from_words_wins_over_the_period():
