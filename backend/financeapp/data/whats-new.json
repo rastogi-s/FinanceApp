@@ -1,6 +1,6 @@
 [
   {
-    "version": "0.11.0",
+    "version": "0.12.0",
     "title": "A plan that starts from your own numbers",
     "features": [
       {
@@ -8,6 +8,24 @@
         "title": "Every plan number, worked out for you",
         "body": "Monthly savings now comes from your pay stubs (take-home plus 401(k) and HSA) against a typical month of spending, even with only one recent stub; the market return comes from your own mix of stocks, bonds and cash; and spending later comes from your real transactions. Each slider says where its number came from, and \"Use it\" takes you back after a what-if.",
         "tryIt": "/plan"
+      }
+    ]
+  },
+  {
+    "version": "0.11.0",
+    "title": "Updates, right from the app",
+    "features": [
+      {
+        "id": "update-check",
+        "title": "Know when there's a new version",
+        "body": "A small card tells you when a new version is out, with what's in it, and Settings shows the version you're on and when it last looked. Tap Not now and it waits for the next one.",
+        "tryIt": "/settings"
+      },
+      {
+        "id": "update-now",
+        "title": "Update now, safely",
+        "body": "The owner can install a new version from the app. The server still does the work: it checks the new version's signature, backs up first, and goes back on its own if the new version doesn't start cleanly. The app never gets any control over the server.",
+        "tryIt": "/settings"
       }
     ]
   },

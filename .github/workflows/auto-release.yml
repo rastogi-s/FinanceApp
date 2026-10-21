@@ -37,6 +37,13 @@ jobs:
             echo "This commit is already released as $(git tag --points-at HEAD 'v*'); nothing to do."
             exit 0
           fi
+          # Two merges close together can run out of order; only the newest commit on main is released, so an
+          # older one never ends up as the latest version.
+          git fetch --quiet origin main
+          if [ "$(git rev-parse origin/main)" != "$GITHUB_SHA" ]; then
+            echo "main has moved on to $(git rev-parse --short origin/main); that push releases it."
+            exit 0
+          fi
           LAST=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
           LAST=${LAST:-v0.0.0}
           IFS=. read -r MA MI PA <<< "${LAST#v}"

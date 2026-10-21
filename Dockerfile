@@ -33,6 +33,11 @@ RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/* \
  && useradd --system --uid 10001 --no-create-home --shell /usr/sbin/nologin finance
 COPY --from=python /app/.venv /app/.venv
 COPY --from=web /web/out /app/web
+# The server files, so update.sh can refresh itself, docker-compose.yml and the systemd units from the image it just
+# checked the signature of (nothing here runs inside the container).
+COPY docker-compose.yml update.sh /app/server/
+COPY .env.example /app/server/env.example
+COPY deploy/systemd/ /app/server/
 ENV PATH=/app/.venv/bin:$PATH \
     APP_VERSION=${APP_VERSION} \
     STATIC_DIR=/app/web \
