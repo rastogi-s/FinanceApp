@@ -484,6 +484,8 @@ def _plan_inputs(today: date, net_worth: int) -> dict:
                     ("Spending", 4, -1),
                 )
             ],
+            "excluded": None,
+            "months": [],
         },
         "savings_typed": False,
         "returns": {"low": 3.5, "mid": 5.5, "high": 7.5},

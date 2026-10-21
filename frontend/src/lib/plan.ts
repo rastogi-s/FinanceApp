@@ -17,6 +17,10 @@ export type PlanInputs = {
     short: string;
     note: string;
     breakdown: { label: string; cents: number }[];
+    // Money that came in from the household's own accounts, left out (shown so it can be checked).
+    excluded: { label: string; cents: number } | null;
+    // The months averaged, one row each, so every number can be checked against the bank.
+    months: SavingsMonth[];
   };
   savings_typed: boolean;
   returns: Returns;
@@ -32,6 +36,15 @@ export type PlanInputs = {
     target_cents: number;
     have_cents: number;
   };
+};
+
+export type SavingsMonth = {
+  month: string;
+  pay_cents: number;
+  other_in_cents: number;
+  taxes_cents: number;
+  spending_cents: number;
+  moved_cents: number;
 };
 
 export type Subscription = {

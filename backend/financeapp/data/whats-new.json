@@ -1,5 +1,17 @@
 [
   {
+    "version": "0.19.0",
+    "title": "Savings that add up",
+    "features": [
+      {
+        "id": "plan-savings-stitched",
+        "title": "Pay, spending and transfers, month by month",
+        "body": "Plan's monthly savings now only averages months that every account you use has history for, so a bank that sent less history no longer looks like months with no pay. Money moved between your own accounts and card payments is left out, and a paycheck that landed uncategorized still counts as pay once a pay stub matches it. Tap See each month under the slider to check pay, other money in, spending and transfers for every month.",
+        "tryIt": "/plan"
+      }
+    ]
+  },
+  {
     "version": "0.17.0",
     "title": "Monthly savings you can check",
     "features": [

@@ -69,20 +69,42 @@ def set_preferences(db: DbSession, **changes) -> dict:
     return preferences(db)
 
 
+ACTIVE_TXNS = 20  # a bank account or card with fewer transactions than this is not in regular use
+
+
 def counted_accounts(db: DbSession) -> list[Account]:
     return list(db.scalars(select(Account).where(Account.hidden.is_(False), Account.is_authoritative.is_(True))))
 
 
 def full_months(db: DbSession, account_ids: list[int], end: date) -> list[date]:
-    """The last (up to 6) whole calendar months the transactions cover, oldest first."""
+    """The last (up to 6) whole calendar months the transactions cover, oldest first.
+
+    Banks hand over different amounts of history (one gives two years, another 90 days), so a month only counts
+    once every account in regular use has its history going back that far. Otherwise the early months would
+    have the card's spending but not the paychecks landing in checking, and look like months of no pay.
+    """
     if not account_ids:
         return []
-    first = db.scalar(select(func.min(Transaction.date)).where(Transaction.account_id.in_(account_ids)))
-    if first is None:
+    starts = db.execute(
+        select(func.min(Transaction.date), func.count(), Account.type)
+        .join(Account, Account.id == Transaction.account_id)
+        .where(Transaction.account_id.in_(account_ids))
+        .group_by(Transaction.account_id, Account.type)
+    ).all()
+    if not starts:
         return []
-    first_full = month_start(first) if first.day == 1 else add_months(first, 1)
     last_full = add_months(month_start(end), -1)
-    start = max(first_full, add_months(last_full, -(MAX_MONTHS - 1)))
+
+    def first_full(first: date) -> date:
+        return month_start(first) if first.day == 1 else add_months(first, 1)
+
+    # Pay lands in bank accounts and spending is on them and on cards; a brokerage's short history doesn't matter.
+    active = [first for first, n, kind in starts if n >= ACTIVE_TXNS and kind in ("depository", "credit")]
+    first = max(active) if active else min(first for first, *_ in starts)
+    if active and first_full(first) > last_full:  # a card opened this month: better uneven months than none
+        first = min(first for first, *_ in starts)
+    first_full_month = first_full(first)
+    start = max(first_full_month, add_months(last_full, -(MAX_MONTHS - 1)))
     months = []
     while start <= last_full:
         months.append(start)
