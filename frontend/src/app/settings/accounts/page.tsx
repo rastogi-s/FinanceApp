@@ -178,11 +178,7 @@ function Accounts() {
             />
           ))}
 
-          {data.revoked.length > 0 && (
-            <p className="px-1 text-xs text-muted-foreground">
-              {data.revoked.length} disconnected connection{data.revoked.length === 1 ? "" : "s"} kept for history.
-            </p>
-          )}
+          {data.revoked.length > 0 && <DisconnectedCard revoked={data.revoked} disabled={demo} onRemoved={changed} />}
         </div>
       )}
 
@@ -213,6 +209,77 @@ function Accounts() {
         />
       )}
     </>
+  );
+}
+
+// Links that were revoked keep their history; this is where that history can be deleted for good.
+function DisconnectedCard({
+  revoked,
+  disabled,
+  onRemoved,
+}: {
+  revoked: Connection[];
+  disabled: boolean;
+  onRemoved: () => void;
+}) {
+  const [confirming, setConfirming] = useState<number | null>(null);
+  const remove = async (c: Connection) => {
+    try {
+      await api(`/api/connections/${c.id}?delete_data=true`, { method: "DELETE" });
+      toast(`${c.institution}'s history deleted.`);
+      setConfirming(null);
+      onRemoved();
+    } catch (e) {
+      toast((e as Error).message, "error");
+    }
+  };
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Disconnected</CardTitle>
+        <p className="text-sm text-muted-foreground">No longer syncing. Their history still counts until you delete it.</p>
+      </CardHeader>
+      <CardContent className="grid grid-cols-1 gap-3">
+        {revoked.map((c) => (
+          <div key={c.id} className="grid grid-cols-1 gap-2 rounded-2xl border p-4">
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="truncate text-sm font-medium">{c.institution}</p>
+                <p className="text-xs text-muted-foreground">
+                  {PROVIDER[c.provider]} · {c.accounts.length} account{c.accounts.length === 1 ? "" : "s"}
+                </p>
+              </div>
+              {confirming !== c.id && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="text-negative hover:text-negative"
+                  onClick={() => setConfirming(c.id)}
+                  disabled={disabled}
+                >
+                  Delete history
+                </Button>
+              )}
+            </div>
+            {confirming === c.id && (
+              <div className="grid grid-cols-1 gap-2">
+                <p className="text-xs text-muted-foreground">
+                  Deletes its accounts, balances and transactions from this app. This can&apos;t be undone.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <Button size="sm" variant="destructive" onClick={() => remove(c)}>
+                    Delete everything
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => setConfirming(null)}>
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
+        ))}
+      </CardContent>
+    </Card>
   );
 }
 
