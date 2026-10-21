@@ -10,13 +10,15 @@ export type PlanInputs = {
   year: number;
   monthly_savings_cents: number | null;
   measured_savings_cents: number | null;
-  savings_months: number;
+  // Where the app's own number came from: true savings rate months, pay stubs, take-home deposits, the last 90 days.
+  savings_source: { kind: "savings_rate" | "pay_stubs" | "take_home" | "recent" | "none"; note: string };
   savings_typed: boolean;
   returns: Returns;
+  returns_source: { typed: boolean; derived_mid: number; note: string; mix: Record<"stocks" | "bonds" | "cash" | "other", number> | null };
   withdrawal_rate: number;
   level: Level;
   birth_year: number | null;
-  levels: Record<Level, { yearly_cents: number; typed: boolean }>;
+  levels: Record<Level, { yearly_cents: number; typed: boolean; derived_cents: number; note: string }>;
   months_used: number;
   emergency: {
     months: number;
@@ -66,7 +68,17 @@ export type PlanState =
     };
 
 export const YEARS = 30;
+export const SPREAD = 2;
 export const MAX_YEARS = 60;
+/** A few words on where the app's monthly savings number came from, for a caption. */
+export const SAVINGS_SHORT: Record<PlanInputs["savings_source"]["kind"], string> = {
+  savings_rate: "from your pay stubs and spending",
+  pay_stubs: "from your pay stubs",
+  take_home: "take-home pay minus spending",
+  recent: "the last 90 days",
+  none: "",
+};
+
 export const LEVEL_NAMES: Record<Level, { title: string; body: string }> = {
   lean: { title: "Lean", body: "Bills and essentials only" },
   regular: { title: "Regular", body: "Life as you spend now" },
@@ -106,12 +118,8 @@ export type Scenario = {
 
 /** The bands and the year the target is reached, for one set of slider values. `ret` is the middle return. */
 export function project(i: PlanInputs, s: Scenario) {
-  // The range stays two points either side of the middle, as on the server (4%, 6%, 8%).
-  const returns = {
-    low: s.ret - (i.returns.mid - i.returns.low),
-    mid: s.ret,
-    high: s.ret + (i.returns.high - i.returns.mid),
-  };
+  // The range stays two points either side of the middle, as on the server.
+  const returns = { low: Math.max(s.ret - SPREAD, 0), mid: s.ret, high: s.ret + SPREAD };
   const bands: Band[] = [];
   for (let y = 0; y <= YEARS; y++) {
     const m = y * 12;

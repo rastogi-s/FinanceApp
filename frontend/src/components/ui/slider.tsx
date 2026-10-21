@@ -31,7 +31,7 @@ export function Slider({
         <label htmlFor={id} className="text-sm font-medium">
           {label}
         </label>
-        <span className="text-sm font-semibold tabular-nums">{display}</span>
+        <span className="shrink-0 text-sm font-semibold whitespace-nowrap tabular-nums">{display}</span>
       </div>
       <input
         id={id}

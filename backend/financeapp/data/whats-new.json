@@ -1,5 +1,17 @@
 [
   {
+    "version": "0.14.0",
+    "title": "A plan that starts from your own numbers",
+    "features": [
+      {
+        "id": "plan-defaults",
+        "title": "Every plan number, worked out for you",
+        "body": "Monthly savings now comes from your pay stubs (take-home plus 401(k) and HSA) against a typical month of spending, even with only one recent stub; the market return comes from your own mix of stocks, bonds and cash; and spending later comes from your real transactions. Each slider says where its number came from, and \"Use it\" takes you back after a what-if.",
+        "tryIt": "/plan"
+      }
+    ]
+  },
+  {
     "version": "0.13.0",
     "title": "A heads-up before a budget goes over",
     "features": [
