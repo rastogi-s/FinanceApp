@@ -473,7 +473,17 @@ def _plan_inputs(today: date, net_worth: int) -> dict:
         "measured_savings_cents": round(sum(saved) / len(saved)),
         "savings_source": {
             "kind": "savings_rate",
-            "note": "Average of the last 6 months: pay before taxes, minus taxes, paycheck deductions and spending.",
+            "short": "from your pay stubs and spending",
+            "note": "Average of the last 6 months, the months with pay stubs in.",
+            "breakdown": [
+                {"label": label, "cents": sign * _cents(sum(row[col] for row in SAVINGS) / len(SAVINGS))}
+                for label, col, sign in (
+                    ("Pay before taxes and other income", 1, 1),
+                    ("Taxes", 2, -1),
+                    ("Other paycheck deductions (health insurance and the like)", 3, -1),
+                    ("Spending", 4, -1),
+                )
+            ],
         },
         "savings_typed": False,
         "returns": {"low": 3.5, "mid": 5.5, "high": 7.5},

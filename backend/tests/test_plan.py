@@ -121,7 +121,37 @@ def test_savings_from_whatever_there_is(client, home):
     s = client.get("/api/plan").json()["inputs"]
     assert s["savings_source"]["kind"] == "take_home"
     assert "Add a pay stub" in s["savings_source"]["note"]
-    # One biweekly stub from this month: $2,800 take-home and $460 to the 401(k), 26 a year.
+    landed = s["monthly_savings_cents"]
+    assert sum(b["cents"] for b in s["savings_source"]["breakdown"]) == landed
+    # Biweekly stubs from this month: $2,800 take-home and $460 to the 401(k), 26 a year, and a bonus stub.
+    # What landed stays what landed (the stubs aren't scaled up over it); the 401(k) never lands, so it's added,
+    # from the typical paycheck rather than the bonus.
+    with db_of(client).session() as db:
+        for day, net, put in ((2, 2_800_00, 460_00), (10, 9_000_00, 2_000_00), (16, 2_800_00, 460_00)):
+            db.add(
+                Paycheck(
+                    date=date(2026, 10, day),
+                    frequency="biweekly",
+                    gross_cents=net + put + 1_000_00,
+                    taxes_cents=900_00,
+                    savings_cents=put,
+                    net_cents=net,
+                )
+            )
+    s = client.get("/api/plan").json()["inputs"]
+    src = s["savings_source"]
+    assert src["kind"] == "take_home" and "401(k)" in src["short"]
+    put_away = round(460_00 * 26 / 12)
+    assert s["monthly_savings_cents"] == landed + put_away
+    assert [b["cents"] for b in src["breakdown"] if "401(k)" in b["label"]] == [put_away]
+    assert sum(b["cents"] for b in src["breakdown"]) == s["monthly_savings_cents"]
+
+
+def test_savings_from_pay_stubs_alone(client, home):
+    """No full month of deposits yet: the typical paycheck as an average month, minus spending so far."""
+    home.setup()
+    add_transactions(client, [("2026-10-05", "Landlord", -3_000, "Rent & mortgage")])
+    link_balance(client, 1_000)
     with db_of(client).session() as db:
         db.add(
             Paycheck(
@@ -134,10 +164,12 @@ def test_savings_from_whatever_there_is(client, home):
             )
         )
     s = client.get("/api/plan").json()["inputs"]
-    assert s["savings_source"]["kind"] == "pay_stubs"
-    net, put_away = round(2_800_00 * 26 / 12), round(460_00 * 26 / 12)
-    assert s["monthly_savings_cents"] == net + put_away - 251_500
-    assert "$6,067 take-home a month and $997 into your 401(k)" in s["savings_source"]["note"]
+    src = s["savings_source"]
+    assert src["kind"] == "pay_stubs"
+    net, put_away, spent = round(2_800_00 * 26 / 12), round(460_00 * 26 / 12), round(3_000_00 * 30 / 90)
+    assert s["monthly_savings_cents"] == net + put_away - spent
+    assert "$2,800 a paycheck, paid every two weeks (26 a year)" in src["note"]
+    assert [b["cents"] for b in src["breakdown"]] == [net, put_away, -spent]
 
 
 def test_savings_from_the_last_90_days(client, home):

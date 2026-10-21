@@ -17,7 +17,7 @@ import { Slider } from "@/components/ui/slider";
 import { toast } from "@/components/ui/toast";
 import { api } from "@/lib/api";
 import { resetHousehold, useApi } from "@/lib/household";
-import { LEVEL_NAMES, type Level, type PlanInputs, type PlanState, SAVINGS_SHORT, type Scenario, project } from "@/lib/plan";
+import { LEVEL_NAMES, type Level, type PlanInputs, type PlanState, type Scenario, project } from "@/lib/plan";
 import { cn } from "@/lib/utils";
 
 const monthName = new Intl.DateTimeFormat("en-US", {
@@ -250,7 +250,7 @@ function PlanView({ p, onSaved }: { p: Linked; onSaved: (p: PlanState) => void }
             </p>
             <p className="mt-1 text-xs text-muted-foreground">
               {s.monthly === i.measured_savings_cents
-                ? SAVINGS_SHORT[i.savings_source.kind]
+                ? i.savings_source.short
                 : i.savings_typed && s.monthly === i.monthly_savings_cents
                   ? "the number you typed in"
                   : "what if"}
@@ -288,6 +288,7 @@ function PlanView({ p, onSaved }: { p: Linked; onSaved: (p: PlanState) => void }
             hint={
               <Source
                 note={i.savings_source.note}
+                breakdown={i.savings_source.breakdown}
                 differs={i.measured_savings_cents !== null && s.monthly !== i.measured_savings_cents}
                 typed={i.savings_typed && s.monthly === i.monthly_savings_cents}
                 derived={i.measured_savings_cents !== null ? <Money cents={i.measured_savings_cents} /> : null}
@@ -390,12 +391,14 @@ function PlanView({ p, onSaved }: { p: Linked; onSaved: (p: PlanState) => void }
 /** Under a slider: where the app's number came from, and a way back to it once the slider has moved away. */
 function Source({
   note,
+  breakdown,
   differs,
   typed,
   derived,
   onUse,
 }: {
   note: string;
+  breakdown?: { label: string; cents: number }[];
   differs: boolean;
   typed: boolean;
   derived: React.ReactNode;
@@ -403,6 +406,7 @@ function Source({
 }) {
   return (
     <>
+      {breakdown && breakdown.length > 0 && <Breakdown lines={breakdown} />}
       {typed && <span className="font-medium text-foreground">You typed this in. </span>}
       {differs && derived !== null ? <>The app works out {derived}. </> : null}
       {note}
@@ -415,6 +419,30 @@ function Source({
         </>
       )}
     </>
+  );
+}
+
+/** The sum the app's number comes from: money in, then what comes off it, then the total. */
+function Breakdown({ lines }: { lines: { label: string; cents: number }[] }) {
+  const total = lines.reduce((sum, l) => sum + l.cents, 0);
+  return (
+    <dl className="money mb-2 grid grid-cols-[1fr_auto] gap-x-4 gap-y-1 rounded-lg bg-muted/50 px-3 py-2.5 text-xs tabular-nums">
+      {lines.map((l) => (
+        <div key={l.label} className="contents">
+          <dt className="text-muted-foreground">{l.label}</dt>
+          <dd className={l.cents < 0 ? "text-right text-foreground" : "text-right text-positive"}>
+            {l.cents < 0 ? "−" : "+"}
+            <Money cents={Math.abs(l.cents)} />
+          </dd>
+        </div>
+      ))}
+      <div className="contents">
+        <dt className="border-t pt-1 font-medium text-foreground">Saved in an average month</dt>
+        <dd className="border-t pt-1 text-right font-medium text-foreground">
+          <Money cents={total} />
+        </dd>
+      </div>
+    </dl>
   );
 }
 
