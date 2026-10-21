@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Bell, ChartPie, PiggyBank, Trash2, TrendingUp } from "lucide-react";
+import { Bell, ChartPie, PiggyBank, Trash2, TrendingDown, TrendingUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select } from "@/components/ui/input";
 import { Sheet } from "@/components/ui/sheet";
@@ -11,7 +11,7 @@ import { cn } from "@/lib/utils";
 
 export type Rule = {
   id: number;
-  kind: "price" | "budget" | "concentration";
+  kind: "price" | "dip" | "budget" | "concentration";
   params: Record<string, number | string | null>;
   enabled: boolean;
   summary: string;
@@ -20,12 +20,15 @@ export type Rule = {
 
 export type RuleIn =
   | { kind: "price"; symbol: string; above?: number; below?: number; move_percent?: number }
+  | { kind: "dip"; symbol: string | null; from_high_percent?: number; below_average?: 50 | 200 }
   | { kind: "budget"; category_id: number | null; percent?: number; forecast?: boolean }
   | { kind: "concentration"; percent: number };
 
-export const KIND_ICON = { price: TrendingUp, budget: PiggyBank, concentration: ChartPie } as const;
+export const KIND_ICON = { price: TrendingUp, dip: TrendingDown, budget: PiggyBank, concentration: ChartPie } as const;
+const KIND_LABEL = { price: "A price", dip: "A dip", budget: "A budget", concentration: "One company" } as const;
 
 type PriceMode = "above" | "below" | "move_percent";
+type DipMode = "high" | "200" | "50";
 
 /**
  * Add or change one alert rule. A price rule can come with its symbol fixed (from a holding's page), and shows
@@ -101,7 +104,8 @@ function RuleForm({
   const demo = state.status === "signed-in" && state.demo;
   const p = rule?.params ?? {};
   const [kind, setKind] = useState<Rule["kind"]>(rule?.kind ?? "price");
-  const [symbol, setSymbol] = useState<string>(fixed ?? (p.symbol as string) ?? symbols[0] ?? "");
+  // A dip rule with no symbol watches everything held, so it starts empty.
+  const [symbol, setSymbol] = useState<string>(fixed ?? (rule?.kind === "dip" ? ((p.symbol as string | null) ?? "") : ((p.symbol as string) ?? symbols[0] ?? "")));
   const [mode, setMode] = useState<PriceMode>(p.below != null ? "below" : p.move_percent != null ? "move_percent" : "above");
   const [value, setValue] = useState<string>(() => {
     const v = p.above ?? p.below ?? p.move_percent ?? p.percent;
@@ -114,6 +118,8 @@ function RuleForm({
     rule?.kind === "budget" ? (p.forecast ? "forecast" : String(p.percent)) : "90",
   );
   const [concPct, setConcPct] = useState<string>(rule?.kind === "concentration" ? String(p.percent) : "10");
+  const [dipMode, setDipMode] = useState<DipMode>(p.below_average != null ? (String(p.below_average) as DipMode) : "high");
+  const [dipPct, setDipPct] = useState<string>(p.from_high_percent != null ? String(p.from_high_percent) : "10");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -126,6 +132,15 @@ function RuleForm({
       if (!symbol.trim()) return setError("Pick a symbol.");
       if (!Number.isFinite(n) || n <= 0) return setError(mode === "move_percent" ? "Enter a percentage, like 3." : "Enter a price, like 600.");
       body = { kind, symbol: symbol.trim().toUpperCase(), [mode]: n };
+    } else if (kind === "dip") {
+      const s = symbol.trim().toUpperCase() || null;
+      if (dipMode === "high") {
+        const n = Number(dipPct.replace(/[%\s]/g, ""));
+        if (!Number.isFinite(n) || n < 2 || n > 50) return setError("Pick a drop between 2% and 50%.");
+        body = { kind, symbol: s, from_high_percent: n };
+      } else {
+        body = { kind, symbol: s, below_average: dipMode === "200" ? 200 : 50 };
+      }
     } else if (kind === "budget") {
       body =
         budgetPct === "forecast"
@@ -150,9 +165,9 @@ function RuleForm({
 
   return (
     <form onSubmit={submit} className="grid grid-cols-1 gap-4">
-      {!fixed && !rule && (
-        <div role="radiogroup" aria-label="What to watch" className="grid grid-cols-3 gap-2">
-          {(["price", "budget", "concentration"] as const).map((k) => {
+      {!rule && (
+        <div role="radiogroup" aria-label="What to watch" className={cn("grid gap-2", fixed ? "grid-cols-2" : "grid-cols-2 sm:grid-cols-4")}>
+          {(fixed ? (["price", "dip"] as const) : (["price", "dip", "budget", "concentration"] as const)).map((k) => {
             const Icon = KIND_ICON[k];
             return (
               <button
@@ -163,6 +178,7 @@ function RuleForm({
                 onClick={() => {
                   setKind(k);
                   setError(null);
+                  if (!fixed) setSymbol(k === "dip" ? "" : symbols[0] ?? "");
                 }}
                 className={cn(
                   "flex flex-col items-center gap-1.5 rounded-2xl border px-2 py-3 text-xs font-medium transition-colors",
@@ -170,7 +186,7 @@ function RuleForm({
                 )}
               >
                 <Icon className="size-5" aria-hidden />
-                {k === "price" ? "A price" : k === "budget" ? "A budget" : "One company"}
+                {KIND_LABEL[k]}
               </button>
             );
           })}
@@ -236,6 +252,69 @@ function RuleForm({
           >
             <Input value={value} onChange={(e) => setValue(e.target.value)} inputMode="decimal" placeholder={mode === "move_percent" ? "3" : "600"} />
           </Field>
+        </>
+      )}
+
+      {kind === "dip" && (
+        <>
+          {!fixed && (
+            <Field id="rule-dip-symbol" label="Symbol" hint="Leave it empty to watch every stock and fund you hold.">
+              <Input
+                value={symbol}
+                onChange={(e) => setSymbol(e.target.value.toUpperCase())}
+                list="rule-symbols"
+                autoCapitalize="characters"
+                autoComplete="off"
+                spellCheck={false}
+                maxLength={12}
+                placeholder="Everything you hold"
+              />
+            </Field>
+          )}
+          <datalist id="rule-symbols">
+            {symbols.map((s) => (
+              <option key={s} value={s} />
+            ))}
+          </datalist>
+          <div role="radiogroup" aria-label="When" className="grid grid-cols-3 gap-1 rounded-full bg-muted p-1 text-sm">
+            {(
+              [
+                ["high", "Off its high"],
+                ["200", "200-day avg"],
+                ["50", "50-day avg"],
+              ] as const
+            ).map(([m, label]) => (
+              <button
+                key={m}
+                type="button"
+                role="radio"
+                aria-checked={dipMode === m}
+                onClick={() => {
+                  setDipMode(m);
+                  setError(null);
+                }}
+                className={cn("rounded-full py-2 font-medium transition-colors", dipMode === m ? "bg-card shadow-sm" : "text-muted-foreground")}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          {dipMode === "high" ? (
+            <Field
+              id="rule-dip-pct"
+              label="When it's under its 52-week high by"
+              hint="Then again at each step further down, and only after it climbs back first. Facts about the price, not advice."
+              error={error}
+            >
+              <Input value={dipPct} onChange={(e) => setDipPct(e.target.value)} inputMode="decimal" placeholder="10" />
+            </Field>
+          ) : (
+            <p className="rounded-xl bg-muted/50 p-3 text-xs text-muted-foreground">
+              When the price drops under its average of the last {dipMode} trading days. Again only after it&apos;s back 1% above. Facts
+              about the price, not advice.
+              {error && <span className="mt-1 block text-negative">{error}</span>}
+            </p>
+          )}
         </>
       )}
 

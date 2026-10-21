@@ -15,7 +15,7 @@ import { Progress } from "@/components/ui/progress";
 import { toast } from "@/components/ui/toast";
 import { api } from "@/lib/api";
 import { monthName } from "@/lib/budget";
-import { type LinkedHousehold, resetHousehold, useApi } from "@/lib/household";
+import { KIND_DOT, type LinkedHousehold, resetHousehold, useApi } from "@/lib/household";
 import { cn } from "@/lib/utils";
 
 const time = new Intl.DateTimeFormat("en-US", {
@@ -275,7 +275,7 @@ function Alerts({ h }: { h: LinkedHousehold }) {
               <span
                 className={cn(
                   "mt-1.5 size-2 shrink-0 rounded-full",
-                  a.kind === "budget" ? "bg-warning" : a.kind === "price" ? "bg-chart-2" : "bg-chart-4",
+                  KIND_DOT[a.kind],
                 )}
                 aria-hidden
               />

@@ -45,6 +45,8 @@ HOLDINGS = [
     ("MSFT", "Microsoft", "US stocks", "E*TRADE", 37_200, 0.48),
     ("FXAIX", "Fidelity 500 Index Fund", "US stocks", "Fidelity IRA", 74_800, 0.55),
     ("BND", "Vanguard Total Bond Market ETF", "Bonds", "Fidelity IRA", 41_600, 0.08),
+    ("VTI", "Vanguard Total Stock Market ETF", "US stocks", "Fidelity IRA", 28_700, 0.62),
+    ("VTI", "Vanguard Total Stock Market ETF", "US stocks", "E*TRADE", 12_100, 0.62),
     ("HSA cash", "HealthEquity cash", "Cash", "HealthEquity HSA", 6_200, 0.0),
 ]
 
@@ -776,6 +778,22 @@ def alerts() -> dict:
                 "triggered": False,
             },
             {
+                "id": 6,
+                "kind": "dip",
+                "params": {"symbol": None, "from_high_percent": 10},
+                "enabled": True,
+                "summary": "Anything you hold falls 10% under its 52-week high, and each 10% more",
+                "triggered": False,
+            },
+            {
+                "id": 7,
+                "kind": "dip",
+                "params": {"symbol": None, "below_average": 200},
+                "enabled": True,
+                "summary": "Anything you hold drops under its 200-day average",
+                "triggered": False,
+            },
+            {
                 "id": 3,
                 "kind": "price",
                 "params": {"symbol": "AAPL", "above": 350},
@@ -812,6 +830,16 @@ def alerts() -> dict:
                 "status": "sent",
                 "channel": "ntfy",
                 "read": False,
+            },
+            {
+                "id": "a4",
+                "kind": "dip",
+                "title": "MSFT is 11% under its 52-week high",
+                "body": "MSFT is at $496.20; its 52-week high is $555.45. Information only, not advice.",
+                "at": (at - timedelta(days=2)).isoformat(),
+                "status": "sent",
+                "channel": "ntfy",
+                "read": True,
             },
             {
                 "id": "a3",

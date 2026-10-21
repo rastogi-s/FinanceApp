@@ -5,6 +5,9 @@ Only ticker symbols ever leave the server: no quantities, values, accounts or an
 sources (QUOTES_PROVIDER): Finnhub's official free tier (needs FINNHUB_API_KEY; stocks and ETFs) and Yahoo
 Finance's public chart data (no key; has mutual funds too). "auto" uses Finnhub when there's a key and Yahoo for
 the rest. A failed lookup just leaves the last price in place: holdings fall back to the price from the last sync.
+
+Trends. Once a day after the close, a year of daily closes from Yahoo gives each symbol's 52-week high and low and its
+50- and 200-day averages (Finnhub's free tier has no history), for the dip alerts in alerts.py.
 """
 
 import logging
@@ -138,8 +141,8 @@ def fetch(settings: Settings, symbols: list[str], client: httpx.Client | None = 
 # ---- what to look up, and saving it
 
 
-def held_symbols(db: DbSession) -> list[str]:
-    """Every quotable symbol in the latest holdings of a counted account, plus those price alerts watch."""
+def holding_symbols(db: DbSession) -> set[str]:
+    """Every quotable symbol in the latest holdings of a counted account."""
     latest = (
         select(HoldingSnapshot.account_id, func.max(HoldingSnapshot.date).label("d"))
         .group_by(HoldingSnapshot.account_id)
@@ -151,9 +154,14 @@ def held_symbols(db: DbSession) -> list[str]:
         .join(Account, Account.id == HoldingSnapshot.account_id)
         .where(Account.hidden.is_(False), Account.is_authoritative.is_(True))
     ).all()
-    symbols = {s for s, c in rows if quotable(s, c)}
-    for r in db.scalars(select(AlertRule).where(AlertRule.kind == "price", AlertRule.enabled.is_(True))):
-        s = str(r.params.get("symbol", ""))
+    return {s for s, c in rows if quotable(s, c)}
+
+
+def held_symbols(db: DbSession) -> list[str]:
+    """What to look up: every symbol held, plus those price and dip alerts watch."""
+    symbols = holding_symbols(db)
+    for r in db.scalars(select(AlertRule).where(AlertRule.kind.in_(["price", "dip"]), AlertRule.enabled.is_(True))):
+        s = str(r.params.get("symbol") or "")
         if quotable(s):
             symbols.add(s)
     return sorted(symbols)[:MAX_SYMBOLS]
@@ -196,6 +204,93 @@ def refresh(database: Database, settings: Settings, force: bool = False) -> int 
     with database.session() as db:
         save(db, quotes)
     return len(quotes)
+
+
+# ---- trends: a year of daily closes, once a day
+
+
+def last_close_day(t: datetime) -> date:
+    """The trading day whose close is the latest one in (weekends skipped; holidays aren't known)."""
+    et = t.astimezone(ET)
+    d = et.date() if et.time() >= AFTER_CLOSE[0] else et.date() - timedelta(days=1)
+    while d.weekday() >= 5:
+        d -= timedelta(days=1)
+    return d
+
+
+def _average(closes: list[Decimal], n: int) -> Decimal | None:
+    return (sum(closes[-n:]) / n).quantize(Decimal("0.0001")) if len(closes) >= n else None
+
+
+def yahoo_trend(client: httpx.Client, symbol: str, through: date) -> dict | None:
+    r = client.get(
+        f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol.replace('.', '-')}",
+        params={"range": "1y", "interval": "1d"},
+    )
+    if r.status_code == 404:
+        return None
+    r.raise_for_status()
+    result = (r.json().get("chart") or {}).get("result") or []
+    if not result:
+        return None
+    meta = result[0].get("meta") or {}
+    if (meta.get("currency") or "USD") != "USD":
+        return None
+    raw = ((result[0].get("indicators") or {}).get("quote") or [{}])[0].get("close") or []
+    days: list[tuple[date, Decimal]] = []
+    for ts, c in zip(result[0].get("timestamp") or [], raw, strict=False):
+        price = _decimal(c)
+        if isinstance(ts, int) and price is not None:
+            day = datetime.fromtimestamp(ts, UTC).astimezone(ET).date()
+            if day <= through:  # not today's bar while the market is still open
+                days.append((day, price))
+    if not days:
+        return None
+    closes = [c for _, c in days]
+    high, low = _decimal(meta.get("fiftyTwoWeekHigh")), _decimal(meta.get("fiftyTwoWeekLow"))
+    return {
+        "year_high": max(high or closes[0], max(closes)),
+        "year_low": min(low or closes[0], min(closes)),
+        "average_50": _average(closes, 50),
+        "average_200": _average(closes, 200),
+        "trend_as_of": days[-1][0],
+    }
+
+
+def refresh_trends(database: Database, t: datetime, client: httpx.Client | None = None) -> int:
+    """Updates the trends of held symbols that don't have the latest close counted yet. Returns how many changed."""
+    through = last_close_day(t)
+    with database.session() as db:
+        stale = [
+            q.symbol for q in latest(db, held_symbols(db)).values() if q.trend_as_of is None or q.trend_as_of < through
+        ]
+    if not stale:
+        return 0
+    own = client is None
+    client = client or httpx.Client(timeout=10, headers={"User-Agent": "FinanceApp (self-hosted)"})
+    found: dict[str, dict] = {}
+    try:
+        for s in stale:
+            try:
+                trend = yahoo_trend(client, s, through)
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code == 429:
+                    log.info("yahoo rate limit reached; the rest of the trends wait for the next round")
+                    break
+                continue
+            except (httpx.HTTPError, ValueError):
+                continue
+            found[s] = trend or {"trend_as_of": through}  # Yahoo has no history for it: don't ask again today
+    finally:
+        if own:
+            client.close()
+    with database.session() as db:
+        for s, trend in found.items():
+            q = db.get(Quote, s)
+            if q is not None:
+                for k, v in trend.items():
+                    setattr(q, k, v)
+    return len(found)
 
 
 def latest(db: DbSession, symbols: list[str] | set[str]) -> dict[str, Quote]:

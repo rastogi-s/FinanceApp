@@ -30,9 +30,12 @@ export type Holding = {
   cost_basis_cents?: number | null;
   live?: boolean;
 };
+/** The dot beside an alert, by what kind of rule sent it. */
+export const KIND_DOT = { price: "bg-chart-2", dip: "bg-chart-3", budget: "bg-warning", concentration: "bg-chart-4" } as const;
+
 export type Alert = {
   id: string;
-  kind: "budget" | "price" | "concentration";
+  kind: "budget" | "price" | "dip" | "concentration";
   title: string;
   body: string;
   at: string;

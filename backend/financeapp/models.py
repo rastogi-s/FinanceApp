@@ -383,14 +383,20 @@ class Quote(Base):
     as_of: Mapped[datetime]  # the market time of the price
     source: Mapped[str] = mapped_column(String(16))  # finnhub | yahoo
     fetched_at: Mapped[datetime] = mapped_column(default=now)
+    # From a year of daily closes, refreshed once a day after the close (quotes.refresh_trends).
+    year_high: Mapped[Decimal | None]
+    year_low: Mapped[Decimal | None]
+    average_50: Mapped[Decimal | None]
+    average_200: Mapped[Decimal | None]
+    trend_as_of: Mapped[date | None]  # the trading day of the last close counted
 
 
 class AlertRule(Base):
-    """A price, budget or concentration rule (see alerts.py for the params of each)."""
+    """A price, dip, budget or concentration rule (see alerts.py for the params of each)."""
 
     __tablename__ = "alert_rules"
     id: Mapped[int] = mapped_column(primary_key=True)
-    kind: Mapped[str] = mapped_column(String(16))  # price | budget | concentration
+    kind: Mapped[str] = mapped_column(String(16))  # price | dip | budget | concentration
     params: Mapped[dict] = mapped_column(default=dict)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     # Which conditions have fired and not re-armed yet, so a rule never sends the same thing twice.
