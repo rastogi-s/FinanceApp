@@ -9,6 +9,7 @@ import { ReauthDialog, requestReauth } from "@/components/reauth";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Toaster } from "@/components/ui/toast";
+import { UpdateBanner } from "@/components/updates";
 import { AuthProvider, isPublic, useAuth } from "@/lib/auth";
 import { useMeta } from "@/lib/household";
 import { cn } from "@/lib/utils";
@@ -178,6 +179,7 @@ function PrivateShell({ children }: { children: React.ReactNode }) {
         </header>
 
         <main id="main" className="mx-auto w-full max-w-3xl flex-1 px-4 pt-4 pb-28 md:pb-12">
+          <UpdateBanner />
           {children}
         </main>
       </div>

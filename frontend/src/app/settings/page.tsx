@@ -6,6 +6,7 @@ import { PageTitle } from "@/components/page";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { UpdatesCard } from "@/components/updates";
 import { useAuth, useUser } from "@/lib/auth";
 import { useApi, useMeta } from "@/lib/household";
 
@@ -65,6 +66,7 @@ export default function Settings() {
         <h2 className="mt-2 flex items-center gap-2 px-1 text-lg font-semibold tracking-tight">
           <Sparkles className="size-5 text-primary" aria-hidden /> What&apos;s new
         </h2>
+        <UpdatesCard />
         {releases === null && <Skeleton className="h-32 rounded-xl" />}
         {releases?.map((r) => (
           <Card key={r.version}>

@@ -19,6 +19,7 @@ from financeapp.api import (
     money_routes,
     plan_routes,
     portfolio_routes,
+    update_routes,
 )
 from financeapp.config import PACKAGE_DIR, Settings, get_settings
 from financeapp.db import Database
@@ -152,6 +153,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(alert_routes.router)
     app.include_router(portfolio_routes.router)
     app.include_router(plan_routes.router)
+    app.include_router(update_routes.router)
 
     @app.api_route("/api/{rest:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
     def api_not_found(rest: str) -> JSONResponse:

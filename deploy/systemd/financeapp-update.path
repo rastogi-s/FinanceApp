@@ -1,0 +1,13 @@
+# "Update now" in the app: the app leaves an empty file in update-request/ and this starts financeapp-update.service,
+# which runs update.sh. update.sh deletes the request without reading it and installs the latest signed release (or
+# nothing), with its usual backup and rollback. The app never gets the Docker socket. update.sh installs this unit
+# itself when run as root (sudo ./update.sh), for the folder it's in.
+[Unit]
+Description=Watch for "Update now" in the Finance App
+
+[Path]
+PathExists=/opt/financeapp/update-request/request
+Unit=financeapp-update.service
+
+[Install]
+WantedBy=paths.target

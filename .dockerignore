@@ -8,8 +8,9 @@
 .git
 .github
 e2e
-deploy
 backups
 .env
 .env.*
+# The server files ship inside the image too (update.sh refreshes them from the signed image).
+!.env.example
 *.md

@@ -1,4 +1,5 @@
-# Runs update.sh once. Installed by the README's "Hands-off updates" step; WorkingDirectory is the folder with
+# Runs update.sh once. Started by the nightly timer and by "Update now" in the app (financeapp-update.path).
+# update.sh installs it for the folder it's in when run as root; WorkingDirectory is the folder with
 # docker-compose.yml, .env and update.sh.
 [Unit]
 Description=Update the Finance App

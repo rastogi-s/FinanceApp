@@ -1,6 +1,6 @@
 """The background work, in a thread inside the app (no extra container): the sync every SYNC_INTERVAL_HOURS, live
 prices every QUOTE_INTERVAL_MINUTES while markets are open (each followed by a check of the price and concentration
-alerts), and funds' holdings for look-through once a week.
+alerts), funds' holdings for look-through once a week, and whether a newer version is out every few hours.
 
 It checks every minute whether each is due, from what's saved in the database, so restarts and updates don't cause
 extra runs, and the sync's own database lock means two copies of the app never sync at once. It also clears out
@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 
 from sqlalchemy import delete, select
 
-from financeapp import alerts, lookthrough, quotes, sync
+from financeapp import alerts, lookthrough, quotes, sync, updates
 from financeapp.config import Settings
 from financeapp.db import Database
 from financeapp.models import Challenge, Connection, Session, SyncRun, now
@@ -60,6 +60,7 @@ class Scheduler:
             # Held alerts go out when quiet hours end, even if no new prices came in.
             with self.database.session() as db:
                 alerts.send_pending(db, self.settings)
+        updates.check_if_due(self.database, self.settings)
         if self.funds_checked is None or now() - self.funds_checked > FUNDS_CHECK:
             self.funds_checked = now()
             if lookthrough.refresh(self.database, self.settings):

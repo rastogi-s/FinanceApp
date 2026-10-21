@@ -5,7 +5,9 @@
 #
 # Locked down: the app listens on 127.0.0.1 only (reach it over Tailscale, see README), Postgres is on an internal
 # network with no way out and no published port, both run as non-root users on read-only filesystems with every
-# Linux capability dropped, and neither can gain new privileges. Nothing here mounts the Docker socket.
+# Linux capability dropped, and neither can gain new privileges. Nothing here mounts the Docker socket: "Update now" in
+# the app only leaves an empty file in update-request/, which the server's own updater (update.sh, started by
+# financeapp-update.path) picks up.
 
 x-hardening: &hardening
   read_only: true
@@ -47,10 +49,16 @@ services:
       FINNHUB_API_KEY: ${FINNHUB_API_KEY:-}
       SEC_CONTACT_EMAIL: ${SEC_CONTACT_EMAIL:-}
       LOOKTHROUGH_ENABLED: ${LOOKTHROUGH_ENABLED:-true}
+      UPDATE_CHECK: ${UPDATE_CHECK:-true}
     ports:
       - "127.0.0.1:${APP_PORT:-8080}:8080"
     tmpfs:
       - /tmp:size=64m,mode=1777
+    volumes:
+      # The only places the app shares with the server (update.sh makes both): it may leave a request in the first
+      # and only read how the update went from the second.
+      - ./update-request:/app/update-request
+      - ./update-status:/app/update-status:ro
     networks: [web, db]
     mem_limit: 512m
     pids_limit: 200
