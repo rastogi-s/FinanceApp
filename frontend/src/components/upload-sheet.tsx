@@ -1,14 +1,17 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { AlertTriangle, ArrowLeftRight, CheckCircle2, FileUp, Info } from "lucide-react";
+import { AlertTriangle, ArrowLeftRight, CheckCircle2, FileUp, Info, Sparkles } from "lucide-react";
+import { type AIOffer, AIOfferCard, shrinkPicture } from "@/components/ai-offer";
 import { Money } from "@/components/money";
 import { Button } from "@/components/ui/button";
 import { Input, Select } from "@/components/ui/input";
 import { Sheet } from "@/components/ui/sheet";
 import { Switch } from "@/components/ui/switch";
 import { toast } from "@/components/ui/toast";
+import { usd } from "@/lib/ai";
 import { api } from "@/lib/api";
+import { resetHousehold } from "@/lib/household";
 import { cn } from "@/lib/utils";
 
 type PreviewAccount = {
@@ -38,17 +41,35 @@ type Preview = {
   warnings: string[];
   accounts: PreviewAccount[];
   targets: { id: number; name: string; type: string }[];
+  ai: { model: string; cost: number } | null;
 };
+type Stub = {
+  date: string | null;
+  period_start: string | null;
+  period_end: string | null;
+  frequency: string | null;
+  gross_cents: number | null;
+  taxes_cents: number | null;
+  savings_cents: number | null;
+  net_cents: number | null;
+  employer_match_cents: number | null;
+  warnings: string[];
+};
+type Answer = Preview | { ai_offer: AIOffer } | { paystub: Stub; format: string; ai_cost?: number };
 type Target = { account_id: number | null; name: string; institution: string; type: string; skip: boolean };
 
 const day = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
 
 /**
  * Upload -> check -> save. The file is read on the server and shown back as a one-screen summary ("42 transactions,
- * 3 new holdings, total matches") before anything is saved. Uploading the same file twice adds nothing.
+ * 3 new holdings, total matches") before anything is saved. Uploading the same file twice adds nothing. A file the
+ * app can't read by itself (a PDF statement, a screenshot, a spreadsheet in another layout) comes back as an offer
+ * to read it with AI, showing what would be sent; it's only sent if the person says yes.
  */
 export function UploadSheet({ open, onOpenChange, onSaved }: { open: boolean; onOpenChange: (o: boolean) => void; onSaved: () => void }) {
   const [preview, setPreview] = useState<Preview | null>(null);
+  const [offer, setOffer] = useState<{ file: File; offer: AIOffer } | null>(null);
+  const [stub, setStub] = useState<{ stub: Stub; cost?: number } | null>(null);
   const [targets, setTargets] = useState<Target[]>([]);
   const [flip, setFlip] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -58,6 +79,8 @@ export function UploadSheet({ open, onOpenChange, onSaved }: { open: boolean; on
 
   const reset = () => {
     setPreview(null);
+    setOffer(null);
+    setStub(null);
     setTargets([]);
     setFlip(false);
     setError(null);
@@ -71,13 +94,24 @@ export function UploadSheet({ open, onOpenChange, onSaved }: { open: boolean; on
     onOpenChange(o);
   };
 
-  const send = async (file: File) => {
+  const send = async (original: File, withAI = false) => {
     setError(null);
     setBusy(true);
     try {
+      const file = await shrinkPicture(original);
       const form = new FormData();
       form.append("file", file);
-      const p = await api<Preview>("/api/imports", { form });
+      const answer = await api<Answer>(`/api/imports${withAI ? "?read_with_ai=true" : ""}`, { form });
+      if ("ai_offer" in answer) {
+        setOffer({ file, offer: answer.ai_offer });
+        return;
+      }
+      setOffer(null);
+      if ("paystub" in answer) {
+        setStub({ stub: answer.paystub, cost: answer.ai_cost });
+        return;
+      }
+      const p = answer;
       setPreview(p);
       setTargets(
         p.accounts.map((a) => ({
@@ -124,10 +158,31 @@ export function UploadSheet({ open, onOpenChange, onSaved }: { open: boolean; on
     <Sheet
       open={open}
       onOpenChange={close}
-      title={preview ? "Check and save" : "Upload a file"}
-      description={preview ? preview.format : "Positions or transactions as CSV, or an OFX/QFX download from your bank."}
+      title={preview || stub ? "Check and save" : offer ? "Read it with AI?" : "Upload a file"}
+      description={
+        preview
+          ? preview.format
+          : stub
+            ? "A pay stub"
+            : offer
+              ? undefined
+              : "A CSV or OFX/QFX download, a spreadsheet, a PDF statement or pay stub, or a screenshot."
+      }
     >
-      {!preview && (
+      {offer && !preview && (
+        <div className="pb-2">
+          <AIOfferCard offer={offer.offer} busy={busy} onAccept={() => send(offer.file, true)} onCancel={() => setOffer(null)} />
+          {error && (
+            <div className="mt-3">
+              <ErrorLine text={error} />
+            </div>
+          )}
+        </div>
+      )}
+
+      {stub && <StubPreview stub={stub.stub} cost={stub.cost} onCancel={() => close(false)} onSaved={() => (reset(), onOpenChange(false), onSaved())} />}
+
+      {!preview && !offer && !stub && (
         <div className="grid grid-cols-1 gap-4 pb-2">
           <button
             type="button"
@@ -158,7 +213,7 @@ export function UploadSheet({ open, onOpenChange, onSaved }: { open: boolean; on
           <input
             ref={input}
             type="file"
-            accept=".csv,.ofx,.qfx,text/csv"
+            accept=".csv,.ofx,.qfx,.xlsx,.pdf,text/csv,application/pdf,image/png,image/jpeg,image/webp"
             className="sr-only"
             aria-label="File to upload"
             onChange={(e) => {
@@ -179,6 +234,10 @@ export function UploadSheet({ open, onOpenChange, onSaved }: { open: boolean; on
               <li>
                 <b className="font-medium text-foreground">Banks and cards:</b> Activity → Download → CSV, or Quicken/QFX.
               </li>
+              <li>
+                <b className="font-medium text-foreground">Anything else:</b> a PDF statement, a spreadsheet or a screenshot. If the app
+                can&apos;t read it by itself, it asks before AI reads it.
+              </li>
             </ul>
           </details>
           {error && <ErrorLine text={error} />}
@@ -187,6 +246,14 @@ export function UploadSheet({ open, onOpenChange, onSaved }: { open: boolean; on
 
       {preview && (
         <div className="grid grid-cols-1 gap-4 pb-2">
+          {preview.ai && (
+            <p className="flex items-start gap-2 rounded-xl bg-accent/60 px-3.5 py-3 text-sm">
+              <Sparkles className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden />
+              <span>
+                Read by AI ({preview.ai.model}, {usd(preview.ai.cost)}). Check the numbers against the file before saving.
+              </span>
+            </p>
+          )}
           {preview.accounts.map((a, i) => (
             <AccountPreview
               key={a.index}
@@ -365,5 +432,82 @@ function ErrorLine({ text }: { text: string }) {
     <p role="alert" className="flex items-start gap-2 text-sm font-medium text-negative">
       <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden /> {text}
     </p>
+  );
+}
+
+function StubPreview({ stub, cost, onCancel, onSaved }: { stub: Stub; cost?: number; onCancel: () => void; onSaved: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const missing = stub.gross_cents === null || stub.net_cents === null || stub.date === null;
+  const rows: [string, number | null][] = [
+    ["Gross pay", stub.gross_cents],
+    ["Taxes", stub.taxes_cents],
+    ["401(k), HSA, ESPP", stub.savings_cents],
+    ["Take-home", stub.net_cents],
+    ["Employer match", stub.employer_match_cents],
+  ];
+  const save = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await api("/api/paychecks", {
+        body: {
+          date: stub.date,
+          frequency: stub.frequency,
+          period_start: stub.period_start,
+          period_end: stub.period_end,
+          gross_cents: stub.gross_cents,
+          taxes_cents: stub.taxes_cents ?? 0,
+          savings_cents: stub.savings_cents ?? 0,
+          net_cents: stub.net_cents,
+          employer_match_cents: stub.employer_match_cents ?? 0,
+        },
+      });
+      resetHousehold();
+      toast("Pay stub saved. The savings rate now uses gross pay.");
+      onSaved();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="grid grid-cols-1 gap-4 pb-2">
+      <div className="rounded-2xl border p-4">
+        <p className="font-medium">
+          Paid {stub.date ? day.format(new Date(stub.date)) : "(date not found)"}
+          {stub.frequency && <span className="font-normal text-muted-foreground"> · {stub.frequency}</span>}
+          {cost !== undefined && <span className="font-normal text-muted-foreground"> · read by AI, {usd(cost)}</span>}
+        </p>
+        <dl className="mt-3 grid grid-cols-[1fr_auto] gap-x-4 gap-y-1.5 text-sm">
+          {rows.map(([label, cents]) => (
+            <div key={label} className="contents">
+              <dt className="text-muted-foreground">{label}</dt>
+              <dd className="text-right font-medium tabular-nums">{cents === null ? "Not found" : <Money cents={cents} style="exact" />}</dd>
+            </div>
+          ))}
+        </dl>
+      </div>
+      {stub.warnings.map((w) => (
+        <p key={w} className="flex items-start gap-2 text-sm text-warning">
+          <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden /> {w}
+        </p>
+      ))}
+      {missing && (
+        <p className="text-sm text-muted-foreground">
+          Some numbers are missing. Add this stub from Budget, Pay stubs, where you can type them in.
+        </p>
+      )}
+      {error && <ErrorLine text={error} />}
+      <div className="grid grid-cols-2 gap-2">
+        <Button variant="outline" size="lg" onClick={onCancel} disabled={busy}>
+          Cancel
+        </Button>
+        <Button size="lg" onClick={save} disabled={busy || missing}>
+          {busy ? "Saving…" : "Save pay stub"}
+        </Button>
+      </div>
+    </div>
   );
 }

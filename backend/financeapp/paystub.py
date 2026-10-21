@@ -7,8 +7,9 @@ else the sum of the federal, state, Social Security and Medicare lines. Savings 
 lines; employer contributions go to the match instead. How often you're paid comes from the stub's own words
 ("Biweekly") or the length of the pay period.
 
-Only PDFs with text in them can be read here; a scanned or photographed stub has none. Nothing is stored: the file
-is read in memory and the numbers go back to the form for someone to check and save.
+Only PDFs with text in them can be read here; a scanned or photographed stub has none, and is read with AI
+(ai/extract.py) if the household has set it up. Nothing is stored: the file is read in memory and the numbers go
+back to the form for someone to check and save.
 """
 
 import io
@@ -115,10 +116,7 @@ def text_of(data: bytes) -> list[str]:
     lines = [re.sub(r"\s+", " ", line).strip() for line in lines]
     lines = [line for line in lines if line]
     if not lines:
-        raise StubError(
-            "This PDF is a scan, with no text in it to read. Type the numbers in for now; reading scans and photos "
-            "comes with the AI step."
-        )
+        raise StubError("This PDF is a scan, with no text in it for the app to read by itself.")
     return lines
 
 

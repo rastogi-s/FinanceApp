@@ -29,6 +29,14 @@ STREET = re.compile(
     r"|pkwy|parkway|hwy|highway)\b\.?(?:,?\s*(?:apt|unit|suite|ste|#)\.?\s*[\w-]+)?"
 )
 
+# Words that follow or precede a name on statements and stubs without being part of it.
+_NOT_NAMES = (
+    r"(?!(?i:employee|employer|pay|payroll|net|gross|total|earnings|statement|account|acct|check|deposit|inc|llc|corp"
+    r"|company|co|dept|department|id|ssn|date|period|amount|balance|member|customer|card|jr|sr|ii|iii)\b)"
+)
+NEXT_TO_NAME = re.compile(rf"\[name\] {_NOT_NAMES}(?:[A-Z][a-z]+|[A-Z]{{2,}})\b")
+BEFORE_NAME = re.compile(rf"\b{_NOT_NAMES}(?:[A-Z][a-z]+|[A-Z]{{2,}})(,? )\[name\]")
+
 
 @dataclass
 class Redacted:
@@ -60,7 +68,14 @@ def redact(text: str, names: list[str] | None = None, emails: list[str] | None =
 
     sub(SSN_LABELLED, "Social Security numbers", lambda m: f"{m.group(1)} [SSN]")
     sub(SSN, "Social Security numbers", lambda m: "[SSN]")
-    sub(LABELLED_ID, "ID numbers", lambda m: f"{m.group(1)} [ID]")
+
+    def labelled(m: re.Match) -> str:
+        digits = re.sub(r"\D", "", m.group(2))
+        if re.match(r"(?i)(account|acct|loan)", m.group(1)) and len(digits) >= 4:
+            return f"{m.group(1)} [number ending {digits[-4:]}]"
+        return f"{m.group(1)} [ID]"
+
+    sub(LABELLED_ID, "ID numbers", labelled)
     sub(EMAIL, "email addresses", lambda m: "[email]")
     sub(PHONE, "phone numbers", lambda m: "[phone]")
     sub(LONG_NUMBER, "account or card numbers", lambda m: _keep_last4(m.group(0)))
@@ -72,6 +87,11 @@ def redact(text: str, names: list[str] | None = None, emails: list[str] | None =
         parts = [p for p in re.split(r"\s+", name) if len(p) >= 3]
         for piece in [name, *parts]:
             sub(re.compile(rf"(?<!\w){re.escape(piece)}(?!\w)", re.I), "names", lambda m: "[name]")
+    if names:
+        # A capitalized word right next to a name is almost always the rest of it ("SHUBHAM RASTOGI", "Rastogi,
+        # Shubham" when only the first name is known).
+        sub(NEXT_TO_NAME, "names", lambda m: "[name] [name]")
+        sub(BEFORE_NAME, "names", lambda m: f"[name]{m.group(1)}[name]")
     return Redacted(text, dict(counts))
 
 

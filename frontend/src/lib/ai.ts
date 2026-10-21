@@ -51,6 +51,7 @@ export type AIOverview = {
   providers: AIProviderRow[];
   tasks: AITask[];
   cap_cents: number;
+  hide_words: string[];
   spent: number; // dollars this month
   guessed: boolean;
   usage: AIUsageRow[];

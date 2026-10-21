@@ -76,6 +76,7 @@ export default function AIPage() {
           <>
             <Providers data={data} change={change} onAdd={() => setAdding(true)} />
             {data.providers.length > 0 && <Tasks data={data} change={change} />}
+            <HideWords data={data} change={change} />
             <Spending data={data} change={change} />
           </>
         )}
@@ -599,6 +600,64 @@ function TaskRow({ task: t, data, change }: { task: AITask; data: AIOverview; ch
         </div>
       )}
     </div>
+  );
+}
+
+// ---- extra words to take out
+
+function HideWords({ data, change }: { data: AIOverview; change: Change }) {
+  const [word, setWord] = useState("");
+  const save = (words: string[]) => change("/api/ai/settings", { method: "PUT", body: { hide_words: words } });
+  const add = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const w = word.trim();
+    if (w.length < 2) return;
+    if (await save([...data.hide_words, w])) setWord("");
+  };
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Also take out</CardTitle>
+        <EyeOff className="size-4 text-muted-foreground" aria-hidden />
+      </CardHeader>
+      <CardContent className="grid grid-cols-1 gap-3">
+        <p className="text-sm text-muted-foreground">
+          Everyone&apos;s name and email in this household are always taken out. Add anything else that identifies you: a surname,
+          your children&apos;s names, an employee number.
+        </p>
+        {data.hide_words.length > 0 && (
+          <ul className="flex flex-wrap gap-2">
+            {data.hide_words.map((w) => (
+              <li key={w}>
+                <span className="inline-flex items-center gap-1 rounded-full bg-muted py-1 pr-1 pl-3 text-sm">
+                  {w}
+                  {data.can_edit && (
+                    <button
+                      type="button"
+                      aria-label={`Stop taking out ${w}`}
+                      onClick={() => save(data.hide_words.filter((x) => x !== w))}
+                      className="grid size-6 place-items-center rounded-full text-muted-foreground hover:bg-background hover:text-foreground"
+                    >
+                      <Trash2 className="size-3.5" aria-hidden />
+                    </button>
+                  )}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+        {data.can_edit && (
+          <form onSubmit={add} className="grid grid-cols-[1fr_auto] items-end gap-2">
+            <Field id="ai-hide" label="Word or name">
+              <Input value={word} onChange={(e) => setWord(e.target.value)} maxLength={60} autoComplete="off" />
+            </Field>
+            <Button type="submit" variant="secondary" className="mb-0.5" disabled={word.trim().length < 2}>
+              Add
+            </Button>
+          </form>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 

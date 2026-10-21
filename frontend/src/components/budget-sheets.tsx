@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 import { Check, FileUp } from "lucide-react";
+import { type AIOffer, AIOfferCard, shrinkPicture } from "@/components/ai-offer";
 import { Money, formatMoney } from "@/components/money";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select } from "@/components/ui/input";
@@ -205,7 +206,7 @@ export function PaycheckSheet({
       open={open}
       onOpenChange={(o) => !o && onClose()}
       title="Add a pay stub"
-      description="Upload the PDF, or type five numbers from it. Amounts for this one paycheck, not year to date."
+      description="Upload the PDF or a photo, or type five numbers from it. Amounts for this one paycheck, not year to date."
     >
       {open && <PaycheckForm key={who} who={who} setPerson={setPerson} budget={budget} change={change} onClose={onClose} />}
     </Sheet>
@@ -232,6 +233,7 @@ type Read = {
   employer_match_cents: number | null;
   warnings: string[];
 };
+type ReadAnswer = Read | { ai_offer: AIOffer };
 
 function PaycheckForm({
   who,
@@ -270,14 +272,23 @@ function PaycheckForm({
   const [readError, setReadError] = useState<string | null>(null);
   const input = useRef<HTMLInputElement>(null);
 
-  const upload = async (file: File) => {
+  const [offer, setOffer] = useState<{ file: File; offer: AIOffer } | null>(null);
+
+  const upload = async (original: File, withAI = false) => {
     if (demo) return toast("Reading pay stubs is off while the app shows sample data.");
     setReading(true);
     setReadError(null);
     try {
+      const file = await shrinkPicture(original);
       const form = new FormData();
       form.append("file", file);
-      const r = await api<Read>("/api/paychecks/read", { form });
+      const answer = await api<ReadAnswer>(`/api/paychecks/read${withAI ? "?read_with_ai=true" : ""}`, { form });
+      if ("ai_offer" in answer) {
+        setOffer({ file, offer: answer.ai_offer });
+        return;
+      }
+      setOffer(null);
+      const r = answer;
       const amount = (c: number | null) => (c === null ? "" : c ? dollars(c) : "0");
       setValues({
         gross: amount(r.gross_cents),
@@ -369,17 +380,17 @@ function PaycheckForm({
         <input
           ref={input}
           type="file"
-          accept="application/pdf,.pdf"
+          accept="application/pdf,.pdf,image/png,image/jpeg,image/webp"
           className="sr-only"
           id="stub-file"
-          aria-label="Pay stub PDF"
+          aria-label="Pay stub PDF or picture"
           tabIndex={-1}
           onChange={(e) => e.target.files?.[0] && upload(e.target.files[0])}
         />
         <div className="flex items-center gap-3">
           <FileUp className="size-5 shrink-0 text-primary" aria-hidden />
           <div className="min-w-0 flex-1">
-            <p className="text-sm font-medium">{read ? `Filled in from ${read.name}` : "Have the PDF? Upload it"}</p>
+            <p className="text-sm font-medium">{read ? `Filled in from ${read.name}` : "Have the PDF or a photo? Upload it"}</p>
             <p className="text-xs text-muted-foreground">
               {read ? "Check the numbers against the stub, then save." : "The numbers fill in by themselves. The file isn't kept."}
             </p>
@@ -388,6 +399,11 @@ function PaycheckForm({
             {reading ? "Reading…" : read ? "Another" : "Upload"}
           </Button>
         </div>
+        {offer && (
+          <div className="mt-4">
+            <AIOfferCard offer={offer.offer} busy={reading} onAccept={() => upload(offer.file, true)} onCancel={() => setOffer(null)} />
+          </div>
+        )}
         {readError && (
           <p className="mt-3 text-sm text-negative" role="alert">
             {readError}
