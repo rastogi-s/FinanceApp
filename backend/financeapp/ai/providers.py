@@ -164,9 +164,11 @@ def _anthropic_models(e: Endpoint) -> list[str]:
 
 
 def _optional_not_null(schema):
-    """Claude's structured outputs cap how many fields may be unions (21 nullable fields in the reading schema is too
-    many: "too many parameters with union types"). So for Claude a nullable field becomes an optional one: its null
-    branch is dropped and it leaves `required`, and a missing field reads as None (the answer models default to it).
+    """Claude's structured outputs cap the schema's complexity: 21 nullable fields in the reading schema are too many
+    unions ("too many parameters with union types"), and 21 optional ones are too big a grammar ("Schema is too
+    complex"; each optional field roughly doubles part of it). So for Claude a nullable field loses its null branch:
+    a string or an object stays required (an empty string means not shown, which every reader treats like None), and
+    only a number becomes optional (left out when not shown; the answer models default it to None).
     """
     if isinstance(schema, list):
         return [_optional_not_null(s) for s in schema]
@@ -178,11 +180,16 @@ def _optional_not_null(schema):
             branches = sub.get("anyOf") if isinstance(sub, dict) else None
             if branches and any(b == {"type": "null"} for b in branches):
                 rest = [b for b in branches if b != {"type": "null"}]
-                props[name] = _optional_not_null(rest[0] if len(rest) == 1 else {**sub, "anyOf": rest})
+                inner = rest[0] if len(rest) == 1 else {**sub, "anyOf": rest}
+                if inner.get("type") == "string":
+                    inner = {**inner, "description": "Empty if not shown."}
+                props[name] = _optional_not_null(inner)
+                keep = inner.get("type") in ("string", "object")
             else:
                 props[name] = _optional_not_null(sub)
-                if name in schema.get("required", []):
-                    required.append(name)
+                keep = True
+            if keep and name in schema.get("required", []):
+                required.append(name)
         return {**schema, "properties": props, "required": required}
     return {k: _optional_not_null(v) for k, v in schema.items()}
 

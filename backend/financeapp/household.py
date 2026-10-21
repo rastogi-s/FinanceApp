@@ -196,7 +196,10 @@ def build_with_plan(db: DbSession) -> tuple[dict, dict | None]:
     as_of = max(synced_times) if synced_times else datetime.now(UTC)
 
     budget_state = budget.build(db)
-    plan_inputs = plan.inputs(db, budget_state, net, end)
+    allocation_rows = [
+        {"asset_class": k, "cents": v} for k, v in sorted(allocation.items(), key=lambda kv: -kv[1]) if v
+    ]
+    plan_inputs = plan.inputs(db, budget_state, net, end, holdings, allocation_rows)
     return {
         "demo": False,
         "linked": True,
@@ -217,9 +220,7 @@ def build_with_plan(db: DbSession) -> tuple[dict, dict | None]:
         "transactions": transactions,
         "accounts": {"cash": cash, "investments": investments, "debts": debts},
         "holdings": holdings,
-        "allocation": [
-            {"asset_class": k, "cents": v} for k, v in sorted(allocation.items(), key=lambda kv: -kv[1]) if v
-        ],
+        "allocation": allocation_rows,
         "projection": plan.projection(plan_inputs),
         "health": {
             "stale": [

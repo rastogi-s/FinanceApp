@@ -17,7 +17,7 @@ import { Slider } from "@/components/ui/slider";
 import { toast } from "@/components/ui/toast";
 import { api } from "@/lib/api";
 import { resetHousehold, useApi } from "@/lib/household";
-import { LEVEL_NAMES, type Level, type PlanInputs, type PlanState, type Scenario, project } from "@/lib/plan";
+import { LEVEL_NAMES, type Level, type PlanInputs, type PlanState, SAVINGS_SHORT, type Scenario, project } from "@/lib/plan";
 import { cn } from "@/lib/utils";
 
 const monthName = new Intl.DateTimeFormat("en-US", {
@@ -125,6 +125,7 @@ function PlanView({ p, onSaved }: { p: Linked; onSaved: (p: PlanState) => void }
         withdrawal_rate: s.withdrawal,
         // Typed in only when it differs from what the app measured; the same number keeps following the budget.
         savings_cents: s.monthly === i.measured_savings_cents ? null : s.monthly,
+        return_mid: s.ret === i.returns_source.derived_mid ? null : s.ret,
         ...(s.yearly !== i.levels[level].yearly_cents ? { spending: { [level]: s.yearly } } : {}),
       },
       "Saved as your plan.",
@@ -137,13 +138,18 @@ function PlanView({ p, onSaved }: { p: Linked; onSaved: (p: PlanState) => void }
           icon={<Telescope className="size-5" />}
           title="How much do you save a month?"
           action={
-            <Button size="sm" className="mt-3" onClick={() => setAboutOpen(true)}>
-              Type it in
-            </Button>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Button asChild size="sm">
+                <Link href="/budget#pay">Add a pay stub</Link>
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => setAboutOpen(true)}>
+                Type it in
+              </Button>
+            </div>
           }
         >
-          The app works it out from your pay and spending once a paycheck lands in a linked account (or you add a pay stub on the Budget
-          page). Until then, type in a number to see where it leads.
+          The app works it out from your pay stubs, or from paychecks landing in a linked account, against what you spend. It hasn&apos;t
+          seen any pay yet.
         </Notice>
         <Emergency e={i.emergency} />
         <Ideas p={p} s={s} />
@@ -244,7 +250,7 @@ function PlanView({ p, onSaved }: { p: Linked; onSaved: (p: PlanState) => void }
             </p>
             <p className="mt-1 text-xs text-muted-foreground">
               {s.monthly === i.measured_savings_cents
-                ? `average of the last ${i.savings_months} month${i.savings_months === 1 ? "" : "s"}`
+                ? SAVINGS_SHORT[i.savings_source.kind]
                 : i.savings_typed && s.monthly === i.monthly_savings_cents
                   ? "the number you typed in"
                   : "what if"}
@@ -280,11 +286,13 @@ function PlanView({ p, onSaved }: { p: Linked; onSaved: (p: PlanState) => void }
             step={5_000}
             onChange={(v) => setS({ ...s, monthly: v })}
             hint={
-              i.measured_savings_cents !== null ? (
-                <>
-                  You&apos;ve been saving about <Money cents={i.measured_savings_cents} /> a month.
-                </>
-              ) : undefined
+              <Source
+                note={i.savings_source.note}
+                differs={i.measured_savings_cents !== null && s.monthly !== i.measured_savings_cents}
+                typed={i.savings_typed && s.monthly === i.monthly_savings_cents}
+                derived={i.measured_savings_cents !== null ? <Money cents={i.measured_savings_cents} /> : null}
+                onUse={() => i.measured_savings_cents !== null && setS({ ...s, monthly: i.measured_savings_cents })}
+              />
             }
           />
           <div className="grid grid-cols-1 gap-2">
@@ -315,10 +323,6 @@ function PlanView({ p, onSaved }: { p: Linked; onSaved: (p: PlanState) => void }
                 </button>
               ))}
             </div>
-            <p className="text-xs text-muted-foreground">
-              {LEVEL_NAMES[level].body}
-              {i.levels[level].typed ? ", as you typed it in." : ", from your budget and spending."}
-            </p>
           </div>
           <Slider
             label="Yearly spending"
@@ -328,16 +332,33 @@ function PlanView({ p, onSaved }: { p: Linked; onSaved: (p: PlanState) => void }
             max={Math.max(20_000_000, Math.ceil((i.levels.fat.yearly_cents * 1.5) / 1_000_000) * 1_000_000)}
             step={100_000}
             onChange={(v) => setS({ ...s, yearly: v })}
+            hint={
+              <Source
+                note={`${LEVEL_NAMES[level].title}: ${i.levels[level].note.charAt(0).toLowerCase()}${i.levels[level].note.slice(1)}`}
+                differs={s.yearly !== i.levels[level].derived_cents}
+                typed={i.levels[level].typed && s.yearly === i.levels[level].yearly_cents}
+                derived={<Money cents={i.levels[level].derived_cents} />}
+                onUse={() => setS({ ...s, yearly: i.levels[level].derived_cents })}
+              />
+            }
           />
           <Slider
-            label="Market return, middle of the range"
+            label="Market return, after inflation"
             value={s.ret}
             display={`${s.ret}% a year`}
-            min={2}
+            min={1}
             max={10}
             step={0.5}
             onChange={(v) => setS({ ...s, ret: v })}
-            hint="After inflation. US stocks have returned about 6–7% a year after inflation over the long run, with big swings."
+            hint={
+              <Source
+                note={i.returns_source.note}
+                differs={s.ret !== i.returns_source.derived_mid}
+                typed={i.returns_source.typed && s.ret === i.returns.mid}
+                derived={`${i.returns_source.derived_mid}%`}
+                onUse={() => setS({ ...s, ret: i.returns_source.derived_mid })}
+              />
+            }
           />
           <Slider
             label="Taking out each year"
@@ -354,7 +375,6 @@ function PlanView({ p, onSaved }: { p: Linked; onSaved: (p: PlanState) => void }
               <Button onClick={saveScenario} disabled={saving}>
                 Save as my plan
               </Button>
-              {s.ret !== saved.ret && <p className="text-xs text-muted-foreground">The return stays a what-if; Home uses 4% to 8%.</p>}
             </div>
           )}
         </CardContent>
@@ -364,6 +384,37 @@ function PlanView({ p, onSaved }: { p: Linked; onSaved: (p: PlanState) => void }
       <Emergency e={i.emergency} />
       <About open={aboutOpen} onOpenChange={setAboutOpen} p={p} save={save} saving={saving} />
     </div>
+  );
+}
+
+/** Under a slider: where the app's number came from, and a way back to it once the slider has moved away. */
+function Source({
+  note,
+  differs,
+  typed,
+  derived,
+  onUse,
+}: {
+  note: string;
+  differs: boolean;
+  typed: boolean;
+  derived: React.ReactNode;
+  onUse: () => void;
+}) {
+  return (
+    <>
+      {typed && <span className="font-medium text-foreground">You typed this in. </span>}
+      {differs && derived !== null ? <>The app works out {derived}. </> : null}
+      {note}
+      {differs && derived !== null && (
+        <>
+          {" "}
+          <button type="button" onClick={onUse} className="font-medium text-primary underline-offset-4 hover:underline">
+            Use it
+          </button>
+        </>
+      )}
+    </>
   );
 }
 
@@ -568,8 +619,8 @@ function AboutForm({
         label="Saving each month"
         hint={
           i.measured_savings_cents !== null
-            ? `The app measured ${formatMoney(i.measured_savings_cents)} a month.`
-            : "No paychecks seen yet to measure it from."
+            ? `The app works out ${formatMoney(i.measured_savings_cents)} a month. ${i.savings_source.note}`
+            : "No pay or income seen yet to work it out from. Add a pay stub on the Budget page, or type a number."
         }
         error={bad(savings) ? "Enter an amount in dollars." : null}
       >
@@ -594,7 +645,7 @@ function AboutForm({
             <Input
               inputMode="decimal"
               autoComplete="off"
-              placeholder={i.levels[l].typed ? "" : dollars(i.levels[l].yearly_cents)}
+              placeholder={dollars(i.levels[l].derived_cents)}
               value={levels[l]}
               onChange={(e) => setLevels({ ...levels, [l]: e.target.value })}
             />
