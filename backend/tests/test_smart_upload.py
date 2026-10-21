@@ -303,19 +303,32 @@ def optional_fields(schema) -> int:
 
 
 def test_claude_gets_a_schema_without_unions(fake):  # noqa: F811
-    """Claude refuses schemas with many union-typed fields (a 400 seen reading a pay stub photo), so nullable fields
-    go to it as optional ones, and an answer that leaves them out still reads."""
+    """Claude refuses schemas with many union-typed fields ("too many parameters with union types") and with many
+    optional ones ("Schema is too complex", both seen reading a pay stub), so nullable strings and objects go to it as
+    required (empty string for not shown) and only nullable numbers as optional, and such an answer still reads."""
     from financeapp.ai import providers
 
     doc = documents.open_document(png())
     out = extract.build_request(doc, [], [], "a pay stub")
-    fake.answer = json.dumps({"kind": "paystub", "transactions": [], "holdings": [], "paystub": {"gross": 4500}})
+    stub = {"pay_date": "2026-10-15", "period_start": "", "period_end": "", "frequency": "", "gross": 4500}
+    fake.answer = json.dumps(
+        {
+            "kind": "paystub",
+            **{k: "" for k in ("institution", "account_name", "account_last4", "account_type", "as_of", "notes")},
+            "transactions": [],
+            "holdings": [],
+            "paystub": stub,
+        }
+    )
     reply = providers.complete(providers.Endpoint("anthropic", CLAUDE_KEY, None), "claude-opus-5-5", out.request)
     sent = json.loads(fake.sent[-1].content)["output_config"]["format"]["schema"]
     assert count(sent, lambda s: "anyOf" in s or isinstance(s.get("type"), list)) == 0
-    assert optional_fields(sent) <= 24  # Claude's limit on optional fields
-    assert sent["required"] == ["kind", "transactions", "holdings"] and sent["additionalProperties"] is False
+    assert optional_fields(sent) == 9  # the numbers only; 21 optional fields was "Schema is too complex"
+    assert "statement_balance" not in sent["required"] and "paystub" in sent["required"]
+    assert sent["properties"]["paystub"]["required"] == ["pay_date", "period_start", "period_end", "frequency"]
     answer = extract.parse_answer(reply.text)
-    assert answer.paystub.gross == 4500 and answer.paystub.net is None and answer.institution is None
-    # Other providers still get the strict, all-required schema.
+    assert answer.paystub.gross == 4500 and answer.paystub.net is None
+    form = extract.to_paystub(answer, "claude-opus-5-5")
+    assert form["date"] == "2026-10-15" and form["period_start"] is None and form["frequency"] is None
+    assert form["gross_cents"] == 450000 and form["net_cents"] is None
     assert count(extract.SCHEMA, lambda s: "anyOf" in s) == 21
