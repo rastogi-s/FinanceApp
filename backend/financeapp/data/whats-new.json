@@ -1,5 +1,29 @@
 [
   {
+    "version": "0.15.0",
+    "title": "Find anything you spent",
+    "features": [
+      {
+        "id": "transaction-search",
+        "title": "Search and filter spending",
+        "body": "Spending has a search box and a Filters button. Search by merchant, then narrow by category, account, money in or out, amount, and dates from this month to your whole history. The totals at the top add up everything that matches.",
+        "tryIt": "/spending"
+      },
+      {
+        "id": "budget-to-spending",
+        "title": "See what's behind a budget line",
+        "body": "Tap a budget line and choose See this month's transactions to open Spending already filtered to that category.",
+        "tryIt": "/budget"
+      },
+      {
+        "id": "holdings-search",
+        "title": "Search and sort holdings",
+        "body": "Portfolio holdings can be searched by ticker or name, sorted by size, today's move or total gain, and narrowed to one account or kind of holding. Your real exposure has a box to find any company, so you can see how much Apple you really own.",
+        "tryIt": "/portfolio"
+      }
+    ]
+  },
+  {
     "version": "0.14.0",
     "title": "A plan that starts from your own numbers",
     "features": [
