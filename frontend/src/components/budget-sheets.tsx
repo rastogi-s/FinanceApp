@@ -90,6 +90,7 @@ function LineEditor({ line, budget, change, onClose }: LineProps & { line: Budge
           if (cents !== null) save(cents);
         }}
       >
+        {line.forecast && line.forecast.status !== "over" && <MonthEnd line={line} month={budget.month} />}
         <Field
           id="limit"
           label="Monthly limit"
@@ -123,6 +124,54 @@ function LineEditor({ line, budget, change, onClose }: LineProps & { line: Budge
         </div>
       </form>
     </Sheet>
+  );
+}
+
+const dayFormat = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+
+/** How the month-end number adds up: spent, bills still to come, and the everyday pace for the days left. */
+function MonthEnd({ line, month }: { line: BudgetLine; month: string }) {
+  const f = line.forecast!;
+  const over = f.status === "heading_over";
+  const days = `${f.days_left} day${f.days_left === 1 ? "" : "s"}`;
+  return (
+    <div className={cn("rounded-2xl border p-4 text-sm", over && "border-warning/40 bg-warning/5")}>
+      <p className="font-medium">
+        By month-end, about <Money cents={f.projected_cents} />
+        {over && (
+          <span className="text-warning">
+            {" "}
+            · <Money cents={f.over_cents} /> over
+          </span>
+        )}
+      </p>
+      <dl className="mt-3 grid grid-cols-1 gap-1.5 text-muted-foreground">
+        <div className="flex justify-between gap-3">
+          <dt>Spent so far</dt>
+          <dd>
+            <Money cents={line.spent_cents} />
+          </dd>
+        </div>
+        {f.due.map((d) => (
+          <div key={d.merchant} className="flex justify-between gap-3">
+            <dt className="min-w-0 truncate">
+              {d.merchant}, usually {dayFormat.format(new Date(`${month.slice(0, 8)}${String(d.day).padStart(2, "0")}`))}
+            </dt>
+            <dd>
+              <Money cents={d.cents} signed />
+            </dd>
+          </div>
+        ))}
+        {f.pace_cents > 0 && (
+          <div className="flex justify-between gap-3">
+            <dt>{line.kind === "fixed" ? "The rest of a usual month" : `At your pace, ${days} more`}</dt>
+            <dd>
+              <Money cents={f.pace_cents} signed />
+            </dd>
+          </div>
+        )}
+      </dl>
+    </div>
   );
 }
 
