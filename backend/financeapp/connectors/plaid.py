@@ -164,6 +164,15 @@ class Plaid:
             price = Decimal(str(h.get("institution_price") or s.get("close_price") or 0))
             quantity = Decimal(str(h.get("quantity") or 0))
             value = cents(h.get("institution_value"))
+            # Stock plans list unvested shares too; the account balance already leaves them out.
+            vested = h.get("vested_quantity")
+            if vested is not None and Decimal(str(vested)) < quantity:
+                quantity = Decimal(str(vested))
+                value = cents(h.get("vested_value"))
+                if not quantity:
+                    continue
+            if value is None:
+                value = int(price * quantity * 100)
             out.append(
                 HoldingData(
                     account_external_id=h["account_id"],
@@ -172,7 +181,7 @@ class Plaid:
                     asset_class="Cash" if s.get("is_cash_equivalent") else asset_class_for(s.get("type"), symbol),
                     quantity=quantity,
                     price=price,
-                    value_cents=value if value is not None else int(price * quantity * 100),
+                    value_cents=value,
                     cost_basis_cents=cents(h.get("cost_basis")),
                 )
             )
