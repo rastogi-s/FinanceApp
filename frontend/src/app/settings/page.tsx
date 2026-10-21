@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Bell, Bot, BrainCircuit, ChevronRight, Landmark, LogOut, ShieldCheck, Sparkles, Users } from "lucide-react";
+import { Bell, Bot, BrainCircuit, ChevronRight, Landmark, ListChecks, LogOut, ShieldCheck, Sparkles, Users } from "lucide-react";
 import { PageTitle } from "@/components/page";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -9,7 +9,11 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useAuth, useUser } from "@/lib/auth";
 import { useApi, useMeta } from "@/lib/household";
 
-type Release = { version: string; title: string; features: { id: string; title: string; body: string }[] };
+type Release = {
+  version: string;
+  title: string;
+  features: { id: string; title: string; body: string }[];
+};
 type Connections = { connections: { status: string; accounts: unknown[] }[] };
 
 export default function Settings() {
@@ -18,6 +22,7 @@ export default function Settings() {
   const { signOut, state } = useAuth();
   const { data: releases } = useApi<Release[]>("/api/whats-new");
   const { data: connections } = useApi<Connections>("/api/connections");
+  const { data: guide } = useApi<{ done: number; steps: unknown[] }>("/api/guide");
   const accounts = connections?.connections.reduce((n, c) => n + c.accounts.length, 0) ?? 0;
   const stale = connections?.connections.filter((c) => c.status === "stale").length ?? 0;
 
@@ -48,6 +53,13 @@ export default function Settings() {
             <Row href="/settings/security" icon={<ShieldCheck />} title="Security" detail="Passkeys, devices, activity" tab="security" />
             <Row href="/settings/ai" icon={<BrainCircuit />} title="AI" detail="Reading files, the morning brief, providers" tab="ai" />
             <Row href="/settings/agents" icon={<Bot />} title="Agents" detail="Ask your own AI about your money" tab="agents" />
+            <Row
+              href="/start"
+              icon={<ListChecks />}
+              title="Setup guide"
+              detail={guide ? `${guide.done} of ${guide.steps.length} done` : " "}
+              tab="start"
+            />
           </ul>
         </Card>
 

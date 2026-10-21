@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
+import { type Guide, GuideCard } from "@/components/guide";
 import { AlertTriangle, ArrowDownRight, ArrowUpRight, Bell, ChevronRight, Sparkles, TrendingUp } from "lucide-react";
 import { BriefCard } from "@/components/brief";
 import { Sparkline } from "@/components/charts";
@@ -14,15 +15,31 @@ import { Progress } from "@/components/ui/progress";
 import { toast } from "@/components/ui/toast";
 import { api } from "@/lib/api";
 import { monthName } from "@/lib/budget";
-import { type LinkedHousehold, resetHousehold } from "@/lib/household";
+import { type LinkedHousehold, resetHousehold, useApi } from "@/lib/household";
 import { cn } from "@/lib/utils";
 
-const time = new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit" });
-const shortDay = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" });
+const time = new Intl.DateTimeFormat("en-US", {
+  hour: "numeric",
+  minute: "2-digit",
+});
+const shortDay = new Intl.DateTimeFormat("en-US", {
+  month: "short",
+  day: "numeric",
+});
 
 export default function Home() {
+  const { data: guide, reload } = useApi<Guide>("/api/guide");
+  const hideGuide = async () => {
+    try {
+      await api("/api/guide", { method: "PUT", body: { hidden: true } });
+      reload();
+      toast("Hidden. The guide stays in Settings.");
+    } catch (e) {
+      toast((e as Error).message, "error");
+    }
+  };
   return (
-    <HouseholdPage title="Home">
+    <HouseholdPage title="Home" before={guide && <GuideCard guide={guide} onHide={hideGuide} />}>
       {(h) => {
         const change = h.net_worth.change_today_cents;
         const up = change >= 0;
@@ -281,4 +298,3 @@ function when(iso: string) {
   const d = new Date(iso);
   return d.toDateString() === new Date().toDateString() ? time.format(d) : shortDay.format(d);
 }
-

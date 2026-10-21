@@ -1,85 +1,609 @@
 "use client";
 
-import { Telescope } from "lucide-react";
-import { ProjectionChart, Sparkline } from "@/components/charts";
-import { Money } from "@/components/money";
-import { HouseholdPage, Notice } from "@/components/page";
+import Link from "next/link";
+import { useMemo, useState } from "react";
+import { ChevronRight, LifeBuoy, Pencil, RotateCcw, Scissors, Telescope, TrendingUp } from "lucide-react";
+import { PlanChart } from "@/components/plan-chart";
+import { Money, formatMoney } from "@/components/money";
+import { Notice, PageTitle } from "@/components/page";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Field, Input } from "@/components/ui/input";
+import { Progress } from "@/components/ui/progress";
+import { Sheet } from "@/components/ui/sheet";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Slider } from "@/components/ui/slider";
+import { toast } from "@/components/ui/toast";
+import { api } from "@/lib/api";
+import { resetHousehold, useApi } from "@/lib/household";
+import { LEVEL_NAMES, type Level, type PlanInputs, type PlanState, type Scenario, project } from "@/lib/plan";
+import { cn } from "@/lib/utils";
+
+const monthName = new Intl.DateTimeFormat("en-US", {
+  month: "long",
+  timeZone: "UTC",
+});
+const LEVELS: Level[] = ["lean", "regular", "fat"];
+
+type Linked = Extract<PlanState, { linked: true }>;
 
 export default function Plan() {
+  const { data, error } = useApi<PlanState>("/api/plan");
+  const [local, setLocal] = useState<PlanState | null>(null);
+  const state = local ?? data;
   return (
-    <HouseholdPage title="Plan" subtitle="Where today's savings take you. A range, because no one knows future returns.">
-      {(h) => {
-        if (!h.projection) {
-          return (
-            <div className="grid grid-cols-1 gap-4">
-              <Card className="overflow-hidden">
-                <CardHeader>
-                  <CardTitle>Net worth so far</CardTitle>
-                </CardHeader>
-                <CardContent className="pb-0">
-                  <p className="text-3xl font-semibold tracking-tight">
-                    <Money cents={h.net_worth.cents} />
-                  </p>
-                </CardContent>
-                <Sparkline points={h.net_worth.history.map((p) => p.cents)} label="Net worth history" />
-              </Card>
-              <Notice icon={<Telescope className="size-5" />} title="Projections need a few months of history">
-                Once the app has your budget and savings rate, this page shows where today&apos;s savings take you, as a range. Until then
-                it tracks net worth day by day.
-              </Notice>
-            </div>
-          );
-        }
-        const projection = h.projection;
-        const bands = projection.bands;
-        const in10 = bands[Math.min(10, bands.length - 1)]!;
-        const last = bands[bands.length - 1]!;
-        return (
-          <div className="grid grid-cols-1 gap-4">
-            <Card>
-              <CardHeader>
-                <CardTitle>Net worth by {last.year}</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-3xl font-semibold tracking-tight">
-                  <Money cents={last.low} style="compact" /> – <Money cents={last.high} style="compact" />
-                </p>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  Saving <Money cents={projection.monthly_savings_cents} /> a month, at 4% to 8% a year after inflation.
-                </p>
-                <div className="mt-4">
-                  <ProjectionChart bands={bands} />
-                </div>
-              </CardContent>
-            </Card>
-            <div className="grid grid-cols-2 gap-4">
-              <Card>
-                <CardHeader>
-                  <CardTitle>In 10 years</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-2xl font-semibold tracking-tight">
-                    <Money cents={in10.mid} style="compact" />
-                  </p>
-                  <p className="mt-1 text-xs text-muted-foreground">middle of the range</p>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardHeader>
-                  <CardTitle>Monthly savings</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-2xl font-semibold tracking-tight">
-                    <Money cents={projection.monthly_savings_cents} />
-                  </p>
-                  <p className="mt-1 text-xs text-muted-foreground">average of the last 6 months</p>
-                </CardContent>
-              </Card>
-            </div>
+    <>
+      <PageTitle
+        title="Plan"
+        subtitle="Where today's savings take you, and when work becomes optional. A range, because no one knows future returns."
+      />
+      {error && !state && (
+        <Notice icon={<Telescope className="size-5" />} title="Couldn't load the plan">
+          {error}. Check that the server is running, then reload the page.
+        </Notice>
+      )}
+      {!state && !error && (
+        <div className="grid grid-cols-1 gap-4" aria-busy="true" aria-label="Loading">
+          <Skeleton className="h-96 rounded-xl" />
+          <Skeleton className="h-72 rounded-xl" />
+        </div>
+      )}
+      {state && !state.linked && (
+        <Notice
+          icon={<Telescope className="size-5" />}
+          title="No accounts yet"
+          action={
+            <Button asChild size="sm" className="mt-3">
+              <Link href="/settings/accounts">Add an account</Link>
+            </Button>
+          }
+        >
+          The plan starts from your net worth and what you save each month. Link an account and it fills in.
+        </Notice>
+      )}
+      {state?.linked && (
+        <PlanView
+          key={JSON.stringify(state.inputs)}
+          p={state}
+          onSaved={(next) => {
+            setLocal(next);
+            resetHousehold();
+          }}
+        />
+      )}
+    </>
+  );
+}
+
+function savedScenario(i: PlanInputs): Scenario {
+  return {
+    monthly: i.monthly_savings_cents ?? 0,
+    ret: i.returns.mid,
+    yearly: i.levels[i.level].yearly_cents,
+    withdrawal: i.withdrawal_rate,
+  };
+}
+
+function PlanView({ p, onSaved }: { p: Linked; onSaved: (p: PlanState) => void }) {
+  const i = p.inputs;
+  const [s, setS] = useState<Scenario>(() => savedScenario(i));
+  const [level, setLevel] = useState<Level>(i.level);
+  const [aboutOpen, setAboutOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  const result = useMemo(() => project(i, s), [i, s]);
+  const saved = savedScenario(i);
+  const changed =
+    s.monthly !== saved.monthly ||
+    s.ret !== saved.ret ||
+    s.yearly !== saved.yearly ||
+    s.withdrawal !== saved.withdrawal ||
+    level !== i.level;
+
+  const save = async (body: Record<string, unknown>, done: string): Promise<boolean> => {
+    if (p.demo) {
+      toast("The plan can't be changed while the app shows sample data.");
+      return false;
+    }
+    setSaving(true);
+    try {
+      onSaved(await api<PlanState>("/api/plan/settings", { method: "PATCH", body }));
+      toast(done);
+      return true;
+    } catch (e) {
+      toast((e as Error).message, "error");
+      return false;
+    } finally {
+      setSaving(false);
+    }
+  };
+  const saveScenario = () =>
+    save(
+      {
+        level,
+        withdrawal_rate: s.withdrawal,
+        // Typed in only when it differs from what the app measured; the same number keeps following the budget.
+        savings_cents: s.monthly === i.measured_savings_cents ? null : s.monthly,
+        ...(s.yearly !== i.levels[level].yearly_cents ? { spending: { [level]: s.yearly } } : {}),
+      },
+      "Saved as your plan.",
+    );
+
+  if (i.monthly_savings_cents === null && !changed) {
+    return (
+      <div className="grid grid-cols-1 gap-4">
+        <Notice
+          icon={<Telescope className="size-5" />}
+          title="How much do you save a month?"
+          action={
+            <Button size="sm" className="mt-3" onClick={() => setAboutOpen(true)}>
+              Type it in
+            </Button>
+          }
+        >
+          The app works it out from your pay and spending once a paycheck lands in a linked account (or you add a pay stub on the Budget
+          page). Until then, type in a number to see where it leads.
+        </Notice>
+        <Emergency e={i.emergency} />
+        <Ideas p={p} s={s} />
+        <About open={aboutOpen} onOpenChange={setAboutOpen} p={p} save={save} saving={saving} askSavings />
+      </div>
+    );
+  }
+
+  const fire = result.fire;
+  const age = (year: number | null) => (year !== null && i.birth_year ? year - i.birth_year : null);
+  const horizon = Math.min(30, Math.max(12, (fire.low ?? fire.mid ?? i.year + 25) - i.year + 3));
+  const in10 = result.bands[10]!;
+
+  return (
+    <div className="grid grid-cols-1 gap-4">
+      <Card className="overflow-hidden">
+        <CardHeader>
+          <CardTitle>Work becomes optional</CardTitle>
+          <Button variant="ghost" size="sm" onClick={() => setAboutOpen(true)} className="-mt-1.5 -mr-2">
+            <Pencil /> {i.birth_year ? "Your details" : "Add your age"}
+          </Button>
+        </CardHeader>
+        <CardContent>
+          {result.target === null ? (
+            <p className="text-lg font-semibold">Set the spending you&apos;d like later to see a date.</p>
+          ) : fire.mid === null ? (
+            <>
+              <p className="text-3xl font-semibold tracking-tight">Not within 60 years</p>
+              <p className="mt-1 text-sm text-muted-foreground">Saving more, or planning to spend less later, brings it into view.</p>
+            </>
+          ) : fire.mid <= i.year ? (
+            <>
+              <p className="text-3xl font-semibold tracking-tight">You&apos;re there</p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                <Money cents={i.start_cents} style="compact" /> already covers <Money cents={s.yearly} style="compact" /> a year at a{" "}
+                {s.withdrawal}% withdrawal.
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                <span className="text-4xl font-semibold tracking-tight">Around {fire.mid}</span>
+                {age(fire.mid) !== null && <span className="text-lg font-medium text-muted-foreground">at age {age(fire.mid)}</span>}
+              </p>
+              <p className="mt-1.5 text-sm text-muted-foreground">
+                {fire.high !== null && fire.low !== null && fire.high !== fire.low ? (
+                  <>
+                    Between {fire.high} and {fire.low}, depending on markets.{" "}
+                  </>
+                ) : fire.low === null ? (
+                  <>Later, or never, if markets disappoint. </>
+                ) : null}
+                That&apos;s when about <Money cents={result.target} style="compact" /> covers <Money cents={s.yearly} style="compact" /> a
+                year, taking out {s.withdrawal}% a year.
+              </p>
+            </>
+          )}
+          <div className="mt-5">
+            <PlanChart
+              history={p.history}
+              bands={result.bands}
+              target={result.target}
+              fireYear={fire.mid}
+              birthYear={i.birth_year}
+              years={horizon}
+            />
           </div>
-        );
-      }}
-    </HouseholdPage>
+          <p className="mt-3 text-xs text-muted-foreground">
+            In today&apos;s dollars: returns are after inflation ({result.returns.low}% to {result.returns.high}% a year). The solid line is
+            your net worth so far
+            {p.history.length < 30 ? "; it grows a day at a time from when you linked your accounts" : ""}.
+          </p>
+        </CardContent>
+      </Card>
+
+      <div className="grid grid-cols-2 gap-4">
+        <Card>
+          <CardHeader>
+            <CardTitle>In 10 years</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-2xl font-semibold tracking-tight">
+              <Money cents={in10.mid} style="compact" />
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              <Money cents={in10.low} style="compact" /> to <Money cents={in10.high} style="compact" />
+            </p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle>Saving a month</CardTitle>
+            <TrendingUp className="size-4 text-positive" aria-hidden />
+          </CardHeader>
+          <CardContent>
+            <p className="text-2xl font-semibold tracking-tight">
+              <Money cents={s.monthly} />
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {s.monthly === i.measured_savings_cents
+                ? `average of the last ${i.savings_months} month${i.savings_months === 1 ? "" : "s"}`
+                : i.savings_typed && s.monthly === i.monthly_savings_cents
+                  ? "the number you typed in"
+                  : "what if"}
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>What if</CardTitle>
+          {changed && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="-mt-1.5 -mr-2"
+              onClick={() => {
+                setS(saved);
+                setLevel(i.level);
+              }}
+            >
+              <RotateCcw /> Reset
+            </Button>
+          )}
+        </CardHeader>
+        <CardContent className="grid grid-cols-1 gap-6">
+          <Slider
+            label="Saving each month"
+            value={s.monthly}
+            display={<Money cents={s.monthly} />}
+            min={0}
+            max={Math.max(1_000_000, Math.ceil(((i.measured_savings_cents ?? s.monthly) * 2.5) / 50_000) * 50_000)}
+            step={5_000}
+            onChange={(v) => setS({ ...s, monthly: v })}
+            hint={
+              i.measured_savings_cents !== null ? (
+                <>
+                  You&apos;ve been saving about <Money cents={i.measured_savings_cents} /> a month.
+                </>
+              ) : undefined
+            }
+          />
+          <div className="grid grid-cols-1 gap-2">
+            <p className="text-sm font-medium" id="level-label">
+              Spending, once work is optional
+            </p>
+            <div role="radiogroup" aria-labelledby="level-label" className="grid grid-cols-3 gap-2">
+              {LEVELS.map((l) => (
+                <button
+                  key={l}
+                  type="button"
+                  role="radio"
+                  aria-checked={level === l}
+                  onClick={() => {
+                    setLevel(l);
+                    setS({ ...s, yearly: i.levels[l].yearly_cents });
+                  }}
+                  className={cn(
+                    "rounded-xl border px-2.5 py-2.5 text-left transition-colors",
+                    level === l ? "border-primary bg-accent text-accent-foreground" : "hover:bg-muted",
+                  )}
+                >
+                  <span className="block text-sm font-medium">{LEVEL_NAMES[l].title}</span>
+                  <span className="block text-xs opacity-80">
+                    <Money cents={i.levels[l].yearly_cents} style="compact" />
+                    /yr
+                  </span>
+                </button>
+              ))}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {LEVEL_NAMES[level].body}
+              {i.levels[level].typed ? ", as you typed it in." : ", from your budget and spending."}
+            </p>
+          </div>
+          <Slider
+            label="Yearly spending"
+            value={s.yearly}
+            display={<Money cents={s.yearly} />}
+            min={0}
+            max={Math.max(20_000_000, Math.ceil((i.levels.fat.yearly_cents * 1.5) / 1_000_000) * 1_000_000)}
+            step={100_000}
+            onChange={(v) => setS({ ...s, yearly: v })}
+          />
+          <Slider
+            label="Market return, middle of the range"
+            value={s.ret}
+            display={`${s.ret}% a year`}
+            min={2}
+            max={10}
+            step={0.5}
+            onChange={(v) => setS({ ...s, ret: v })}
+            hint="After inflation. US stocks have returned about 6–7% a year after inflation over the long run, with big swings."
+          />
+          <Slider
+            label="Taking out each year"
+            value={s.withdrawal}
+            display={`${s.withdrawal}%`}
+            min={3}
+            max={5}
+            step={0.25}
+            onChange={(v) => setS({ ...s, withdrawal: v })}
+            hint="4% is the common rule of thumb for a 30-year retirement; 3.5% is safer for a longer one."
+          />
+          {changed && (
+            <div className="flex flex-wrap items-center gap-3">
+              <Button onClick={saveScenario} disabled={saving}>
+                Save as my plan
+              </Button>
+              {s.ret !== saved.ret && <p className="text-xs text-muted-foreground">The return stays a what-if; Home uses 4% to 8%.</p>}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Ideas p={p} s={s} />
+      <Emergency e={i.emergency} />
+      <About open={aboutOpen} onOpenChange={setAboutOpen} p={p} save={save} saving={saving} />
+    </div>
+  );
+}
+
+function Ideas({ p, s }: { p: Linked; s: Scenario }) {
+  const { subscriptions, rising, subscriptions_yearly_cents: yearly } = p.ideas;
+  const i = p.inputs;
+  const monthly = Math.round(yearly / 12);
+  // What cancelling every subscription would do: more saved now, and less needed later.
+  const sooner = useMemo(() => {
+    if (!monthly || s.yearly <= 0) return null;
+    const now = project(i, s).fire.mid;
+    const then = project(i, {
+      ...s,
+      monthly: s.monthly + monthly,
+      yearly: Math.max(s.yearly - yearly, 0),
+    }).fire.mid;
+    return now !== null && then !== null && now > i.year ? now - then : null;
+  }, [i, s, monthly, yearly]);
+  if (!subscriptions.length && !rising.length) {
+    return (
+      <Notice icon={<Scissors className="size-5" />} title="Ways to save more">
+        Ideas show up here once there are a few months of transactions: subscriptions you may have forgotten, and categories creeping up.
+      </Notice>
+    );
+  }
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Ways to save more</CardTitle>
+        <Scissors className="size-4 text-muted-foreground" aria-hidden />
+      </CardHeader>
+      <CardContent className="grid grid-cols-1 gap-5">
+        {subscriptions.length > 0 && (
+          <div>
+            <p className="text-sm">
+              <span className="font-medium">
+                {subscriptions.length} subscription
+                {subscriptions.length === 1 ? "" : "s"}
+              </span>{" "}
+              cost <Money cents={yearly} /> a year.
+              {sooner !== null && sooner > 0 && (
+                <span className="text-muted-foreground">
+                  {" "}
+                  Without them, work becomes optional about {sooner} year
+                  {sooner === 1 ? "" : "s"} sooner.
+                </span>
+              )}
+            </p>
+            <ul className="mt-2 divide-y">
+              {subscriptions.slice(0, 8).map((x) => (
+                <li key={x.merchant} className="flex items-center justify-between gap-3 py-2.5 text-sm">
+                  <span className="flex min-w-0 items-center gap-2">
+                    <span className="truncate">{x.merchant}</span>
+                    {x.went_up && <Badge variant="negative">Price went up</Badge>}
+                  </span>
+                  <span className="shrink-0 text-muted-foreground">
+                    <Money cents={x.monthly_cents} style="exact" className="font-medium text-foreground" />
+                    /mo
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {rising.length > 0 && (
+          <div>
+            <p className="text-sm font-medium">Creeping up</p>
+            <ul className="mt-2 divide-y">
+              {rising.map((r) => (
+                <li key={r.category_id} className="py-2.5 text-sm">
+                  <Link href="/budget" className="flex items-center justify-between gap-3">
+                    <span className="min-w-0">
+                      <span className="block">{r.category}</span>
+                      <span className="block text-xs text-muted-foreground">
+                        <Money cents={r.spent_cents} /> in {monthName.format(new Date(r.month))}, usually <Money cents={r.usual_cents} />
+                      </span>
+                    </span>
+                    <span className="flex shrink-0 items-center gap-1 font-medium text-negative">
+                      <Money cents={r.change_cents} signed />
+                      <ChevronRight className="size-4 text-muted-foreground" aria-hidden />
+                    </span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function Emergency({ e }: { e: PlanInputs["emergency"] }) {
+  if (!e.monthly_cents) return null;
+  const months = e.have_cents / e.monthly_cents;
+  return (
+    <Link href="/budget" className="block">
+      <Card className="transition-colors hover:bg-muted/40">
+        <CardHeader>
+          <CardTitle>Emergency fund</CardTitle>
+          <LifeBuoy className="size-4 text-muted-foreground" aria-hidden />
+        </CardHeader>
+        <CardContent className="grid grid-cols-1 gap-2">
+          <p className="text-sm">
+            <span className="font-medium">{months >= 10 ? Math.floor(months) : months.toFixed(1)} months</span> of essentials in cash, of{" "}
+            {e.months} you aimed for.
+          </p>
+          <Progress value={e.have_cents} max={e.target_cents} tone="goal" label="Emergency fund" />
+          <p className="text-xs text-muted-foreground">
+            <Money cents={e.have_cents} /> of <Money cents={e.target_cents} />
+          </p>
+        </CardContent>
+      </Card>
+    </Link>
+  );
+}
+
+function dollars(cents: number | null | undefined) {
+  return cents === null || cents === undefined ? "" : String(Math.round(cents / 100));
+}
+
+function About({
+  open,
+  onOpenChange,
+  p,
+  save,
+  saving,
+  askSavings = false,
+}: {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  p: Linked;
+  save: (body: Record<string, unknown>, done: string) => Promise<boolean>;
+  saving: boolean;
+  askSavings?: boolean;
+}) {
+  return (
+    <Sheet open={open} onOpenChange={onOpenChange} title="Your details" description="Leave a number blank to let the app work it out.">
+      <AboutForm p={p} save={save} saving={saving} askSavings={askSavings} onDone={() => onOpenChange(false)} />
+    </Sheet>
+  );
+}
+
+function AboutForm({
+  p,
+  save,
+  saving,
+  askSavings,
+  onDone,
+}: {
+  p: Linked;
+  save: (body: Record<string, unknown>, done: string) => Promise<boolean>;
+  saving: boolean;
+  askSavings: boolean;
+  onDone: () => void;
+}) {
+  const i = p.inputs;
+  // Mounted each time the sheet opens, so it starts from the saved numbers.
+  const [birth, setBirth] = useState(i.birth_year ? String(i.birth_year) : "");
+  const [savings, setSavings] = useState(i.savings_typed ? dollars(i.monthly_savings_cents) : "");
+  const [levels, setLevels] = useState<Record<Level, string>>({
+    lean: i.levels.lean.typed ? dollars(i.levels.lean.yearly_cents) : "",
+    regular: i.levels.regular.typed ? dollars(i.levels.regular.yearly_cents) : "",
+    fat: i.levels.fat.typed ? dollars(i.levels.fat.yearly_cents) : "",
+  });
+  const year = new Date().getFullYear();
+  const birthNum = birth ? Number(birth) : null;
+  const birthBad = birthNum !== null && (!Number.isInteger(birthNum) || birthNum < 1920 || birthNum > year - 10);
+  const cents = (v: string) => (v.trim() === "" ? null : Math.round(Number(v.replace(/[$,\s]/g, "")) * 100));
+  const bad = (v: string) => v.trim() !== "" && !(Number(v.replace(/[$,\s]/g, "")) >= 0);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (birthBad || bad(savings) || LEVELS.some((l) => bad(levels[l]))) return;
+    const ok = await save(
+      {
+        birth_year: birthNum,
+        savings_cents: cents(savings),
+        spending: {
+          lean: cents(levels.lean),
+          regular: cents(levels.regular),
+          fat: cents(levels.fat),
+        },
+      },
+      "Plan updated.",
+    );
+    if (ok) onDone();
+  };
+
+  return (
+    <form onSubmit={submit} className="grid grid-cols-1 gap-4 px-5 pt-2 pb-6">
+      <Field
+        id="birth"
+        label="Year you were born"
+        hint="Shows dates as ages. Stays on your server."
+        error={birthBad ? "Enter a year like 1988." : null}
+      >
+        <Input inputMode="numeric" autoComplete="off" placeholder="1988" value={birth} onChange={(e) => setBirth(e.target.value)} />
+      </Field>
+      <Field
+        id="savings"
+        label="Saving each month"
+        hint={
+          i.measured_savings_cents !== null
+            ? `The app measured ${formatMoney(i.measured_savings_cents)} a month.`
+            : "No paychecks seen yet to measure it from."
+        }
+        error={bad(savings) ? "Enter an amount in dollars." : null}
+      >
+        <Input
+          inputMode="decimal"
+          autoComplete="off"
+          placeholder={dollars(i.measured_savings_cents) || "2000"}
+          value={savings}
+          onChange={(e) => setSavings(e.target.value)}
+          autoFocus={askSavings}
+        />
+      </Field>
+      <fieldset className="grid grid-cols-1 gap-3">
+        <legend className="mb-1 text-sm font-medium">Spending a year, once work is optional</legend>
+        {LEVELS.map((l) => (
+          <Field
+            key={l}
+            id={`level-${l}`}
+            label={`${LEVEL_NAMES[l].title}: ${LEVEL_NAMES[l].body.toLowerCase()}`}
+            error={bad(levels[l]) ? "Enter an amount in dollars." : null}
+          >
+            <Input
+              inputMode="decimal"
+              autoComplete="off"
+              placeholder={i.levels[l].typed ? "" : dollars(i.levels[l].yearly_cents)}
+              value={levels[l]}
+              onChange={(e) => setLevels({ ...levels, [l]: e.target.value })}
+            />
+          </Field>
+        ))}
+      </fieldset>
+      <Button type="submit" size="lg" disabled={saving}>
+        Save
+      </Button>
+    </form>
   );
 }

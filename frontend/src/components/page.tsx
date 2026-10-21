@@ -36,16 +36,20 @@ export function SubPageTitle({ title, subtitle, back }: { title: string; subtitl
 export function HouseholdPage({
   title,
   subtitle,
+  before,
   children,
 }: {
   title: string;
   subtitle?: string;
+  /** Shown above the page whether or not an account is linked yet (Home's setup guide). */
+  before?: React.ReactNode;
   children: (h: LinkedHousehold) => React.ReactNode;
 }) {
   const state = useHousehold();
   return (
     <>
       <PageTitle title={title} subtitle={subtitle} />
+      {before && <div className="mb-4">{before}</div>}
       {state.status === "loading" && <LoadingCards />}
       {state.status === "error" && (
         <Notice icon={<AlertTriangle className="size-5" />} title="Couldn't load your numbers">

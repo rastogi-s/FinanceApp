@@ -19,6 +19,7 @@ from financeapp.api import (
     budget_routes,
     mcp_routes,
     money_routes,
+    plan_routes,
     portfolio_routes,
 )
 from financeapp.config import PACKAGE_DIR, Settings, get_settings
@@ -155,6 +156,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(ai_routes.router)
     app.include_router(alert_routes.router)
     app.include_router(portfolio_routes.router)
+    app.include_router(plan_routes.router)
     app.include_router(brief_routes.router)
     app.include_router(mcp_routes.router)
 
