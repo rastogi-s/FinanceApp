@@ -24,8 +24,22 @@ export type Holding = {
   account: string;
   value_cents: number;
   change_today_percent: number;
+  account_id?: number;
+  quantity?: number;
+  price?: number;
+  cost_basis_cents?: number | null;
+  live?: boolean;
 };
-export type Alert = { id: string; kind: "budget" | "price"; title: string; body: string; at: string };
+export type Alert = {
+  id: string;
+  kind: "budget" | "price" | "concentration";
+  title: string;
+  body: string;
+  at: string;
+  status?: "pending" | "held" | "sent" | "unsent" | "failed";
+  channel?: string | null;
+  read?: boolean;
+};
 export type AccountRow = { id?: number; name: string; type?: string; cents: number; as_of?: string | null };
 
 export type LinkedHousehold = {
@@ -43,6 +57,7 @@ export type LinkedHousehold = {
   transactions: Transaction[];
   accounts: { cash: AccountRow[]; investments?: AccountRow[]; debts: AccountRow[] };
   holdings: Holding[];
+  prices_as_of?: string | null;
   allocation: { asset_class: string; cents: number }[];
   projection: { monthly_savings_cents: number; bands: { year: number; low: number; mid: number; high: number }[] } | null;
   health?: { stale: { id: number; institution: string; error: string | null }[]; last_sync_ok: boolean | null };

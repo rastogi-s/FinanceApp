@@ -1,17 +1,23 @@
 "use client";
 
 import Link from "next/link";
+import { useState } from "react";
 import { AlertTriangle, ArrowDownRight, ArrowUpRight, Bell, ChevronRight, Sparkles, TrendingUp } from "lucide-react";
 import { Sparkline } from "@/components/charts";
 import { Money, formatMoney } from "@/components/money";
 import { HouseholdPage } from "@/components/page";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
+import { toast } from "@/components/ui/toast";
+import { api } from "@/lib/api";
 import { monthName } from "@/lib/budget";
-import type { LinkedHousehold } from "@/lib/household";
+import { type LinkedHousehold, resetHousehold } from "@/lib/household";
+import { cn } from "@/lib/utils";
 
 const time = new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit" });
+const shortDay = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" });
 
 export default function Home() {
   return (
@@ -88,35 +94,7 @@ export default function Home() {
               </Card>
             )}
 
-            {h.alerts.length > 0 && (
-              <Card>
-                <CardHeader>
-                  <CardTitle>Alerts</CardTitle>
-                  <Bell className="size-4 text-muted-foreground" aria-hidden />
-                </CardHeader>
-                <CardContent className="pt-1">
-                  <ul className="divide-y">
-                    {h.alerts.map((a) => (
-                      <li key={a.id} className="flex items-start gap-3 py-3">
-                        <span
-                          className={
-                            a.kind === "budget" ? "mt-1.5 size-2 rounded-full bg-warning" : "mt-1.5 size-2 rounded-full bg-chart-2"
-                          }
-                          aria-hidden
-                        />
-                        <div className="min-w-0 flex-1">
-                          <p className="text-sm font-medium">{a.title}</p>
-                          <p className="text-sm text-muted-foreground">{a.body}</p>
-                        </div>
-                        <time dateTime={a.at} className="text-xs text-muted-foreground">
-                          {time.format(new Date(a.at))}
-                        </time>
-                      </li>
-                    ))}
-                  </ul>
-                </CardContent>
-              </Card>
-            )}
+            {h.alerts.length > 0 && <Alerts h={h} />}
 
             {!h.demo && <Accounts h={h} />}
           </div>
@@ -242,3 +220,62 @@ function Accounts({ h }: { h: LinkedHousehold }) {
     </Card>
   );
 }
+
+function Alerts({ h }: { h: LinkedHousehold }) {
+  const [cleared, setCleared] = useState(false);
+  if (cleared) return null;
+  const clear = async () => {
+    if (h.demo) return toast("Alerts stay put while the app shows sample data.");
+    try {
+      await api("/api/alerts/read", { method: "POST" });
+      setCleared(true);
+      resetHousehold();
+    } catch (e) {
+      toast((e as Error).message, "error");
+    }
+  };
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Alerts</CardTitle>
+        <div className="flex items-center gap-1">
+          <Button variant="ghost" size="sm" onClick={clear}>
+            Clear
+          </Button>
+          <Link href="/settings/alerts" className="flex items-center text-sm font-medium text-primary" aria-label="All alerts">
+            <Bell className="size-4" aria-hidden />
+            <ChevronRight className="size-4" aria-hidden />
+          </Link>
+        </div>
+      </CardHeader>
+      <CardContent className="pt-1">
+        <ul className="divide-y">
+          {h.alerts.map((a) => (
+            <li key={a.id} className="flex items-start gap-3 py-3">
+              <span
+                className={cn(
+                  "mt-1.5 size-2 shrink-0 rounded-full",
+                  a.kind === "budget" ? "bg-warning" : a.kind === "price" ? "bg-chart-2" : "bg-chart-4",
+                )}
+                aria-hidden
+              />
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium">{a.title}</p>
+                <p className="text-sm text-muted-foreground">{a.body}</p>
+              </div>
+              <time dateTime={a.at} className="text-xs text-muted-foreground">
+                {when(a.at)}
+              </time>
+            </li>
+          ))}
+        </ul>
+      </CardContent>
+    </Card>
+  );
+}
+
+function when(iso: string) {
+  const d = new Date(iso);
+  return d.toDateString() === new Date().toDateString() ? time.format(d) : shortDay.format(d);
+}
+

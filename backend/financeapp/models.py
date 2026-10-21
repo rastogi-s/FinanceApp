@@ -368,3 +368,92 @@ class AIUsage(Base):
     priced: Mapped[bool] = mapped_column(Boolean, default=True)  # False: the model's price was a guess
     ok: Mapped[bool] = mapped_column(Boolean, default=True)
     error: Mapped[str | None] = mapped_column(String(200))
+
+
+# ---- prices, alerts and look-through
+
+
+class Quote(Base):
+    """A symbol's latest price from the quote service. Only ticker symbols are ever sent to it."""
+
+    __tablename__ = "quotes"
+    symbol: Mapped[str] = mapped_column(String(40), primary_key=True)
+    price: Mapped[Decimal]
+    previous_close: Mapped[Decimal | None]
+    as_of: Mapped[datetime]  # the market time of the price
+    source: Mapped[str] = mapped_column(String(16))  # finnhub | yahoo
+    fetched_at: Mapped[datetime] = mapped_column(default=now)
+
+
+class AlertRule(Base):
+    """A price, budget or concentration rule (see alerts.py for the params of each)."""
+
+    __tablename__ = "alert_rules"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    kind: Mapped[str] = mapped_column(String(16))  # price | budget | concentration
+    params: Mapped[dict] = mapped_column(default=dict)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Which conditions have fired and not re-armed yet, so a rule never sends the same thing twice.
+    state: Mapped[dict] = mapped_column(default=dict)
+    created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    created_at: Mapped[datetime] = mapped_column(default=now)
+
+
+class AlertEvent(Base):
+    """One alert. The dedup key is unique, so the same alert can't be saved (or sent) twice."""
+
+    __tablename__ = "alert_events"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    rule_id: Mapped[int | None] = mapped_column(ForeignKey("alert_rules.id", ondelete="SET NULL"), index=True)
+    kind: Mapped[str] = mapped_column(String(16))
+    title: Mapped[str] = mapped_column(String(120))
+    body: Mapped[str] = mapped_column(String(300))
+    dedup_key: Mapped[str] = mapped_column(String(160), unique=True)
+    fired_at: Mapped[datetime] = mapped_column(default=now, index=True)
+    # pending (to send) | held (quiet hours) | sent | unsent (no channel set up) | failed
+    status: Mapped[str] = mapped_column(String(16), default="pending")
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    channel: Mapped[str | None] = mapped_column(String(16))  # ntfy | email
+    sent_at: Mapped[datetime | None]
+    read_at: Mapped[datetime | None]
+
+
+class Fund(Base):
+    """A fund or ETF someone holds, and where its list of holdings came from."""
+
+    __tablename__ = "funds"
+    symbol: Mapped[str] = mapped_column(String(40), primary_key=True)
+    name: Mapped[str | None] = mapped_column(String(200))
+    series_id: Mapped[str | None] = mapped_column(String(16))  # the SEC's id for the fund, e.g. S000002839
+    # nport (the fund's own filing) | proxy (a fund tracking the same index, e.g. SPY files none) | none
+    source: Mapped[str] = mapped_column(String(16), default="none")
+    proxy_of: Mapped[str | None] = mapped_column(String(40))
+    accession: Mapped[str | None] = mapped_column(String(24))  # the filing the constituents came from
+    as_of: Mapped[date | None] = mapped_column(Date)  # the date the holdings are as of
+    equity_weight: Mapped[Decimal | None]  # share of the fund in stocks (0.99 for an index fund, 0 for bonds)
+    status: Mapped[str] = mapped_column(String(16), default="new")  # new | ok | not_found | error
+    error: Mapped[str | None] = mapped_column(String(200))
+    fetched_at: Mapped[datetime | None]
+
+
+class FundConstituent(Base):
+    """One holding inside a fund, as a share of the fund's net assets."""
+
+    __tablename__ = "fund_constituents"
+    fund_symbol: Mapped[str] = mapped_column(ForeignKey("funds.symbol", ondelete="CASCADE"), primary_key=True)
+    # The company (cik:320193), else the security (cusip:037833100), else the name; one row per key.
+    key: Mapped[str] = mapped_column(String(80), primary_key=True)
+    symbol: Mapped[str | None] = mapped_column(String(40))
+    name: Mapped[str] = mapped_column(String(200))
+    weight: Mapped[Decimal] = mapped_column(Numeric(14, 10))  # 0.07 = 7% of the fund
+    is_fund: Mapped[bool] = mapped_column(Boolean, default=False)  # a fund inside the fund (target-date funds)
+
+
+class SecurityId(Base):
+    """CUSIP to ticker and company, looked up once and kept."""
+
+    __tablename__ = "security_ids"
+    cusip: Mapped[str] = mapped_column(String(9), primary_key=True)
+    ticker: Mapped[str | None] = mapped_column(String(40))
+    cik: Mapped[int | None] = mapped_column(Integer)
+    resolved_at: Mapped[datetime] = mapped_column(default=now)

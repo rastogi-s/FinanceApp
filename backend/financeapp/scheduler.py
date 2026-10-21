@@ -1,23 +1,26 @@
-"""The background sync: every SYNC_INTERVAL_HOURS, in a thread inside the app (no extra container).
+"""The background work, in a thread inside the app (no extra container): the sync every SYNC_INTERVAL_HOURS, live
+prices every QUOTE_INTERVAL_MINUTES while markets are open (each followed by a check of the price and concentration
+alerts), and funds' holdings for look-through once a week.
 
-It checks every few minutes whether the last scheduled sync is old enough, so restarts and updates don't cause
-extra syncs, and the sync's own database lock means two copies of the app never sync at once. It also clears out
+It checks every minute whether each is due, from what's saved in the database, so restarts and updates don't cause
+extra runs, and the sync's own database lock means two copies of the app never sync at once. It also clears out
 expired sessions and sign-in steps.
 """
 
 import logging
 import threading
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from sqlalchemy import delete, select
 
-from financeapp import sync
+from financeapp import alerts, lookthrough, quotes, sync
 from financeapp.config import Settings
 from financeapp.db import Database
 from financeapp.models import Challenge, Connection, Session, SyncRun, now
 
 log = logging.getLogger("financeapp")
-CHECK_SECONDS = 300
+CHECK_SECONDS = 60
+FUNDS_CHECK = timedelta(hours=6)
 
 
 class Scheduler:
@@ -26,6 +29,7 @@ class Scheduler:
         self.settings = settings
         self.stop = threading.Event()
         self.thread = threading.Thread(target=self._loop, name="sync-scheduler", daemon=True)
+        self.funds_checked: datetime | None = None
 
     def start(self) -> None:
         self.thread.start()
@@ -50,6 +54,16 @@ class Scheduler:
             run = sync.run(self.database, self.settings, "schedule")
             if run is not None:
                 log.info("scheduled sync finished: %s", "ok" if run.ok else "with problems")
+        if quotes.refresh(self.database, self.settings) is not None:
+            alerts.check(self.database, self.settings, {"price", "concentration"})
+        else:
+            # Held alerts go out when quiet hours end, even if no new prices came in.
+            with self.database.session() as db:
+                alerts.send_pending(db, self.settings)
+        if self.funds_checked is None or now() - self.funds_checked > FUNDS_CHECK:
+            self.funds_checked = now()
+            if lookthrough.refresh(self.database, self.settings):
+                alerts.check(self.database, self.settings, {"concentration"})
 
     def _loop(self) -> None:
         delay = 60  # let the app finish starting first

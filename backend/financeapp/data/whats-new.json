@@ -1,5 +1,29 @@
 [
   {
+    "version": "0.5.0",
+    "title": "Live prices, alerts and what's really inside your funds",
+    "features": [
+      {
+        "id": "live-prices",
+        "title": "Live prices and a page for every holding",
+        "body": "Holdings update every 15 minutes while markets are open. Tap any holding for its price chart (drag across it to read any day), the day's and year's range, dividend yield, your shares across accounts and what you've gained.",
+        "tryIt": "/portfolio"
+      },
+      {
+        "id": "look-through",
+        "title": "Your real share of every company",
+        "body": "Portfolio now looks inside your funds, using each fund's SEC filing, so Apple held directly and Apple inside your index funds add up to one number. A map shows funds and companies; tap a bubble to see where it comes from.",
+        "tryIt": "/portfolio"
+      },
+      {
+        "id": "alerts",
+        "title": "Alerts that know when to stay quiet",
+        "body": "Get a push when a price crosses a line, a budget gets close, or one company grows past 10% of your portfolio. Each alert is sent once, and overnight ones wait until morning as a single message. Set them up in Settings → Alerts.",
+        "tryIt": "/settings/alerts"
+      }
+    ]
+  },
+  {
     "version": "0.4.0",
     "title": "AI, on your terms",
     "features": [

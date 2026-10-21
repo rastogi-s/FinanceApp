@@ -1,4 +1,4 @@
-"""Security and sync alerts to your phone: ntfy push first, email as the fallback.
+"""Security, sync and rule alerts (alerts.py) to your phone: ntfy push first, email as the fallback.
 
 Messages never carry balances, amounts or account numbers (anyone glancing at a lock screen could read them), and
 sending never blocks or breaks the request that triggered it: failures are logged and dropped.
@@ -20,8 +20,8 @@ def configured(settings: Settings) -> bool:
     return bool(settings.ntfy_url or (settings.smtp_host and settings.alert_email))
 
 
-def _ntfy(settings: Settings, title: str, body: str, tags: str) -> None:
-    headers = {"Title": title, "Tags": tags, "Priority": "high"}
+def _ntfy(settings: Settings, title: str, body: str, tags: str, priority: str) -> None:
+    headers = {"Title": title, "Tags": tags, "Priority": priority}
     if settings.ntfy_token:
         headers["Authorization"] = f"Bearer {settings.ntfy_token}"
     r = httpx.post(settings.ntfy_url, content=body.encode(), headers=headers, timeout=10)
@@ -41,21 +41,26 @@ def _email(settings: Settings, title: str, body: str) -> None:
         smtp.send_message(msg)
 
 
-def send_now(settings: Settings, title: str, body: str, tags: str = "lock") -> bool:
-    """Sends on the first channel that works. Returns whether anything was sent."""
+def deliver(settings: Settings, title: str, body: str, tags: str = "lock", priority: str = "high") -> str | None:
+    """Sends on the first channel that works. Returns the channel it went out on (ntfy or email), or None."""
     if settings.ntfy_url:
         try:
-            _ntfy(settings, title, body, tags)
-            return True
+            _ntfy(settings, title, body, tags, priority)
+            return "ntfy"
         except Exception as e:
             log.warning("ntfy alert failed (%s); trying email", type(e).__name__)
     if settings.smtp_host and settings.alert_email:
         try:
             _email(settings, title, body)
-            return True
+            return "email"
         except Exception as e:
             log.warning("email alert failed (%s)", type(e).__name__)
-    return False
+    return None
+
+
+def send_now(settings: Settings, title: str, body: str, tags: str = "lock") -> bool:
+    """Sends on the first channel that works. Returns whether anything was sent."""
+    return deliver(settings, title, body, tags) is not None
 
 
 def send(settings: Settings, title: str, body: str, tags: str = "lock") -> None:
