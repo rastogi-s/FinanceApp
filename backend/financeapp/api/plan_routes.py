@@ -71,6 +71,7 @@ class PlanIn(BaseModel):
     level: Literal["lean", "regular", "fat"] | None = None
     birth_year: int | None = Field(default=None, ge=1920, le=2020)
     savings_cents: int | None = Field(default=None, ge=-MAX_CENTS // 12, le=MAX_CENTS // 12)
+    return_mid: float | None = Field(default=None, ge=1, le=10)
     spending: SpendingIn | None = None
 
 

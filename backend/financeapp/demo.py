@@ -436,24 +436,41 @@ SUBSCRIPTIONS = [  # merchant, category, monthly dollars, went up
 
 def _plan_inputs(today: date, net_worth: int) -> dict:
     b = budget(today)
-    essentials = sum(line["limit_cents"] for line in b["lines"] if line["essential"])
     regular = _cents(statistics.median(spent for *_, spent in SAVINGS))
+    essentials = round(regular * 0.62)
     saved = [m["saved_cents"] for m in b["savings_history"]]
+    where = "your median month of spending, the last 6 months"
+
+    def level(cents: int, note: str) -> dict:
+        return {"yearly_cents": cents, "typed": False, "derived_cents": cents, "note": note}
+
     return {
         "start_cents": net_worth,
         "year": today.year,
         "monthly_savings_cents": round(sum(saved) / len(saved)),
         "measured_savings_cents": round(sum(saved) / len(saved)),
-        "savings_months": len(saved),
+        "savings_source": {
+            "kind": "savings_rate",
+            "note": "Average of the last 6 months: pay before taxes, minus taxes, paycheck deductions and spending.",
+        },
         "savings_typed": False,
-        "returns": plan.RETURNS,
+        "returns": {"low": 3.5, "mid": 5.5, "high": 7.5},
+        "returns_source": {
+            "typed": False,
+            "derived_mid": 5.5,
+            "note": "From your mix today: 77% stocks, 9% bonds, 14% cash. Long-run guesses after inflation: stocks "
+            "6.5%, bonds 2%, cash 0.5% a year.",
+            "mix": {"stocks": 77, "bonds": 9, "cash": 14, "other": 0},
+        },
         "withdrawal_rate": 4.0,
         "level": "regular",
         "birth_year": today.year - 36,
         "levels": {
-            "lean": {"yearly_cents": essentials * 12, "typed": False},
-            "regular": {"yearly_cents": regular * 12, "typed": False},
-            "fat": {"yearly_cents": round(regular * 12 * plan.FAT), "typed": False},
+            "lean": level(
+                essentials * 12, f"Bills and essentials (rent, groceries, utilities and the like) from {where}."
+            ),
+            "regular": level(regular * 12, f"From {where}."),
+            "fat": level(round(regular * 12 * plan.FAT), f"Regular spending and half again, from {where}."),
         },
         "months_used": 6,
         "emergency": b["emergency"],
