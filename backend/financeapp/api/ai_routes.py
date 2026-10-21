@@ -64,13 +64,10 @@ def overview(db: DbSession, who: Signed) -> dict:
     tasks = []
     for task_id, t in TASKS.items():
         route = s["routes"].get(task_id)
-        try:
-            r = service.route_for(db, task_id, pictures=False)
-            price, problem = {"in": r.price[0], "out": r.price[1], "known": r.price[2]}, None
-            if t.pictures and not r.provider.allow_pictures:
-                problem = "Text only: pictures and scans won't be sent."
-        except AIUnavailable as e:
-            price, problem = None, str(e)
+        r, problem = service.find_route(db, task_id, pictures=False)
+        price = {"in": r.price[0], "out": r.price[1], "known": r.price[2]} if r else None
+        if r and t.pictures and not r.provider.allow_pictures:
+            problem = "Text only: pictures and scans won't be sent."
         tasks.append(
             {
                 "id": task_id,
@@ -155,7 +152,7 @@ def check(p: AIProvider) -> None:
     try:
         ids = providers.list_models(service.endpoint(p))
     except ProviderError as e:
-        p.last_error = str(e)[:300]
+        p.last_error = e.message[:300]
         raise
     p.models = {"ids": ids}
     p.last_checked_at = now()
@@ -289,9 +286,9 @@ def check_provider(provider_id: int, request: Request, who: Signed = Depends(own
         raise HTTPException(404, "No such provider.")
     try:
         check(p)
-    except ProviderError as e:
-        # Keep the error on the provider (the route's transaction commits) and say what went wrong.
-        return overview(db, who) | {"error": str(e)}
+    except ProviderError:
+        # The error is kept on the provider (the route's transaction commits), where the page shows it.
+        return overview(db, who) | {"error": p.last_error}
     return overview(db, who)
 
 

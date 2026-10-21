@@ -36,6 +36,7 @@ class ProviderError(RuntimeError):
 
     def __init__(self, message: str, reply: "Reply | None" = None) -> None:
         super().__init__(message)
+        self.message = message
         self.reply = reply
 
 

@@ -128,23 +128,30 @@ class Route:
     price: tuple[float, float, bool]
 
 
-def route_for(db: DbSession, task: str, pictures: bool = False) -> Route:
-    """Where a task would go right now, or AIUnavailable saying what to set up."""
+def find_route(db: DbSession, task: str, pictures: bool = False) -> tuple[Route | None, str | None]:
+    """Where a task would go right now, or what to set up first (a message for the person)."""
     if task not in TASKS:
-        raise AIUnavailable("Unknown AI task.")
+        return None, "Unknown AI task."
     title = TASKS[task].title.lower()
     r = settings(db)["routes"].get(task)
     provider = db.get(AIProvider, r["provider_id"]) if r and r.get("provider_id") else None
     if provider is None or not r.get("model"):
-        raise AIUnavailable(f"AI isn't set up for {title}. The owner can turn it on in Settings, AI.")
+        return None, f"AI isn't set up for {title}. The owner can turn it on in Settings, AI."
     if not provider.enabled:
-        raise AIUnavailable(f"{provider.label} is turned off. The owner can turn it on in Settings, AI.")
+        return None, f"{provider.label} is turned off. The owner can turn it on in Settings, AI."
     if pictures and not provider.allow_pictures:
-        raise AIUnavailable(
+        return None, (
             f"{provider.label} isn't allowed to see pictures and scans, which can't be redacted first. The owner can "
             "allow it in Settings, AI."
         )
-    return Route(task, provider, r["model"], price_of(provider, r["model"], r))
+    return Route(task, provider, r["model"], price_of(provider, r["model"], r)), None
+
+
+def route_for(db: DbSession, task: str, pictures: bool = False) -> Route:
+    route, problem = find_route(db, task, pictures)
+    if route is None:
+        raise AIUnavailable(problem)
+    return route
 
 
 def estimate(req: Request, price: tuple[float, float, bool]) -> int:
@@ -154,14 +161,22 @@ def estimate(req: Request, price: tuple[float, float, bool]) -> int:
     return microdollars(tokens_in, req.max_tokens, price)
 
 
-def check_cap(db: DbSession, cost: int) -> None:
+def cap_problem(db: DbSession, cost: int) -> str | None:
+    """Why a request costing up to `cost` microdollars can't go this month, or None if it can."""
     cap = settings(db)["monthly_cap_cents"] * 10_000
     spent = spent_this_month(db)
     if spent + cost > cap:
-        raise AIUnavailable(
+        return (
             f"That could take this month's AI spending past the ${cap / 1_000_000:.2f} cap "
             f"(${spent / 1_000_000:.2f} used). The owner can raise it in Settings, AI."
         )
+    return None
+
+
+def check_cap(db: DbSession, cost: int) -> None:
+    problem = cap_problem(db, cost)
+    if problem:
+        raise AIUnavailable(problem)
 
 
 def run(database: Database, db: DbSession, task: str, user_id: int | None, req: Request) -> tuple[Reply, Route]:
@@ -176,7 +191,7 @@ def run(database: Database, db: DbSession, task: str, user_id: int | None, req: 
         reply = providers.complete(endpoint(p), route.model, req)
         return reply, route
     except ProviderError as e:
-        reply, error = e.reply, str(e)
+        reply, error = e.reply, e.message
         raise
     except Exception as e:
         error = f"failed ({type(e).__name__})"
