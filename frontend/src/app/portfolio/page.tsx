@@ -443,14 +443,25 @@ function savedView(): View {
 const shares = new Intl.NumberFormat("en-US", { maximumFractionDigits: 3 });
 
 function Holdings({ holdings }: { holdings: Holding[] }) {
-  const [q, setQ] = useRemembered("holdings-q", "");
-  const [chosen, setChosen] = useState<Sort>(savedSort);
-  const [account, setAccount] = useRemembered("holdings-account", "");
-  const [assetClass, setAssetClass] = useRemembered("holdings-class", "");
-  const [view, setView] = useState<View>(savedView); // only rendered in the browser, once the household has loaded
-  const [open, setOpen] = useRemembered<string | null>("holdings-open", null);
   const accounts = useMemo(() => [...new Set(holdings.map((x) => x.account))].sort(), [holdings]);
   const classes = useMemo(() => [...new Set(holdings.map((x) => x.asset_class))].sort(), [holdings]);
+  // The search, sort and filters stay put for as long as the app is open, however you come back to Portfolio.
+  const [q, setQ] = useRemembered("holdings-q", "", { always: true, valid: (v) => typeof v === "string" });
+  // The sort also lasts across visits: someone who wants losers first wants them first tomorrow too.
+  const [chosen, setChosen] = useRemembered<Sort>("holdings-sort", savedSort, {
+    always: true,
+    valid: (v) => SORTS.some((s) => s.id === v),
+  });
+  const [account, setAccount] = useRemembered("holdings-account", "", {
+    always: true,
+    valid: (v) => v === "" || accounts.includes(v),
+  });
+  const [assetClass, setAssetClass] = useRemembered("holdings-class", "", {
+    always: true,
+    valid: (v) => v === "" || classes.includes(v),
+  });
+  const [view, setView] = useState<View>(savedView); // only rendered in the browser, once the household has loaded
+  const [open, setOpen] = useRemembered<string | null>("holdings-open", null);
   const investments = useMemo(() => new Set(holdings.map((x) => x.symbol)).size, [holdings]);
   const shared = investments < holdings.length; // something sits in more than one account
   const hasGain = holdings.some((x) => x.cost_basis_cents);

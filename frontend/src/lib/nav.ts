@@ -129,16 +129,23 @@ export function cameFrom(href: string): boolean {
 
 /**
  * State for a list (a search, a sort, which row is open) that comes back as it was when you return to the page,
- * and starts fresh when you arrive any other way.
+ * and starts fresh when you arrive any other way. With `always`, it also comes back when you arrive another way
+ * (tapping the tab), until the browser tab or home-screen app is closed. `valid` drops a saved value that no
+ * longer fits, such as a sort that was renamed or an account that's gone.
  */
-export function useRemembered<T>(name: string, initial: T | (() => T)): [T, (v: T | ((prev: T) => T)) => void] {
+export function useRemembered<T>(
+  name: string,
+  initial: T | (() => T),
+  { always = false, valid }: { always?: boolean; valid?: (v: T) => boolean } = {},
+): [T, (v: T | ((prev: T) => T)) => void] {
   const [key] = useState(() => (typeof window === "undefined" ? name : `view:${window.location.pathname}:${name}`));
   const [value, setValue] = useState<T>(() => {
-    if (isReturning()) {
+    if (always || isReturning()) {
       const saved = read(key);
       if (saved !== null) {
         try {
-          return JSON.parse(saved) as T;
+          const v = JSON.parse(saved) as T;
+          if (!valid || valid(v)) return v;
         } catch {}
       }
     }

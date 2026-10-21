@@ -1,7 +1,7 @@
 // Going back puts you where you were: opens a holding from far down Portfolio and comes back (with the page's own
 // back link and with the browser's), on a laptop and a phone, and checks the scroll position, the holdings search
-// and the sort are as they were left, that tapping the tab instead starts afresh, and that Home, Budget and
-// Settings come back scrolled where they were too. Runs in CI on every pull request, after the smoke test.
+// and the sort are as they were left, that tapping the tab opens it at the top with the same search and sort, and
+// that Home, Budget and Settings come back scrolled where they were too. Runs in CI on every pull request, after the smoke test.
 //
 //   DEMO_MODE=true uvicorn financeapp.main:app    then    cd e2e && APP_URL=http://localhost:8080 node back.mjs
 import { chromium } from "playwright";
@@ -56,7 +56,12 @@ for (const [name, opts] of Object.entries(sizes)) {
   await page.goto(BASE + "/"); await page.waitForTimeout(800);
   await page.locator('[data-tab="portfolio"]').filter({ visible: true }).click();
   await search.waitFor();
-  check((await search.inputValue()) === "" && (await page.evaluate(() => scrollY)) < 5, `${name} tab tap opens portfolio fresh`);
+  check((await page.evaluate(() => scrollY)) < 5, `${name} tab tap opens portfolio at the top`);
+  check(
+    (await search.inputValue()) === "v" && (await page.getByLabel("Sort holdings").inputValue()) === "name",
+    `${name} tab tap keeps the search and sort`,
+  );
+  await search.fill("");
   // 4. Settings -> Accounts -> the "Settings" back link goes back rather than to a fresh page
   await page.goto(BASE + "/settings"); await page.waitForTimeout(800);
   await page.locator('main a[href="/settings/accounts"]').first().click();
