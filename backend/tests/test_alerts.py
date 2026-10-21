@@ -212,6 +212,35 @@ def test_quiet_hours_hold_then_one_message(client, sent):
 
 
 @needs_db
+def test_priority_per_rule_and_quiet_roundup(client, monkeypatch):
+    loud: list[str] = []
+    monkeypatch.setattr(notify, "configured", lambda settings: True)
+    monkeypatch.setattr(notify, "deliver", lambda settings, title, body, tags="lock", priority="high":
+                        loud.append(priority) or "ntfy")  # fmt: skip
+    settings = client.app.state.settings
+    with db_of(client).session() as db:
+        db.add(AlertRule(kind="price", params={"symbol": "VOO", "below": 500}, enabled=True, state={}))
+        db.add(AlertRule(kind="price", params={"symbol": "VTI", "below": 250, "priority": "low"}, enabled=True,
+                         state={}))  # fmt: skip
+        set_quote(db, "VOO", 480)
+        alerts.evaluate(db, {"price"}, t=NOON)
+        alerts.send_pending(db, settings, t=NOON)
+        set_quote(db, "VTI", 240)
+        alerts.evaluate(db, {"price"}, t=NOON)
+        alerts.send_pending(db, settings, t=NOON)
+        assert loud == ["high", "low"]  # no priority saved: high, so it pops up
+        set_quote(db, "VOO", 520)
+        set_quote(db, "VTI", 260)
+        alerts.evaluate(db, {"price"}, t=NOON)  # re-armed
+        set_quote(db, "VOO", 480)
+        set_quote(db, "VTI", 240)
+        alerts.evaluate(db, {"price"}, t=NIGHT)
+        alerts.send_pending(db, settings, t=NIGHT)
+        alerts.send_pending(db, settings, t=datetime(2026, 10, 22, 11, 5, tzinfo=UTC))
+        assert loud[-1] == "default"  # the morning roundup doesn't break through a Sleep Focus
+
+
+@needs_db
 def test_failed_sends_retry_then_stop(client, monkeypatch):
     monkeypatch.setattr(notify, "configured", lambda settings: True)
     monkeypatch.setattr(notify, "deliver", lambda *a, **k: None)
@@ -270,9 +299,16 @@ def test_rules_api(client, home, sent):
     r = client.post("/api/alerts/rules", json={"rule": {"kind": "price", "symbol": "voo", "above": 600}}, headers=h)
     assert r.status_code == 200, r.text
     rule = next(x for x in r.json()["rules"] if x["kind"] == "price")
-    assert rule["summary"] == "VOO goes above $600.00" and rule["triggered"]
+    assert rule["summary"] == "VOO goes above $600.00" and rule["triggered"] and rule["priority"] == "high"
     assert r.json()["events"][0]["title"] == "VOO is above $600.00"  # checked right away
     assert sent and sent[0][0] == "VOO is above $600.00"
+    quieter = {"kind": "price", "symbol": "VOO", "above": 600, "priority": "low"}
+    r = client.put(f"/api/alerts/rules/{rule['id']}", json={"rule": quieter}, headers=h)
+    changed = next(x for x in r.json()["rules"] if x["id"] == rule["id"])
+    assert changed["priority"] == "low" and changed["triggered"]  # only louder or quieter: it doesn't fire again
+    assert len(sent) == 1
+    bad_priority = {**quieter, "priority": "urgent"}
+    assert client.put(f"/api/alerts/rules/{rule['id']}", json={"rule": bad_priority}, headers=h).status_code == 422
     r = client.patch(f"/api/alerts/rules/{rule['id']}", json={"enabled": False}, headers=h)
     assert not next(x for x in r.json()["rules"] if x["id"] == rule["id"])["enabled"]
     r = client.delete(f"/api/alerts/rules/{rule['id']}", headers=h)

@@ -16,13 +16,24 @@ export type Rule = {
   enabled: boolean;
   summary: string;
   triggered: boolean;
+  priority?: Priority;
 };
 
-export type RuleIn =
+/** How hard the phone tries to get attention: ntfy priorities 4, 3 and 2. */
+export type Priority = "high" | "default" | "low";
+
+export type RuleIn = (
   | { kind: "price"; symbol: string; above?: number; below?: number; move_percent?: number }
   | { kind: "dip"; symbol: string | null; from_high_percent?: number; below_average?: 50 | 200 }
   | { kind: "budget"; category_id: number | null; percent?: number; forecast?: boolean }
-  | { kind: "concentration"; percent: number };
+  | { kind: "concentration"; percent: number }
+) & { priority?: Priority };
+
+export const PRIORITY_OPTIONS = [
+  ["high", "Pop up", "A banner and sound. On iPhone it's Time Sensitive, so a Focus you allow it in won't hold it back."],
+  ["default", "Normal", "A banner and sound, unless a Focus or Do Not Disturb is on."],
+  ["low", "Quiet", "No banner or sound. It waits in the ntfy app and here."],
+] as const;
 
 export const KIND_ICON = { price: TrendingUp, dip: TrendingDown, budget: PiggyBank, concentration: ChartPie } as const;
 const KIND_LABEL = { price: "A price", dip: "A dip", budget: "A budget", concentration: "One company" } as const;
@@ -120,6 +131,7 @@ function RuleForm({
   const [concPct, setConcPct] = useState<string>(rule?.kind === "concentration" ? String(p.percent) : "10");
   const [dipMode, setDipMode] = useState<DipMode>(p.below_average != null ? (String(p.below_average) as DipMode) : "high");
   const [dipPct, setDipPct] = useState<string>(p.from_high_percent != null ? String(p.from_high_percent) : "10");
+  const [priority, setPriority] = useState<Priority>(rule?.priority ?? "high");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -151,6 +163,7 @@ function RuleForm({
       if (!Number.isFinite(n) || n < 1 || n > 100) return setError("Pick a share between 1% and 100%.");
       body = { kind, percent: n };
     }
+    body = { ...body, priority };
     setBusy(true);
     setError(null);
     try {
@@ -362,6 +375,27 @@ function RuleForm({
           <Input value={concPct} onChange={(e) => setConcPct(e.target.value)} inputMode="decimal" placeholder="10" />
         </Field>
       )}
+
+      <div className="grid gap-2">
+        <span id="rule-priority" className="text-sm font-medium">
+          On your phone
+        </span>
+        <div role="radiogroup" aria-labelledby="rule-priority" className="grid grid-cols-3 gap-1 rounded-full bg-muted p-1 text-sm">
+          {PRIORITY_OPTIONS.map(([v, label]) => (
+            <button
+              key={v}
+              type="button"
+              role="radio"
+              aria-checked={priority === v}
+              onClick={() => setPriority(v)}
+              className={cn("rounded-full py-2 font-medium transition-colors", priority === v ? "bg-card shadow-sm" : "text-muted-foreground")}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <p className="text-xs text-muted-foreground">{PRIORITY_OPTIONS.find(([v]) => v === priority)?.[2]}</p>
+      </div>
 
       <Button type="submit" size="lg" disabled={busy}>
         <Bell /> {rule ? "Save" : "Add alert"}

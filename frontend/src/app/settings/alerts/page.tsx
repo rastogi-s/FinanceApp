@@ -190,6 +190,7 @@ export default function AlertsPage() {
                             : r.kind === "budget"
                               ? "Checked after every sync"
                               : "Checked with every price update"}
+                        {r.priority === "low" ? " · Quiet" : r.priority === "default" ? " · Normal" : ""}
                       </span>
                     </button>
                     {r.triggered && <Badge variant="warning">Triggered</Badge>}
