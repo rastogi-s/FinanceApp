@@ -700,6 +700,14 @@ ACTION_TEXT = {
     "ai_provider_removed": "AI provider removed",
     "ai_settings_changed": "AI settings changed",
     "ai_read_file": "File read with AI",
+    "alert_rule_added": "Alert added",
+    "alert_rule_changed": "Alert changed",
+    "alert_rule_removed": "Alert removed",
+    "quiet_hours_changed": "Quiet hours changed",
+    "alert_test": "Test alert sent",
+    "alert_sent": "Alert sent",
+    "alert_failed": "Alert couldn't be sent",
+    "portfolio_refresh": "Prices refreshed",
 }
 
 

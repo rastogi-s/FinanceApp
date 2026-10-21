@@ -31,6 +31,9 @@ const PLACES = [
   ["security", "/settings/security", "direct"],
   ["people", "/settings/people", "direct"],
   ["ai", "/settings/ai", "direct"],
+  ["alerts", "/settings/alerts", "direct"],
+  ["holding-stock", "/portfolio/holding?s=AAPL", "direct"],
+  ["holding-fund", "/portfolio/holding?s=VTI", "direct"],
 ];
 const REQUIRED_HEADERS = {
   "content-security-policy": /default-src 'none'.*frame-ancestors 'none'/,
