@@ -3,13 +3,14 @@
 import json
 from datetime import date, timedelta
 from decimal import Decimal
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session as DbSession
 
-from financeapp import auth, crypto, demo, household, notify, paystub, sync
+from financeapp import auth, crypto, demo, household, notify, paystub, search, sync
 from financeapp.ai import documents, extract, reading
 from financeapp.ai.providers import ProviderError
 from financeapp.ai.service import AIUnavailable
@@ -390,6 +391,15 @@ def categories(request: Request, who: Signed = Depends(signed_in)) -> list[dict]
         {"id": c.id, "name": c.name, "kind": c.kind}
         for c in db_of(request).scalars(select(Category).order_by(Category.sort, Category.name))
     ]
+
+
+@router.get("/transactions")
+def find_transactions(
+    request: Request, f: Annotated[search.Filters, Query()], who: Signed = Depends(signed_in)
+) -> dict:
+    if who.demo:
+        return search.search_sample(demo.household()["transactions"], demo.categories(), f)
+    return search.search(db_of(request), f)
 
 
 class TransactionPatch(BaseModel):

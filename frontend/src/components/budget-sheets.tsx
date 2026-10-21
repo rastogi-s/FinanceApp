@@ -1,7 +1,8 @@
 "use client";
 
+import Link from "next/link";
 import { useRef, useState } from "react";
-import { Check, FileUp } from "lucide-react";
+import { Check, ChevronRight, FileUp } from "lucide-react";
 import { type AIOffer, AIOfferCard, shrinkPicture } from "@/components/ai-offer";
 import { Money, formatMoney } from "@/components/money";
 import { Button } from "@/components/ui/button";
@@ -91,6 +92,13 @@ function LineEditor({ line, budget, change, onClose }: LineProps & { line: Budge
         }}
       >
         {line.forecast && line.forecast.status !== "over" && <MonthEnd line={line} month={budget.month} />}
+        <Link
+          href={`/spending?category=${line.category_id}&range=month`}
+          className="-my-1 flex items-center justify-between rounded-2xl bg-muted/60 px-4 py-3 text-sm font-medium transition-colors hover:bg-muted"
+        >
+          See this month&apos;s {line.category.toLowerCase()} transactions
+          <ChevronRight className="size-4 text-muted-foreground" aria-hidden />
+        </Link>
         <Field
           id="limit"
           label="Monthly limit"

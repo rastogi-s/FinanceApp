@@ -1,14 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
-import { ArrowDownRight, ArrowUpRight, ChevronDown, ChevronRight, Info, Layers, RefreshCw } from "lucide-react";
+import { useMemo, useState } from "react";
+import { ArrowDownRight, ArrowUpRight, ChevronDown, ChevronRight, Info, Layers, RefreshCw, Search, X } from "lucide-react";
 import { ExposureGraph } from "@/components/exposure-graph";
 import { Money } from "@/components/money";
 import { HouseholdPage } from "@/components/page";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input, Select } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "@/components/ui/toast";
 import { api } from "@/lib/api";
@@ -183,8 +184,14 @@ function Largest({ p }: { p: Portfolio }) {
 function RealExposure({ p }: { p: Portfolio }) {
   const [all, setAll] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
+  const [q, setQ] = useState("");
   const e = p.exposure;
-  const shown = all ? e.companies.slice(0, 50) : e.companies.slice(0, 10);
+  const ranked = useMemo(() => e.companies.map((c, i) => ({ c, rank: i + 1 })), [e.companies]);
+  const needle = q.trim().toLowerCase();
+  const found = needle
+    ? ranked.filter(({ c }) => c.symbol?.toLowerCase().startsWith(needle) || c.name.toLowerCase().includes(needle))
+    : null;
+  const shown = found ? found.slice(0, 50) : ranked.slice(0, all ? 50 : 10);
   const pending = e.funds.filter((f) => f.status !== "ok");
   const dates = e.funds.filter((f) => f.as_of).map((f) => f.as_of!);
   const newest = dates.length ? dates.reduce((a, b) => (a > b ? a : b)) : null;
@@ -206,13 +213,27 @@ function RealExposure({ p }: { p: Portfolio }) {
                 : "Hold a stock or a fund and this shows your true share of every company."}
           </p>
         ) : (
-          <ol className="divide-y">
-            {shown.map((c, i) => (
-              <ExposureRow key={c.key} c={c} rank={i + 1} open={open === c.key} toggle={() => setOpen(open === c.key ? null : c.key)} />
-            ))}
-          </ol>
+          <>
+            {e.companies.length > 10 && (
+              <SearchBox
+                value={q}
+                onChange={setQ}
+                label="Find a company"
+                placeholder={`Find any of ${e.companies.length.toLocaleString("en-US")} companies`}
+                className="mb-2"
+              />
+            )}
+            {found && found.length === 0 && (
+              <p className="py-4 text-sm text-muted-foreground">You don&apos;t own any of that, directly or through your funds.</p>
+            )}
+            <ol className="divide-y">
+              {shown.map(({ c, rank }) => (
+                <ExposureRow key={c.key} c={c} rank={rank} open={open === c.key} toggle={() => setOpen(open === c.key ? null : c.key)} />
+              ))}
+            </ol>
+          </>
         )}
-        {e.companies.length > 10 && (
+        {e.companies.length > 10 && !found && (
           <Button variant="ghost" size="sm" className="mt-2" onClick={() => setAll(!all)}>
             {all ? "Top 10 only" : `Show top ${Math.min(50, e.companies.length)}`}
           </Button>
@@ -276,19 +297,107 @@ function ExposureRow({ c, rank, open, toggle }: { c: Company; rank: number; open
   );
 }
 
+type Sort = "value" | "today" | "gain" | "name";
+const SORTS: { id: Sort; label: string }[] = [
+  { id: "value", label: "Biggest" },
+  { id: "today", label: "Movers" },
+  { id: "gain", label: "Gainers" },
+  { id: "name", label: "A to Z" },
+];
+
+const gain = (x: Holding) => (x.cost_basis_cents ? (x.value_cents - x.cost_basis_cents) / x.cost_basis_cents : null);
+
 function Holdings({ holdings }: { holdings: Holding[] }) {
-  const rows = [...holdings].sort((a, b) => b.value_cents - a.value_cents);
+  const [q, setQ] = useState("");
+  const [sort, setSort] = useState<Sort>("value");
+  const [account, setAccount] = useState("");
+  const [assetClass, setAssetClass] = useState("");
+  const accounts = useMemo(() => [...new Set(holdings.map((x) => x.account))].sort(), [holdings]);
+  const classes = useMemo(() => [...new Set(holdings.map((x) => x.asset_class))].sort(), [holdings]);
+  const hasGain = holdings.some((x) => x.cost_basis_cents);
+  const needle = q.trim().toLowerCase();
+  const rows = holdings
+    .filter(
+      (x) =>
+        (!needle || x.symbol.toLowerCase().startsWith(needle) || x.name.toLowerCase().includes(needle)) &&
+        (!account || x.account === account) &&
+        (!assetClass || x.asset_class === assetClass),
+    )
+    .sort((a, b) => {
+      if (sort === "name") return a.symbol.localeCompare(b.symbol);
+      if (sort === "today") return Math.abs(b.change_today_percent) - Math.abs(a.change_today_percent);
+      if (sort === "gain") return (gain(b) ?? -Infinity) - (gain(a) ?? -Infinity);
+      return b.value_cents - a.value_cents;
+    });
+  const narrowed = rows.length !== holdings.length;
+  const total = rows.reduce((s, x) => s + x.value_cents, 0);
+
   return (
     <Card className="md:col-span-2">
       <CardHeader>
         <CardTitle>Holdings</CardTitle>
-        <span className="text-xs text-muted-foreground">Tap one for its chart and details</span>
+        <span className="text-xs text-muted-foreground" aria-live="polite">
+          {narrowed ? (
+            <>
+              {rows.length} of {holdings.length} · <Money cents={total} />
+            </>
+          ) : (
+            "Tap one for its chart and details"
+          )}
+        </span>
       </CardHeader>
-      {rows.length === 0 && (
+      {holdings.length > 3 && (
+        <CardContent className="grid grid-cols-1 gap-2 pt-1 pb-3 sm:grid-cols-[1fr_auto]">
+          <SearchBox value={q} onChange={setQ} label="Search holdings" placeholder="Ticker or name" />
+          <div className="grid grid-cols-2 gap-2 sm:flex">
+            <Select aria-label="Sort holdings" value={sort} onChange={(e) => setSort(e.target.value as Sort)} className="rounded-full">
+              {SORTS.filter((x) => x.id !== "gain" || hasGain).map((x) => (
+                <option key={x.id} value={x.id}>
+                  {x.label}
+                </option>
+              ))}
+            </Select>
+            {accounts.length > 1 && (
+              <Select aria-label="Account" value={account} onChange={(e) => setAccount(e.target.value)} className="rounded-full sm:max-w-48">
+                <option value="">All accounts</option>
+                {accounts.map((a) => (
+                  <option key={a} value={a}>
+                    {a}
+                  </option>
+                ))}
+              </Select>
+            )}
+          </div>
+          {classes.length > 1 && (
+            <div className="-mx-6 flex gap-2 overflow-x-auto px-6 [scrollbar-width:none] sm:col-span-2" role="group" aria-label="Kind of holding">
+              {["", ...classes].map((c) => (
+                <button
+                  key={c || "all"}
+                  type="button"
+                  aria-pressed={assetClass === c}
+                  onClick={() => setAssetClass(c)}
+                  className={cn(
+                    "inline-flex h-8 shrink-0 items-center rounded-full border px-3 text-xs font-medium transition-colors",
+                    assetClass === c ? "border-transparent bg-foreground text-background" : "bg-card text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  {c || "Everything"}
+                </button>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      )}
+      {holdings.length === 0 && (
         <CardContent>
           <p className="text-sm text-muted-foreground">
             No holdings yet. They appear after the next sync of an investment account, or upload a positions file in Settings → Accounts.
           </p>
+        </CardContent>
+      )}
+      {holdings.length > 0 && rows.length === 0 && (
+        <CardContent>
+          <p className="text-sm text-muted-foreground">No holdings match that.</p>
         </CardContent>
       )}
       <ul className="divide-y pb-2">
@@ -306,10 +415,7 @@ function Holdings({ holdings }: { holdings: Holding[] }) {
               </div>
               <div className="text-right">
                 <Money cents={x.value_cents} className="text-sm font-medium" />
-                <p className={cn("text-xs tabular-nums", x.change_today_percent > 0 ? "text-positive" : x.change_today_percent < 0 ? "text-negative" : "text-muted-foreground")}>
-                  {x.change_today_percent > 0 ? "+" : ""}
-                  {x.change_today_percent.toFixed(2)}%
-                </p>
+                <Change percent={sort === "gain" ? (gain(x) ?? 0) * 100 : x.change_today_percent} label={sort === "gain" ? "total" : undefined} />
               </div>
             </>
           );
@@ -329,5 +435,57 @@ function Holdings({ holdings }: { holdings: Holding[] }) {
         })}
       </ul>
     </Card>
+  );
+}
+
+function SearchBox({
+  value,
+  onChange,
+  label,
+  placeholder,
+  className,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  label: string;
+  placeholder: string;
+  className?: string;
+}) {
+  return (
+    <div className={cn("relative", className)}>
+      <Search className="pointer-events-none absolute top-1/2 left-3.5 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
+      <Input
+        type="search"
+        enterKeyHint="search"
+        autoComplete="off"
+        spellCheck={false}
+        maxLength={60}
+        aria-label={label}
+        placeholder={placeholder}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onKeyDown={(e) => e.key === "Escape" && onChange("")}
+        className="rounded-full pr-10 pl-10 [&::-webkit-search-cancel-button]:hidden"
+      />
+      {value && (
+        <button
+          type="button"
+          onClick={() => onChange("")}
+          className="absolute top-1/2 right-2 grid size-8 -translate-y-1/2 place-items-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
+          aria-label="Clear search"
+        >
+          <X className="size-4" aria-hidden />
+        </button>
+      )}
+    </div>
+  );
+}
+
+function Change({ percent, label }: { percent: number; label?: string }) {
+  return (
+    <p className={cn("text-xs tabular-nums", percent > 0 ? "text-positive" : percent < 0 ? "text-negative" : "text-muted-foreground")}>
+      {percent > 0 ? "+" : ""}
+      {percent.toFixed(2)}%{label && ` ${label}`}
+    </p>
   );
 }

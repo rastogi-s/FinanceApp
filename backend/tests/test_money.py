@@ -110,6 +110,52 @@ def test_fixing_a_category_makes_a_rule(client, home):
 
 
 @needs_db
+def test_searching_transactions(client, home):
+    home.setup()
+    commit(client, upload(client, "chase_checking_4417.csv"), institution="Chase")
+    commit(client, upload(client, "amex_1008.csv"), institution="Amex", type="credit")
+
+    def find(**params) -> dict:
+        r = client.get("/api/transactions", params=params)
+        assert r.status_code == 200, r.text
+        return r.json()
+
+    everything = find()
+    assert everything["count"] == 11 and everything["next_offset"] is None
+    # The 500 card payment shows on both sides but counts in neither total.
+    assert everything["out_cents"] == 5420 + 8810 + 650 + 650 + 1575 + 1549 + 4210 + 6399
+    assert everything["in_cents"] == 320000
+
+    coffee = find(q="blue  BOTTLE")
+    assert coffee["count"] == 2 and coffee["out_cents"] == 1300
+    assert find(q="100%")["count"] == 0  # wildcards are matched literally
+    assert find(q="_")["count"] == 0
+
+    transfers = find(kind="transfer")
+    assert transfers["count"] == 2 and transfers["out_cents"] == transfers["in_cents"] == 0
+    assert find(kind="in")["count"] == 1
+    assert find(kind="out")["count"] == 8
+
+    cats = {c["name"]: c["id"] for c in client.get("/api/categories").json()}
+    dining = find(category=[cats["Dining out"]])
+    assert {t["category"] for t in dining["transactions"]} == {"Dining out"} and dining["count"] >= 3
+
+    amex = next(a["id"] for a in everything["accounts"] if a["name"].startswith("Amex"))
+    assert find(account=[amex])["count"] == 5
+    assert find(account=[999999])["count"] == 0  # an account that isn't counted never leaks in
+
+    big = find(min_cents=5000, max_cents=10000)
+    assert sorted(-t["amount_cents"] for t in big["transactions"]) == [5420, 6399, 8810]
+    assert find(min_cents=10000, max_cents=5000)["count"] == 3  # a reversed range still works
+
+    one_day = find(start="2026-10-17", end="2026-10-17")
+    assert one_day["count"] == 4 and one_day["first"] == one_day["last"] == "2026-10-17"
+
+    assert client.get("/api/transactions", params={"q": "x" * 101}).status_code == 422
+    assert client.get("/api/transactions", params={"category": "1" * 13}).status_code == 422
+
+
+@needs_db
 def test_by_hand_categories_survive_a_sync(client, home):
     home.setup()
     commit(client, upload(client, "chase_checking_4417.csv"), institution="Chase")
@@ -548,5 +594,8 @@ def test_demo_mode_serves_sample_settings_and_refuses_changes(tmp_path):
     assert c.get("/api/auth/state").json()["demo"] is True
     assert len(c.get("/api/connections").json()["connections"]) == 6
     assert c.get("/api/categories").status_code == 200
+    sample = c.get("/api/transactions", params={"kind": "transfer"}).json()
+    assert sample["count"] == 1 and sample["out_cents"] == 0
+    assert c.get("/api/transactions", params={"q": "zzz"}).json()["count"] == 0
     assert c.post("/api/sync").status_code == 403
     assert c.post("/api/auth/login", json={"email": "a@b.c", "password": "x"}).status_code in (403, 503)
