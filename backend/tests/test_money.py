@@ -408,73 +408,119 @@ def test_plaid_retries_when_transactions_change_mid_sync():
 
 
 def test_snaptrade_signature_is_stable():
-    sig = signature("key", "/api/v1/accounts", "clientId=C&timestamp=1", None)
-    assert sig == signature("key", "/api/v1/accounts", "clientId=C&timestamp=1", None)
-    assert sig != signature("other", "/api/v1/accounts", "clientId=C&timestamp=1", None)
+    sig = signature("key", "/accounts/all", "clientId=C&timestamp=1", None)
+    assert sig == signature("key", "/accounts/all", "clientId=C&timestamp=1", None)
+    assert sig != signature("other", "/accounts/all", "clientId=C&timestamp=1", None)
     # Keys are sorted and compact, so the body's key order doesn't matter.
     assert signature("k", "/p", "q", {"b": 1, "a": 2}) == signature("k", "/p", "q", {"a": 2, "b": 1})
 
 
-def test_snaptrade_holdings_and_read_only_portal():
-    seen = []
+def snaptrade_api(personal: bool, seen: list):
+    """A fake SnapTrade: Personal keys refuse registerUser and take no userId/userSecret."""
 
     def handler(request: httpx.Request) -> httpx.Response:
-        seen.append((request.method, request.url.path, request.headers.get("Signature")))
-        assert request.url.params["clientId"] == "C"
-        if request.url.path.endswith("/snapTrade/registerUser"):
+        path, params = request.url.path, request.url.params
+        seen.append((request.method, path, request.headers.get("Signature")))
+        assert params["clientId"] == "C" and not path.startswith("/api/v1")
+        if path != "/snapTrade/registerUser":
+            assert ("userId" in params) is not personal
+        if path == "/snapTrade/registerUser":
+            if personal:
+                return httpx.Response(
+                    400,
+                    json={
+                        "detail": "Personal SnapTrade keys are provisioned with their user automatically at signup.",
+                        "code": "1076",
+                    },
+                )
             return httpx.Response(200, json={"userId": "u", "userSecret": "s3cret"})
-        if request.url.path.endswith("/snapTrade/login"):
+        if path == "/snapTrade/login":
             assert json.loads(request.content)["connectionType"] == "read"
             return httpx.Response(200, json={"redirectURI": "https://app.snaptrade.com/connect"})
-        if request.url.path.endswith("/accounts"):
-            return httpx.Response(
-                200,
-                json=[
-                    {
-                        "id": "a1",
-                        "name": "Individual",
-                        "number": "XXXX6621",
-                        "institution_name": "E*TRADE",
-                        "balance": {"total": {"amount": 20246.56}},
-                    }
-                ],
-            )
-        if request.url.path.endswith("/holdings"):
+        if path == "/authorizations":
+            return httpx.Response(200, json=[{"id": "conn-1", "brokerage": {"display_name": "E*TRADE"}}])
+        if path == "/accounts/all":
             return httpx.Response(
                 200,
                 json={
-                    "positions": [
+                    "results": [
                         {
-                            "symbol": {
-                                "symbol": {
-                                    "symbol": "AAPL",
-                                    "description": "Apple",
-                                    "type": {"description": "Common Stock"},
-                                }
-                            },
-                            "units": 100,
-                            "price": 190.12,
-                            "average_purchase_price": 150,
+                            "kind": "investment",
+                            "id": "a1",
+                            "connection_id": "conn-1",
+                            "display_name": "Individual",
+                            "masked_account_number": "***6621",
+                            "raw_type": "Individual Brokerage",
+                            "net_value": {"amount": 20246.56, "currency": "USD"},
                         }
-                    ],
-                    "balances": [{"currency": {"code": "USD"}, "cash": 1234.56}],
+                    ]
                 },
             )
+        if path == "/accounts/a1/positions/all":
+            return httpx.Response(
+                200,
+                json={
+                    "results": [
+                        {
+                            "instrument": {
+                                "kind": "stock",
+                                "symbol": "AAPL",
+                                "raw_symbol": "AAPL",
+                                "description": "Apple",
+                            },
+                            "units": "100",
+                            "price": "190.12",
+                            "cost_basis": "150",
+                        },
+                        {
+                            "instrument": {
+                                "kind": "etf",
+                                "symbol": "VTI",
+                                "raw_symbol": "VTI",
+                                "description": "Vanguard",
+                            },
+                            "units": "2",
+                            "price": "250",
+                        },
+                    ],
+                    "data_freshness": {"as_of": "2026-10-21T00:00:00Z"},
+                },
+            )
+        if path == "/accounts/a1/balances":
+            return httpx.Response(200, json=[{"currency": {"code": "USD"}, "cash": 1234.56}])
+        if path == "/connection/conn-1" and request.method == "DELETE":
+            return httpx.Response(200, json={})
+        if path == "/snapTrade/deleteUser":
+            return httpx.Response(200, json={})
         return httpx.Response(404)
 
-    st = SnapTrade("C", "K", httpx.Client(transport=httpx.MockTransport(handler)))
+    return SnapTrade("C", "K", httpx.Client(transport=httpx.MockTransport(handler)))
+
+
+@pytest.mark.parametrize("personal", [True, False])
+def test_snaptrade_holdings_and_read_only_portal(personal):
+    seen: list = []
+    st = snaptrade_api(personal, seen)
     start = st.start_link("household-1", "https://testserver/settings/accounts", "investments")
     assert start.url == "https://app.snaptrade.com/connect"
     linked = st.finish_link(start.pending)
-    assert linked.institution == "E*TRADE" and json.loads(linked.token) == ["u", "s3cret"]
+    assert linked.institution == "E*TRADE"
+    assert json.loads(linked.token) == (None if personal else ["u", "s3cret"])
     result = st.fetch(linked.token, linked.external_id, {})
     (account,) = result.accounts
-    assert account.mask == "6621" and account.current_cents == 2_024_656
-    assert [(h.symbol, h.value_cents, h.cost_basis_cents) for h in result.holdings] == [
-        ("AAPL", 1_901_200, 1_500_000),
-        ("CASH-USD", 123_456, None),
+    assert (account.institution, account.mask, account.current_cents) == ("E*TRADE", "6621", 2_024_656)
+    assert [(h.symbol, h.asset_class, h.value_cents, h.cost_basis_cents) for h in result.holdings] == [
+        ("AAPL", "Stocks", 1_901_200, 1_500_000),
+        ("VTI", "Funds", 50_000, None),
+        ("CASH-USD", "Cash", 123_456, None),
     ]
     assert all(sig for _, _, sig in seen)
+    # A second brokerage reuses the same SnapTrade user (or the Personal key) without registering again.
+    seen.clear()
+    st.start_link("household-1", "https://testserver/settings/accounts", "investments", token=linked.token)
+    assert [p for _, p, _ in seen] == ["/snapTrade/login"]
+    st.revoke(linked.token, linked.external_id)
+    assert seen[-1][1] == ("/connection/conn-1" if personal else "/snapTrade/deleteUser")
 
 
 # ---- demo mode
