@@ -336,6 +336,7 @@ def build(db: DbSession) -> dict:
                 "savings_cents": p.savings_cents,
                 "net_cents": p.net_cents,
                 "employer_match_cents": p.employer_match_cents,
+                "frequency": p.frequency,
                 "deposit": {"date": matched[p.id].date.isoformat(), "merchant": matched[p.id].merchant}
                 if p.id in matched
                 else None,
@@ -343,12 +344,55 @@ def build(db: DbSession) -> dict:
             for p in recent
         ],
         "people": [{"id": i, "name": n} for i, n in people.items()],
+        "schedules": schedules(recent, people),
         "categories": [
             {"id": c.id, "name": c.name, "kind": c.kind, "essential": c.essential}
             for c in sorted(ledger.categories.values(), key=lambda c: (c.sort, c.name))
             if c.kind in BUDGETED
         ],
     }
+
+
+# ---- pay schedules
+
+PER_YEAR = {"weekly": 52, "biweekly": 26, "semimonthly": 24, "monthly": 12}
+
+
+def next_payday(last: date, frequency: str) -> date:
+    if frequency == "weekly":
+        return last + timedelta(days=7)
+    if frequency == "biweekly":
+        return last + timedelta(days=14)
+    if frequency == "semimonthly":  # the 15th and the last day of the month
+        if last.day < 15:
+            return last.replace(day=15)
+        end = add_months(month_start(last), 1) - timedelta(days=1)
+        return end if last < end else add_months(month_start(last), 1).replace(day=15)
+    nxt = add_months(month_start(last), 1)
+    end = add_months(nxt, 1) - timedelta(days=1)
+    return nxt.replace(day=min(last.day, end.day))
+
+
+def schedules(recent: list[Paycheck], people: dict[int, str]) -> list[dict]:
+    """Each person's pay schedule, from their latest stub that says how often they're paid."""
+    out = []
+    seen: set[int | None] = set()
+    for p in recent:  # newest first
+        if p.user_id in seen or not p.frequency:
+            continue
+        seen.add(p.user_id)
+        out.append(
+            {
+                "user_id": p.user_id,
+                "person": people.get(p.user_id) if p.user_id else None,
+                "frequency": p.frequency,
+                "next_date": next_payday(p.date, p.frequency).isoformat(),
+                # A biweekly month can have 3 paychecks: this is the average month.
+                "monthly_gross_cents": round(p.gross_cents * PER_YEAR[p.frequency] / 12),
+                "monthly_net_cents": round(p.net_cents * PER_YEAR[p.frequency] / 12),
+            }
+        )
+    return out
 
 
 def version_json(v: BudgetVersion, people: dict[int, str], totals: dict[int, int]) -> dict:

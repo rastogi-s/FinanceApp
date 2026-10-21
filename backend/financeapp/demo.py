@@ -408,11 +408,22 @@ def budget(today: date | None = None) -> dict:
                 "savings_cents": _cents(675),
                 "net_cents": _cents(2_600),
                 "employer_match_cents": _cents(225),
+                "frequency": "biweekly",
                 "deposit": {"date": (paycheck - timedelta(days=14 * i)).isoformat(), "merchant": "Acme Corp Payroll"},
             }
             for i in range(3)
         ],
         "people": [{"id": 0, "name": "Sample"}],
+        "schedules": [
+            {
+                "user_id": 0,
+                "person": "Sample",
+                "frequency": "biweekly",
+                "next_date": (paycheck + timedelta(days=14)).isoformat(),
+                "monthly_gross_cents": _cents(4_500 * 26 / 12),
+                "monthly_net_cents": _cents(2_600 * 26 / 12),
+            }
+        ],
         "categories": [
             {"id": i, "name": n, "kind": k, "essential": k == "fixed" or n in ("Groceries", "Transport")}
             for i, (n, k) in enumerate(CATEGORY_NAMES, 1)

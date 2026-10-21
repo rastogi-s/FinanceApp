@@ -26,6 +26,15 @@ export type SavingsMonth = {
   stubs: number;
 };
 export type Version = { id: number; source: "draft" | "edit" | "restore"; by: string | null; at: string; total_cents: number };
+export type Frequency = "weekly" | "biweekly" | "semimonthly" | "monthly";
+export type Schedule = {
+  user_id: number | null;
+  person: string | null;
+  frequency: Frequency;
+  next_date: string;
+  monthly_gross_cents: number;
+  monthly_net_cents: number;
+};
 export type Paycheck = {
   id: number;
   user_id: number | null;
@@ -36,6 +45,7 @@ export type Paycheck = {
   savings_cents: number;
   net_cents: number;
   employer_match_cents: number;
+  frequency: Frequency | null;
   deposit: { date: string; merchant: string } | null;
 };
 export type BudgetState = {
@@ -54,6 +64,7 @@ export type BudgetState = {
   versions: Version[];
   paychecks: Paycheck[];
   people: { id: number; name: string }[];
+  schedules: Schedule[];
   categories: { id: number; name: string; kind: "fixed" | "flexible"; essential: boolean }[];
 };
 

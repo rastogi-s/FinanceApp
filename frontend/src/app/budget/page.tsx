@@ -2,8 +2,8 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { ChevronRight, History, Minus, PiggyBank, Plus, ShieldCheck, Sparkles, Trash2, Wallet } from "lucide-react";
-import { AddSheet, LineSheet, PaycheckSheet } from "@/components/budget-sheets";
+import { CalendarClock, ChevronRight, History, Minus, PiggyBank, Plus, ShieldCheck, Sparkles, Trash2, Wallet } from "lucide-react";
+import { AddSheet, FREQUENCY_LABEL, LineSheet, PaycheckSheet } from "@/components/budget-sheets";
 import { Money } from "@/components/money";
 import { HouseholdPage, Notice } from "@/components/page";
 import { Button } from "@/components/ui/button";
@@ -313,6 +313,21 @@ function Savings({ data, onAdd, run }: { data: BudgetState; onAdd: () => void; r
             rate.
           </p>
         )}
+        {data.schedules.map((sc) => (
+          <div key={sc.user_id ?? "me"} className="flex items-center gap-3 rounded-xl bg-muted px-4 py-3 text-sm">
+            <CalendarClock className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+            <p className="min-w-0 flex-1">
+              <span className="font-medium">
+                {data.people.length > 1 && sc.person ? `${sc.person}: ` : ""}
+                {FREQUENCY_LABEL[sc.frequency]}
+              </span>
+              <span className="text-muted-foreground">
+                {" "}
+                · next payday {short.format(new Date(sc.next_date))} · about <Money cents={sc.monthly_gross_cents} /> gross a month
+              </span>
+            </p>
+          </div>
+        ))}
         {data.paychecks.length > 0 && (
           <ul className="divide-y rounded-xl border">
             {data.paychecks.slice(0, 4).map((p) => (

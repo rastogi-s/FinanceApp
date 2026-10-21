@@ -1,13 +1,14 @@
 """The budget (draft, edits, versions), pay stubs, and the household settings behind the savings numbers."""
 
 import datetime
+from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
 
-from financeapp import budget, demo
+from financeapp import budget, demo, paystub
 from financeapp.api.deps import Signed, audit, signed_in
 from financeapp.models import BudgetLine, BudgetVersion, Category, Paycheck, User
 
@@ -122,12 +123,28 @@ class PaycheckIn(BaseModel):
     savings_cents: int = Field(ge=0, le=MAX_CENTS)
     net_cents: int = Field(ge=0, le=MAX_CENTS)
     employer_match_cents: int = Field(default=0, ge=0, le=MAX_CENTS)
+    frequency: Literal["weekly", "biweekly", "semimonthly", "monthly"] | None = None
+    period_start: datetime.date | None = None
+    period_end: datetime.date | None = None
 
     @model_validator(mode="after")
     def adds_up(self) -> "PaycheckIn":
         if self.taxes_cents + self.savings_cents + self.net_cents > self.gross_cents:
             raise ValueError("Taxes, savings and take-home pay add up to more than gross pay.")
+        if self.period_start and self.period_end and self.period_start > self.period_end:
+            raise ValueError("The pay period ends before it starts.")
         return self
+
+
+@router.post("/paychecks/read")
+async def read_paycheck(file: UploadFile, who: Signed = Depends(signed_in)) -> dict:
+    """Reads an uploaded pay stub PDF into the form's numbers. Nothing is saved, and the file isn't kept."""
+    no_demo(who)
+    data = await file.read(paystub.MAX_BYTES + 1)
+    try:
+        return paystub.to_json(paystub.read(data))
+    except paystub.StubError as e:
+        raise HTTPException(422, str(e)) from None
 
 
 @router.post("/paychecks")
