@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useSyncExternalStore } from "react";
 import { ChartPie, Eye, EyeOff, House, PiggyBank, ReceiptText, Settings, TrendingUp } from "lucide-react";
+import { PullToRefresh } from "@/components/pull-to-refresh";
 import { ReauthDialog, requestReauth } from "@/components/reauth";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -120,6 +121,7 @@ function PrivateShell({ children }: { children: React.ReactNode }) {
       >
         Skip to content
       </a>
+      <PullToRefresh />
 
       {/* Laptop: a quiet sidebar. */}
       <aside className="sticky top-0 hidden h-dvh flex-col border-r px-4 py-6 md:flex">
