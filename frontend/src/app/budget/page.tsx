@@ -282,7 +282,7 @@ function Savings({ data, onAdd, run }: { data: BudgetState; onAdd: () => void; r
   const rate = data.savings_rate;
   const hasMatch = data.paychecks.some((p) => p.employer_match_cents > 0);
   return (
-    <Card>
+    <Card id="pay" className="scroll-mt-20">
       <CardHeader>
         <CardTitle>Where the pay went</CardTitle>
         {rate && <span className="text-sm text-muted-foreground">{monthName.format(new Date(rate.month))}</span>}

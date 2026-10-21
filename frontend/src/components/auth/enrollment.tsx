@@ -91,7 +91,7 @@ export function Enrollment({ mode, inviteCode, inviteName }: { mode: "setup" | "
       finish();
     });
 
-  const finish = () => router.replace(mode === "setup" ? "/settings/accounts?welcome=1" : "/");
+  const finish = () => router.replace(mode === "setup" ? "/start" : "/");
 
   const strength = passwordHint(password);
   const index = STEPS.findIndex((s) => s.key === step);

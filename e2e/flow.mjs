@@ -117,6 +117,10 @@ try {
 
   await check("setup-passkey-added", async () => {
     await button("Add a passkey").click();
+    // The setup guide comes next: the passkey step is ticked, linking accounts is the open one.
+    await page.waitForURL((u) => u.pathname === "/start");
+    await main().getByRole("heading", { name: "Get set up" }).waitFor();
+    await main().getByRole("link", { name: "Add an account" }).click();
     await page.waitForURL((u) => u.pathname === "/settings/accounts");
     await page.getByText("Now add your first account").waitFor();
     const { credentials } = await cdp.send("WebAuthn.getCredentials", { authenticatorId });
