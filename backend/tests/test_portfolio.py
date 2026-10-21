@@ -258,6 +258,7 @@ def test_trends_once_a_day(client):
         assert voo.year_high == Decimal("160") and voo.year_low == Decimal("95")
         assert voo.average_200 is not None and voo.average_50 is not None
         assert float(voo.average_50) == pytest.approx(150 - 50 / 249 * 49 / 2, abs=0.01)
+        assert len(voo.closes) == quotes.SPARK_DAYS and voo.closes[-1] == pytest.approx(150)  # for the sparkline
         brk = db.get(Quote, "BRK.B")
         assert brk.trend_as_of == date(2026, 10, 20) and brk.year_high is None  # no history: not asked again today
     assert quotes.refresh_trends(db_of(client), t, client=mock(handler)) == 0
@@ -351,3 +352,47 @@ def test_demo_portfolio_and_detail(tmp_path):
                 d = c.get(f"/api/securities/{symbol}?range={r}").json()
                 assert len(d["points"]) > 10, (symbol, r)
         assert json.dumps(p)  # serializable as it is
+        assert p["exposure"]["company_count"] >= len(p["exposure"]["companies"])
+        found = c.get("/api/portfolio/companies?q=micro").json()
+        assert found["companies"][0]["symbol"] == "MSFT" and found["companies"][0]["rank"] >= 1
+
+
+@needs_db
+def test_portfolio_page_is_light_and_cached(client, home):
+    """Thousands of companies inside funds: the page gets the top 100 and searches the rest; the math is kept
+    until a fund's holdings or a position change."""
+    home.setup()
+    with db_of(client).session() as db:
+        seed(db, [("VTI", "Funds", 10, 100), ("MSFT", "Stocks", 1, 500)])
+        db.add(Fund(symbol="VTI", source="nport", status="ok"))
+        db.flush()
+        db.add_all(
+            FundConstituent(fund_symbol="VTI", key=f"cik:{i}", symbol=f"T{i}", name=f"Company {i}",
+                            weight=Decimal(1) / Decimal(400))
+            for i in range(400)
+        )  # fmt: skip
+    p = client.get("/api/portfolio").json()
+    e = p["exposure"]
+    assert len(e["companies"]) == 100 and e["company_count"] == 401
+    assert e["companies"][0]["symbol"] == "MSFT"
+    assert p["trends"] == {}  # no quotes yet
+
+    found = client.get("/api/portfolio/companies?q=company 39").json()
+    assert found["count"] == 11 and {c["symbol"] for c in found["companies"]} >= {"T39", "T390"}
+    assert all(c["rank"] > 1 for c in found["companies"])
+    assert client.get("/api/portfolio/companies?q=").status_code == 422
+
+    with db_of(client).session() as db:
+        first = lookthrough.exposure(db, household.counted(db))
+        assert lookthrough.exposure(db, household.counted(db)) is first  # nothing changed: the same answer
+        db.get_one(FundConstituent, ("VTI", "cik:0")).weight = Decimal("0.6")
+        db.flush()
+        changed = lookthrough.exposure(db, household.counted(db))
+        assert changed is not first and changed["companies"][0]["symbol"] == "T0"
+        db.add(Quote(symbol="MSFT", price=Decimal("5000"), previous_close=Decimal("500"), source="yahoo",
+                     as_of=datetime.now(UTC), closes=[480.0, 500.0]))  # fmt: skip
+        db.flush()
+        moved = lookthrough.exposure(db, household.counted(db))
+        assert moved is not changed and moved["companies"][0]["symbol"] == "MSFT"  # a new price counts at once
+    t = client.get("/api/portfolio").json()["trends"]
+    assert t["MSFT"]["closes"] == [480.0, 500.0] and t["MSFT"]["previous_close"] == 500.0

@@ -181,6 +181,7 @@ def household(today: date | None = None) -> dict:
                 "account": a,
                 "value_cents": _cents(v),
                 "change_today_percent": p,
+                **_sample_shares(s, v),
             }
             for s, n, c, a, v, p in HOLDINGS
         ],
@@ -671,6 +672,7 @@ def portfolio(today: date | None = None) -> dict:
         "top5_percent": round(sum(r["value_cents"] for r in rows[:5]) / _cents(total) * 100, 1),
         "largest": rows[0]["symbol"],
         "exposure": _sample_exposure(today),
+        "trends": _sample_trends(),
         "prices_as_of": datetime.combine(today, datetime.min.time(), UTC).replace(hour=19, minute=45).isoformat(),
         "market_open": False,
         "sources": {"quotes": "yahoo", "lookthrough": True, "fundamentals": False},
@@ -678,6 +680,41 @@ def portfolio(today: date | None = None) -> dict:
 
 
 SAMPLE_PRICES = {"VTI": 318.40, "VXUS": 71.20, "AAPL": 339.50, "MSFT": 512.30, "FXAIX": 268.06, "BND": 74.10}
+SAMPLE_COST = {"VTI": 0.74, "VXUS": 0.91, "AAPL": 0.58, "MSFT": 0.66, "FXAIX": 0.79, "BND": 1.04}  # cost / value
+
+
+def _sample_shares(symbol: str, dollars: float) -> dict:
+    """Shares, price and cost basis for a sample holding, so the holdings table has every column filled."""
+    price = SAMPLE_PRICES.get(symbol)
+    if price is None:
+        return {}
+    return {
+        "quantity": round(dollars / price, 3),
+        "price": price,
+        "cost_basis_cents": _cents(dollars * SAMPLE_COST[symbol]),
+        "live": True,
+    }
+
+
+def _sample_trends() -> dict:
+    """A steady made-up month of closes and year range for each sample symbol."""
+    out = {}
+    for symbol, price in SAMPLE_PRICES.items():
+        rng = random.Random(f"{SEED}:trend:{symbol}")  # noqa: S311 - sample data, not security
+        closes, p = [], price
+        for _ in range(22):
+            p = p / (1 + rng.gauss(0.0006, 0.011))
+            closes.append(round(p, 2))
+        closes.reverse()
+        out[symbol] = {
+            "previous_close": closes[-1],
+            "year_low": round(price * 0.78, 2),
+            "year_high": round(price * 1.06, 2),
+            "average_50": round(sum(closes) / len(closes) * 0.99, 2),
+            "average_200": round(price * 0.9, 2),
+            "closes": closes,
+        }
+    return out
 
 
 def security(symbol: str, range_: str, today: date | None = None) -> dict:

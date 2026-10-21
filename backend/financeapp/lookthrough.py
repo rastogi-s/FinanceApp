@@ -21,8 +21,10 @@ size, since they come from outside.
 import contextlib
 import logging
 import re
+import threading
 import time as clock
 from collections import defaultdict
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import BinaryIO
@@ -430,13 +432,92 @@ def refresh(database: Database, settings: Settings, force: bool = False) -> dict
 # ---- exposure
 
 
-def exposure(db: DbSession, accounts: list[Account]) -> dict:
-    ps = portfolio.positions(db, accounts)
+@dataclass(frozen=True)
+class _FundRow:
+    status: str
+    source: str
+    proxy_of: str | None
+    name: str | None
+    as_of: date | None
+    equity_weight: Decimal | None
+    error: str | None
+
+
+@dataclass(frozen=True)
+class _Constituent:
+    key: str
+    symbol: str | None
+    name: str
+    weight: float
+    is_fund: bool
+
+
+@dataclass
+class _Index:
+    """Every fund's holdings, read once and kept until a fund changes: a total market fund alone holds thousands."""
+
+    funds: dict[str, _FundRow]
+    cons: dict[str, list[_Constituent]]
+    key_of: dict[str, str]  # a ticker (in each spelling) -> the company's key inside funds
+
+
+# Look-through is the slow part of the Portfolio page (tens of thousands of fund holdings), and its answer only
+# changes when a fund's holdings or the household's positions do. Keyed by database, so tests never share it.
+_cache_lock = threading.Lock()
+_index_cache: dict[str, tuple[tuple, _Index]] = {}
+_exposure_cache: dict[str, tuple[tuple, dict]] = {}
+
+
+def _index(db: DbSession) -> tuple[tuple, _Index]:
+    funds = {
+        f.symbol: _FundRow(f.status, f.source, f.proxy_of, f.name, f.as_of, f.equity_weight, f.error)
+        for f in db.scalars(select(Fund))
+    }
+    count, total = db.execute(select(func.count(), func.coalesce(func.sum(FundConstituent.weight), 0))).one()
+    version = (tuple(sorted(funds.items())), count, total)
+    where = str(db.get_bind().url)
+    with _cache_lock:
+        hit = _index_cache.get(where)
+    if hit and hit[0] == version:
+        return version, hit[1]
+    cons: dict[str, list[_Constituent]] = defaultdict(list)
+    rows = db.execute(
+        select(
+            FundConstituent.fund_symbol, FundConstituent.key, FundConstituent.symbol, FundConstituent.name,
+            FundConstituent.weight, FundConstituent.is_fund,
+        )
+    )  # fmt: skip
+    for fund, key, symbol, name, weight, is_fund in rows:
+        cons[fund].append(_Constituent(key, symbol, name, float(weight), is_fund))
+    key_of: dict[str, str] = {}
+    for c in (c for found in cons.values() for c in found if c.symbol and not c.is_fund):
+        for form in (c.symbol, c.symbol.replace("-", "."), c.symbol.replace(".", "-")):
+            key_of.setdefault(form, c.key)
+    index = _Index(funds, dict(cons), key_of)
+    with _cache_lock:
+        _index_cache[where] = (version, index)
+    return version, index
+
+
+def exposure(db: DbSession, accounts: list[Account], ps: list[portfolio.Position] | None = None) -> dict:
+    """Your real share of every company, largest first. Pass `ps` when the positions are at hand already."""
+    ps = portfolio.positions(db, accounts) if ps is None else ps
+    version, index = _index(db)
+    key = (version, _reference[0] if _reference else None, tuple((p.symbol, p.asset_class, p.value_cents) for p in ps))
+    where = str(db.get_bind().url)
+    with _cache_lock:
+        hit = _exposure_cache.get(where)
+    if hit and hit[0] == key:
+        return hit[1]
+    result = _exposure(index, ps)
+    with _cache_lock:
+        _exposure_cache[where] = (key, result)
+    return result
+
+
+def _exposure(index: _Index, ps: list[portfolio.Position]) -> dict:
     total = sum(p.value_cents for p in ps)
-    funds = {f.symbol: f for f in db.scalars(select(Fund))}
-    cons: dict[str, list[FundConstituent]] = defaultdict(list)
-    for c in db.scalars(select(FundConstituent)):
-        cons[c.fund_symbol].append(c)
+    funds, cons, key_of = index.funds, index.cons, index.key_of
     companies: dict[str, dict] = {}
     fund_rows: dict[str, dict] = {}
     other = 0.0
@@ -464,7 +545,7 @@ def exposure(db: DbSession, accounts: list[Account]) -> dict:
             return 0.0
         placed = 0.0
         for c in cons[src]:
-            amount = cents * float(c.weight)
+            amount = cents * c.weight
             if c.is_fund:
                 if depth < 2 and c.symbol:
                     placed += spread(c.symbol, amount, via, depth + 1)
@@ -474,10 +555,6 @@ def exposure(db: DbSession, accounts: list[Account]) -> dict:
         return placed
 
     ref = _reference[1] if _reference else None
-    key_of = {}
-    for c in (c for rows in cons.values() for c in rows if c.symbol and not c.is_fund):
-        for form in (c.symbol, c.symbol.replace("-", "."), c.symbol.replace(".", "-")):
-            key_of.setdefault(form, c.key)
     for p in ps:
         if source_of(p.symbol) is not None:
             placed = spread(p.symbol, p.value_cents, p.symbol, 0)
@@ -535,9 +612,7 @@ def exposure(db: DbSession, accounts: list[Account]) -> dict:
                 "as_of": sf.as_of.isoformat() if sf and sf.as_of else None,
                 "holdings": len(cons.get(src or "", [])),
                 "equity_percent": equity,
-                "top": [
-                    {"symbol": c.symbol, "name": c.name, "weight_percent": round(float(c.weight) * 100, 2)} for c in top
-                ],
+                "top": [{"symbol": c.symbol, "name": c.name, "weight_percent": round(c.weight * 100, 2)} for c in top],
             }
         )
     seen = sum(r["cents"] for r in fund_rows.values() if source_of(r["symbol"]))
