@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { AlertTriangle, ArrowDownRight, ArrowUpRight, Bell, ChevronRight, Sparkles, TrendingUp } from "lucide-react";
+import { BriefCard } from "@/components/brief";
 import { Sparkline } from "@/components/charts";
 import { Money, formatMoney } from "@/components/money";
 import { HouseholdPage } from "@/components/page";
@@ -42,6 +43,8 @@ export default function Home() {
                 <ChevronRight className="size-4 text-muted-foreground" aria-hidden />
               </Link>
             ))}
+
+            {!h.demo && <BriefCard />}
 
             <Card className="overflow-hidden">
               <CardHeader>
