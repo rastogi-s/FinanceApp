@@ -1,5 +1,29 @@
 [
   {
+    "version": "0.3.0",
+    "title": "Your budget",
+    "features": [
+      {
+        "id": "budget",
+        "title": "A budget that drafts itself",
+        "body": "Budget starts with a draft built from your last few months: what each bill and everyday category usually costs, with a little room on everyday spending. Tap any line to change it. Every save is kept, so you can bring an older budget back.",
+        "tryIt": "/budget"
+      },
+      {
+        "id": "savings-rate",
+        "title": "Your true savings rate",
+        "body": "Add a pay stub (five numbers, filled in from the last one) and the savings rate counts 401(k), HSA and ESPP money taken out before payday. Without a stub it works from take-home pay. Employer match is a switch.",
+        "tryIt": "/budget"
+      },
+      {
+        "id": "safe-to-spend",
+        "title": "Safe to spend and an emergency fund",
+        "body": "Home shows what's left of the everyday budget for the rest of the month. Budget shows how many months of essentials your cash covers, against a target you pick.",
+        "tryIt": "/"
+      }
+    ]
+  },
+  {
     "version": "0.2.0",
     "title": "Your own accounts",
     "features": [

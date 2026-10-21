@@ -23,6 +23,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     Uuid,
+    false,
 )
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -196,6 +197,8 @@ class Category(Base):
     name: Mapped[str] = mapped_column(String(60), unique=True)
     kind: Mapped[str] = mapped_column(String(16))  # fixed | flexible | income | transfer | other
     sort: Mapped[int] = mapped_column(Integer, default=100)
+    # Counts toward the emergency fund target (every bill, plus groceries, transport and health to start with).
+    essential: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
 
 
 class Transaction(Base):
@@ -273,3 +276,49 @@ class Import(Base):
     account_id: Mapped[int | None] = mapped_column(ForeignKey("accounts.id", ondelete="SET NULL"))
     parsed: Mapped[dict] = mapped_column(default=dict)
     summary: Mapped[dict] = mapped_column(default=dict)
+
+
+# ---- budget and pay
+
+
+class BudgetVersion(Base):
+    """One saved budget. Every save makes a new version, so an older one can be looked at or brought back."""
+
+    __tablename__ = "budget_versions"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    source: Mapped[str] = mapped_column(String(16))  # draft | edit | restore
+    created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    created_at: Mapped[datetime] = mapped_column(default=now)
+
+
+class BudgetLine(Base):
+    """A category's monthly limit in one version of the budget."""
+
+    __tablename__ = "budget_lines"
+    version_id: Mapped[int] = mapped_column(ForeignKey("budget_versions.id", ondelete="CASCADE"), primary_key=True)
+    category_id: Mapped[int] = mapped_column(ForeignKey("categories.id", ondelete="CASCADE"), primary_key=True)
+    limit_cents: Mapped[int] = mapped_column(BigInteger)
+
+
+class Paycheck(Base):
+    """A pay stub, typed in. Other deductions (health insurance and the like) = gross - taxes - savings - net."""
+
+    __tablename__ = "paychecks"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))  # whose pay
+    date: Mapped[date] = mapped_column(Date, index=True)  # pay date
+    gross_cents: Mapped[int] = mapped_column(BigInteger)
+    taxes_cents: Mapped[int] = mapped_column(BigInteger)  # federal, state, Social Security and Medicare
+    savings_cents: Mapped[int] = mapped_column(BigInteger)  # 401(k), HSA and ESPP taken out before pay
+    net_cents: Mapped[int] = mapped_column(BigInteger)  # what landed in the bank
+    employer_match_cents: Mapped[int] = mapped_column(BigInteger, default=0)
+    created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    created_at: Mapped[datetime] = mapped_column(default=now)
+
+
+class Preference(Base):
+    """Household settings that aren't secrets or server config, e.g. how many months the emergency fund covers."""
+
+    __tablename__ = "preferences"
+    key: Mapped[str] = mapped_column(String(40), primary_key=True)
+    value: Mapped[dict] = mapped_column(default=dict)

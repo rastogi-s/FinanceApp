@@ -140,7 +140,7 @@ def household(today: date | None = None) -> dict:
         "as_of": datetime.combine(today, datetime.min.time(), UTC).replace(hour=6).isoformat(),
         "net_worth": {"cents": net_worth, "change_today_cents": change_today, "history": history},
         "safe_to_spend": {"cents": flexible_left, "days_left": days_left},
-        "savings_rate": {"percent": 31.4, "month": month_start.isoformat()},
+        "savings_rate": {"percent": 31.4, "month": _last_month(month_start).isoformat(), "basis": "gross"},
         "budgets": budgets,
         "budgets_closest": closest,
         "alerts": [
@@ -194,6 +194,10 @@ def household(today: date | None = None) -> dict:
         "allocation": [{"asset_class": k, "cents": v} for k, v in sorted(by_class.items(), key=lambda kv: -kv[1])],
         "projection": {"monthly_savings_cents": _cents(monthly_savings), "bands": bands},
     }
+
+
+def _last_month(month_start: date) -> date:
+    return (month_start - timedelta(days=1)).replace(day=1)
 
 
 def _by_account() -> dict[str, float]:
@@ -304,3 +308,114 @@ def connections() -> dict:
 def empty() -> dict:
     """What a fresh install with no linked accounts returns."""
     return {"demo": False, "linked": False}
+
+
+TYPICAL = {"Groceries": 840, "Dining out": 410, "Shopping": 360, "Transport": 270, "Entertainment": 180}
+SAVINGS = [  # month offset, gross, taxes, deductions, spending (dollars): the last full month is 31.4%
+    (-6, 18_000, 4_300, 600, 8_310),
+    (-5, 18_000, 4_300, 600, 7_920),
+    (-4, 18_000, 4_300, 600, 8_640),
+    (-3, 18_000, 4_300, 600, 7_380),
+    (-2, 18_000, 4_300, 600, 7_710),
+    (-1, 18_000, 4_300, 600, 7_450),
+]
+
+
+def budget(today: date | None = None) -> dict:
+    """The Budget page in demo mode, matching household()."""
+    today = today or datetime.now(UTC).date()
+    month_start = today.replace(day=1)
+    next_month = (month_start + timedelta(days=32)).replace(day=1)
+    ids = {name: i for i, (name, _) in enumerate(CATEGORY_NAMES, 1)}
+    lines = [
+        {
+            "category_id": ids[name],
+            "category": name,
+            "kind": kind,
+            "essential": kind == "fixed" or name in ("Groceries", "Transport"),
+            "limit_cents": _cents(limit),
+            "spent_cents": _cents(limit * share),
+            "typical_cents": _cents(TYPICAL.get(name, limit)),
+        }
+        for name, kind, limit, share in BUDGET
+    ]
+    flexible_left = sum(b["limit_cents"] - b["spent_cents"] for b in lines if b["kind"] == "flexible")
+
+    def month(offset: int) -> date:
+        m = month_start.year * 12 + month_start.month - 1 + offset
+        return date(m // 12, m % 12 + 1, 1)
+
+    history = [
+        {
+            "month": month(offset).isoformat(),
+            "percent": round((gross - taxes - other - spent) / gross * 100, 1),
+            "basis": "gross",
+            "income_cents": _cents(gross),
+            "taxes_cents": _cents(taxes),
+            "deductions_cents": _cents(other),
+            "spending_cents": _cents(spent),
+            "saved_cents": _cents(gross - taxes - other - spent),
+            "match_cents": 0,
+            "stubs": 4,
+        }
+        for offset, gross, taxes, other, spent in SAVINGS
+    ]
+    essentials = sum(b["limit_cents"] for b in lines if b["essential"])
+    stamp = datetime.combine(month(-1), datetime.min.time(), UTC).replace(day=2, hour=20).isoformat()
+    paycheck = month(0) - timedelta(days=1)
+    return {
+        "saved": True,
+        "version": {
+            "id": 2,
+            "source": "edit",
+            "by": "Sample",
+            "at": stamp,
+            "total_cents": sum(b["limit_cents"] for b in lines),
+        },
+        "months_used": 6,
+        "rough": False,
+        "month": month_start.isoformat(),
+        "lines": lines,
+        "unbudgeted": [{"category_id": 12, "category": "Uncategorized", "kind": "other", "spent_cents": _cents(38)}],
+        "safe_to_spend": {"cents": flexible_left - _cents(38), "days_left": (next_month - today).days},
+        "savings_rate": history[-1],
+        "savings_history": history,
+        "emergency": {
+            "months": 6,
+            "monthly_cents": essentials,
+            "target_cents": essentials * 6,
+            "have_cents": _cents(sum(v for _, v in CASH)),
+        },
+        "include_match": False,
+        "versions": [
+            {
+                "id": 2,
+                "source": "edit",
+                "by": "Sample",
+                "at": stamp,
+                "total_cents": sum(b["limit_cents"] for b in lines),
+            },
+            {"id": 1, "source": "draft", "by": "Sample", "at": stamp, "total_cents": _cents(5_610)},
+        ],
+        "paychecks": [
+            {
+                "id": i,
+                "user_id": 0,
+                "person": "Sample",
+                "date": (paycheck - timedelta(days=14 * i)).isoformat(),
+                "gross_cents": _cents(4_500),
+                "taxes_cents": _cents(1_075),
+                "savings_cents": _cents(675),
+                "net_cents": _cents(2_600),
+                "employer_match_cents": _cents(225),
+                "deposit": {"date": (paycheck - timedelta(days=14 * i)).isoformat(), "merchant": "Acme Corp Payroll"},
+            }
+            for i in range(3)
+        ],
+        "people": [{"id": 0, "name": "Sample"}],
+        "categories": [
+            {"id": i, "name": n, "kind": k, "essential": k == "fixed" or n in ("Groceries", "Transport")}
+            for i, (n, k) in enumerate(CATEGORY_NAMES, 1)
+            if k in ("fixed", "flexible")
+        ],
+    }

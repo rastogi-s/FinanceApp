@@ -1,0 +1,156 @@
+"""The budget (draft, edits, versions), pay stubs, and the household settings behind the savings numbers."""
+
+import datetime
+
+from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel, Field, model_validator
+from sqlalchemy import select
+from sqlalchemy.orm import Session as DbSession
+
+from financeapp import budget, demo
+from financeapp.api.deps import Signed, audit, signed_in
+from financeapp.models import BudgetLine, BudgetVersion, Category, Paycheck, User
+
+router = APIRouter(prefix="/api")
+MAX_CENTS = 10_000_000_00  # $10M: anything bigger is a typo
+
+
+def db_of(request: Request) -> DbSession:
+    return request.state.db
+
+
+def no_demo(who: Signed) -> None:
+    if who.demo:
+        raise HTTPException(403, "Not available with sample data.")
+
+
+@router.get("/budget")
+def get_budget(request: Request, who: Signed = Depends(signed_in)) -> dict:
+    if who.demo:
+        return demo.budget()
+    return budget.build(db_of(request))
+
+
+class LineIn(BaseModel):
+    category_id: int
+    limit_cents: int = Field(ge=0, le=MAX_CENTS)
+
+
+class BudgetIn(BaseModel):
+    lines: list[LineIn] = Field(max_length=200)
+
+
+@router.put("/budget")
+def save_budget(body: BudgetIn, request: Request, who: Signed = Depends(signed_in)) -> dict:
+    """Saves the whole budget as a new version (the page sends every line, changed or not)."""
+    no_demo(who)
+    db = db_of(request)
+    ids = [line.category_id for line in body.lines]
+    if len(set(ids)) != len(ids):
+        raise HTTPException(422, "A category is in the budget twice.")
+    kinds = dict(db.execute(select(Category.id, Category.kind).where(Category.id.in_(ids))).all())
+    if any(kinds.get(i) not in budget.BUDGETED for i in ids):
+        raise HTTPException(422, "Only bills and everyday spending categories can have a budget.")
+    v = budget.save_version(db, {line.category_id: line.limit_cents for line in body.lines}, "edit", who.user.id)
+    audit(db, request, "budget_saved", who.user.id, version=v.id, lines=len(body.lines))
+    return budget.build(db)
+
+
+@router.post("/budget/draft")
+def redraft(request: Request, who: Signed = Depends(signed_in)) -> dict:
+    """Saves the draft made from recent spending: "looks right" on a first draft, or starting over later."""
+    no_demo(who)
+    db = db_of(request)
+    v = budget.save_draft(db, who.user.id)
+    if v is None:
+        raise HTTPException(409, "There isn't a full month of spending to draft from yet.")
+    audit(db, request, "budget_saved", who.user.id, version=v.id, source="draft")
+    return budget.build(db)
+
+
+@router.post("/budget/versions/{version_id}/restore")
+def restore(version_id: int, request: Request, who: Signed = Depends(signed_in)) -> dict:
+    no_demo(who)
+    db = db_of(request)
+    if db.get(BudgetVersion, version_id) is None:
+        raise HTTPException(404, "No such budget version.")
+    lines = {
+        line.category_id: line.limit_cents
+        for line in db.scalars(select(BudgetLine).where(BudgetLine.version_id == version_id))
+    }
+    v = budget.save_version(db, lines, "restore", who.user.id)
+    audit(db, request, "budget_saved", who.user.id, version=v.id, restored=version_id)
+    return budget.build(db)
+
+
+class SettingsIn(BaseModel):
+    emergency_months: int | None = Field(default=None, ge=1, le=36)
+    include_match: bool | None = None
+
+
+@router.patch("/budget/settings")
+def budget_settings(body: SettingsIn, request: Request, who: Signed = Depends(signed_in)) -> dict:
+    no_demo(who)
+    db = db_of(request)
+    budget.set_preferences(db, **body.model_dump(exclude_none=True))
+    return budget.build(db)
+
+
+class CategoryPatch(BaseModel):
+    essential: bool
+
+
+@router.patch("/categories/{category_id}")
+def patch_category(category_id: int, body: CategoryPatch, request: Request, who: Signed = Depends(signed_in)) -> dict:
+    no_demo(who)
+    db = db_of(request)
+    c = db.get(Category, category_id)
+    if c is None:
+        raise HTTPException(404, "No such category.")
+    c.essential = body.essential
+    return budget.build(db)
+
+
+# ---- pay stubs
+
+
+class PaycheckIn(BaseModel):
+    user_id: int | None = None  # whose pay; the person entering it when left out
+    date: datetime.date
+    gross_cents: int = Field(gt=0, le=MAX_CENTS)
+    taxes_cents: int = Field(ge=0, le=MAX_CENTS)
+    savings_cents: int = Field(ge=0, le=MAX_CENTS)
+    net_cents: int = Field(ge=0, le=MAX_CENTS)
+    employer_match_cents: int = Field(default=0, ge=0, le=MAX_CENTS)
+
+    @model_validator(mode="after")
+    def adds_up(self) -> "PaycheckIn":
+        if self.taxes_cents + self.savings_cents + self.net_cents > self.gross_cents:
+            raise ValueError("Taxes, savings and take-home pay add up to more than gross pay.")
+        return self
+
+
+@router.post("/paychecks")
+def add_paycheck(body: PaycheckIn, request: Request, who: Signed = Depends(signed_in)) -> dict:
+    no_demo(who)
+    db = db_of(request)
+    user_id = body.user_id if body.user_id is not None else who.user.id
+    if db.get(User, user_id) is None:
+        raise HTTPException(422, "No such person.")
+    db.add(Paycheck(**body.model_dump(exclude={"user_id"}), user_id=user_id, created_by=who.user.id))
+    db.flush()
+    audit(db, request, "paycheck_added", who.user.id)
+    return budget.build(db)
+
+
+@router.delete("/paychecks/{paycheck_id}")
+def delete_paycheck(paycheck_id: int, request: Request, who: Signed = Depends(signed_in)) -> dict:
+    no_demo(who)
+    db = db_of(request)
+    p = db.get(Paycheck, paycheck_id)
+    if p is None:
+        raise HTTPException(404, "No such pay stub.")
+    db.delete(p)
+    db.flush()
+    audit(db, request, "paycheck_removed", who.user.id)
+    return budget.build(db)

@@ -2,8 +2,8 @@
 
 Net worth = cash + investments - card and loan balances, using each account's latest balance, and only accounts
 marked authoritative (so an account that comes in through two sources is counted once). Transfers between your own
-accounts are left out of spending. Budgets, the savings rate and projections arrive in later phases; until then
-those parts are null and the pages say so.
+accounts are left out of spending. The budget, savings rate and "safe to spend" come from budget.py; projections
+arrive in a later phase, and until then that part is null and the Plan page says so.
 """
 
 from collections import defaultdict
@@ -12,6 +12,7 @@ from datetime import UTC, date, datetime, timedelta
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session as DbSession
 
+from financeapp import budget
 from financeapp.models import Account, Balance, Category, Connection, HoldingSnapshot, SyncRun, Transaction
 from financeapp.sync import today
 
@@ -193,10 +194,7 @@ def build(db: DbSession) -> dict:
         "as_of": as_of.isoformat(),
         "net_worth": {"cents": net, "change_today_cents": net - yesterday, "history": history},
         "spending": {"month_cents": spent_month, "last_month_same_day_cents": spent_last, "needs_review": review},
-        "safe_to_spend": None,
-        "savings_rate": None,
-        "budgets": [],
-        "budgets_closest": [],
+        **budget.for_household(budget.build(db)),
         "alerts": [],
         "transactions": transactions,
         "accounts": {"cash": cash, "investments": investments, "debts": debts},
