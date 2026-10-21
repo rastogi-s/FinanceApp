@@ -1,7 +1,7 @@
 """The database tables. Money is integer cents (negative = money out), timestamps are UTC, dates are calendar days.
 
-Secrets (aggregator tokens, TOTP seeds) are stored only as AES-GCM ciphertext (see crypto.py); passwords, session
-tokens, setup and invite codes only as hashes. Schema changes go through migrations/ (Alembic).
+Secrets (aggregator tokens, TOTP seeds, AI keys) are stored only as AES-GCM ciphertext (see crypto.py); passwords,
+session tokens, setup and invite codes only as hashes. Schema changes go through migrations/ (Alembic).
 """
 
 import uuid
@@ -326,3 +326,45 @@ class Preference(Base):
     __tablename__ = "preferences"
     key: Mapped[str] = mapped_column(String(40), primary_key=True)
     value: Mapped[dict] = mapped_column(default=dict)
+
+
+# ---- AI
+
+
+class AIProvider(Base):
+    """An AI provider the owner set up. The key is stored only as ciphertext and never sent back to the browser."""
+
+    __tablename__ = "ai_providers"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    kind: Mapped[str] = mapped_column(String(24))  # anthropic | openai | gemini | openai_compatible
+    label: Mapped[str] = mapped_column(String(80))
+    base_url: Mapped[str | None] = mapped_column(String(300))  # openai_compatible only
+    api_key_enc: Mapped[str | None] = mapped_column(Text)
+    key_hint: Mapped[str | None] = mapped_column(String(8))  # the key's last 4 characters, to tell keys apart
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Pictures and scans can't be redacted before sending, so they only go to a provider with this switched on.
+    allow_pictures: Mapped[bool] = mapped_column(Boolean, default=False)
+    models: Mapped[dict] = mapped_column(default=dict)  # {"ids": [...]} from the last successful check
+    last_checked_at: Mapped[datetime | None]
+    last_error: Mapped[str | None] = mapped_column(String(300))
+    created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    created_at: Mapped[datetime] = mapped_column(default=now)
+
+
+class AIUsage(Base):
+    """One call to an AI provider: who, what for, which model, tokens and cost. Never what was sent or answered."""
+
+    __tablename__ = "ai_usage"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    at: Mapped[datetime] = mapped_column(default=now, index=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    task: Mapped[str] = mapped_column(String(24))
+    provider_id: Mapped[int | None] = mapped_column(ForeignKey("ai_providers.id", ondelete="SET NULL"))
+    provider_kind: Mapped[str] = mapped_column(String(24))
+    model: Mapped[str] = mapped_column(String(120))
+    input_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    output_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    cost_microdollars: Mapped[int] = mapped_column(BigInteger, default=0)  # millionths of a dollar
+    priced: Mapped[bool] = mapped_column(Boolean, default=True)  # False: the model's price was a guess
+    ok: Mapped[bool] = mapped_column(Boolean, default=True)
+    error: Mapped[str | None] = mapped_column(String(200))

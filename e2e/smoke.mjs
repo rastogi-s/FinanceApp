@@ -30,6 +30,7 @@ const PLACES = [
   ["accounts", "/settings/accounts", "direct"],
   ["security", "/settings/security", "direct"],
   ["people", "/settings/people", "direct"],
+  ["ai", "/settings/ai", "direct"],
 ];
 const REQUIRED_HEADERS = {
   "content-security-policy": /default-src 'none'.*frame-ancestors 'none'/,

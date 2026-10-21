@@ -154,6 +154,13 @@ them. To restore one, bring the private key over for the moment you need it:
 - **Read-only, revocable.** Plaid gets only read products (transactions, investments, liabilities, balance); SnapTrade connections are
   made read-only. Plaid Link is the hosted page (no Plaid script runs inside the app, so the CSP stays strict).
   "Revoke all connections" removes every connection at Plaid and SnapTrade and deletes every token here.
+- **AI is opt-in.** Nothing goes to an AI provider until the owner adds one under Settings → AI and picks it for a
+  job. API keys are encrypted like tokens, checked before they're kept, never sent back to the browser, and changing
+  one needs a fresh passkey or code. Text has Social Security, account and card numbers (all but the last 4
+  digits), names, emails, phone numbers and street addresses taken out before it's sent; pictures can't be, so
+  they only go to a provider with "Send pictures and scans" on (on by default only for a server on your own
+  network). Requests never follow redirects. A monthly spending cap (default $5) refuses a request that could go
+  over it, and every request is logged with its tokens and cost, never its content.
 - **Uploads checked.** Files are capped at 5 MB and parsed on the server (the raw file is never kept); you see a
   preview before anything is saved.
 
@@ -164,6 +171,14 @@ them. To restore one, bring the private key over for the moment you need it:
 | Plaid | Banks and cards (Chase, Amex, Ally...) | Hosted Link; `/transactions/sync` with a cursor. The free Trial plan covers a household. |
 | SnapTrade | Brokerages (E*TRADE, Fidelity, Schwab, Robinhood...) | One SnapTrade user for the household; read-only connections. Covers E*TRADE, so its own API isn't needed. |
 | File upload | Anything | Fidelity and E*TRADE positions CSVs, any bank's transactions CSV, OFX/QFX. Fidelity 401(k)s, which no aggregator reaches well, go this way. |
+
+## AI
+
+Settings → AI takes Claude, OpenAI, Gemini, or any OpenAI-compatible server (Ollama, LM Studio, vLLM). Each job
+(for now, reading uploads the built-in readers don't know) goes to the provider and model you pick there. Models
+with a known price are costed exactly; for others, type in the price or the app assumes a high one so the cap stops
+early. A local server is free and keeps everything at home: run Ollama with a vision model (`ollama pull
+qwen2.5vl:7b`) and add `http://<that machine>:11434/v1`.
 
 Each account has an "authoritative" switch for when the same account comes in two ways (say, an upload and a
 link): only the authoritative one counts toward net worth. Enter a statement balance on any account to check the
