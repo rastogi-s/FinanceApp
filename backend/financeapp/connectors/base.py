@@ -56,11 +56,28 @@ class TransactionData:
 
 
 @dataclass
+class InvestmentTransactionData:
+    """Brokerage activity. amount_cents > 0 is cash arriving in the account (a dividend), < 0 cash leaving (a buy)."""
+
+    account_external_id: str
+    external_id: str
+    date: date
+    type: str  # buy | sell | cash | fee | transfer | cancel
+    subtype: str
+    symbol: str | None
+    name: str
+    quantity: Decimal | None
+    price: Decimal | None
+    amount_cents: int
+
+
+@dataclass
 class FetchResult:
     accounts: list[AccountData] = field(default_factory=list)
     holdings: list[HoldingData] | None = None  # None: this source has no holdings (don't clear existing ones)
     transactions: list[TransactionData] = field(default_factory=list)
     removed_transaction_ids: list[str] = field(default_factory=list)
+    investment_transactions: list[InvestmentTransactionData] = field(default_factory=list)
     state: dict = field(default_factory=dict)  # saved and handed back next time (e.g. a sync cursor)
 
 

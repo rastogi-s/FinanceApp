@@ -223,6 +223,7 @@ class FakePlaid:
         self.fail: str | None = None
         self.removed = False
         self.pages = 0
+        self.investment_starts: list[str] = []
 
     def handler(self, request: httpx.Request) -> httpx.Response:
         path = request.url.path
@@ -308,6 +309,43 @@ class FakePlaid:
                         {"security_id": "s1", "ticker_symbol": "AAPL", "name": "Apple", "type": "equity"},
                         {"security_id": "s2", "ticker_symbol": "NTAP", "name": "NetApp", "type": "equity"},
                     ],
+                },
+            )
+        if path == "/investments/transactions/get":
+            self.investment_starts.append(body["start_date"])
+            today = date.today()
+            activity = [
+                # A reinvested dividend: the cash dividend and the buy with it (Plaid: negative amount = cash in).
+                ("d1", 40, "cash", "qualified dividend", "s1", -24.5, None),
+                ("d2", 40, "buy", "dividend reinvestment", "s1", 24.5, 0.13),
+                # A brokerage that only sends the reinvestment buy.
+                ("d3", 100, "buy", "dividend reinvestment", "s2", 6.0, 0.06),
+                ("d4", 10, "cash", "interest", None, -1.25, None),
+                ("d5", 5, "buy", "buy", "s1", 1900, 10),
+            ]
+            return httpx.Response(
+                200,
+                json={
+                    "investment_transactions": [
+                        {
+                            "investment_transaction_id": i,
+                            "account_id": "brk",
+                            "security_id": sec,
+                            "date": (today - timedelta(days=ago)).isoformat(),
+                            "name": f"{sub} {sec or ''}",
+                            "quantity": qty,
+                            "amount": amount,
+                            "price": 190 if qty else None,
+                            "type": kind,
+                            "subtype": sub,
+                        }
+                        for i, ago, kind, sub, sec, amount, qty in activity
+                    ],
+                    "securities": [
+                        {"security_id": "s1", "ticker_symbol": "AAPL", "name": "Apple"},
+                        {"security_id": "s2", "ticker_symbol": "NTAP", "name": "NetApp"},
+                    ],
+                    "total_investment_transactions": len(activity),
                 },
             )
         if path == "/transactions/sync":

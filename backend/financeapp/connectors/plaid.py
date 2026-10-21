@@ -6,7 +6,7 @@ runs inside the app and its Content-Security-Policy stays closed. The app isn't 
 webhooks it asks for new transactions on every sync (/transactions/sync with a saved cursor).
 """
 
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 
 import httpx
@@ -16,6 +16,7 @@ from financeapp.connectors.base import (
     ConnectorError,
     FetchResult,
     HoldingData,
+    InvestmentTransactionData,
     Linked,
     LinkStart,
     TransactionData,
@@ -43,6 +44,8 @@ NOT_APPLICABLE = {
     "ADDITIONAL_CONSENT_REQUIRED",
     "NO_LIABILITY_ACCOUNTS",
 }
+INVESTMENT_HISTORY_DAYS = 730  # Plaid keeps up to 24 months of brokerage activity
+INVESTMENT_OVERLAP_DAYS = 31  # look back again each time: activity can post late or be corrected
 TYPES = {
     "depository": "depository",
     "credit": "credit",
@@ -144,6 +147,7 @@ class Plaid:
 
         if any(t == "investment" for t in types.values()):
             result.holdings = self._holdings(token)
+            self._investment_transactions(token, result)
 
         if any(t in ("depository", "credit", "loan") for t in types.values()):
             self._transactions(token, result)
@@ -186,6 +190,57 @@ class Plaid:
                 )
             )
         return out
+
+    def _investment_transactions(self, token: str, result: FetchResult, today: date | None = None) -> None:
+        """Dividends, interest, buys and sells: the full 24 months the first time, then the last month again."""
+        end = today or date.today()
+        through = result.state.get("investments_through")
+        start = (
+            date.fromisoformat(through) - timedelta(days=INVESTMENT_OVERLAP_DAYS)
+            if through
+            else end - timedelta(days=INVESTMENT_HISTORY_DAYS)
+        )
+        found: list[InvestmentTransactionData] = []
+        offset = 0
+        try:
+            while True:
+                data = self._post(
+                    "/investments/transactions/get",
+                    {
+                        "access_token": token,
+                        "start_date": start.isoformat(),
+                        "end_date": end.isoformat(),
+                        "options": {"count": 500, "offset": offset},
+                    },
+                )
+                securities = {s["security_id"]: s for s in data.get("securities") or []}
+                page = data.get("investment_transactions") or []
+                for t in page:
+                    s = securities.get(t.get("security_id") or "", {})
+                    quantity, price = t.get("quantity"), t.get("price")
+                    found.append(
+                        InvestmentTransactionData(
+                            account_external_id=t["account_id"],
+                            external_id=t["investment_transaction_id"],
+                            date=date.fromisoformat(t["date"]),
+                            type=(t.get("type") or "")[:24],
+                            subtype=(t.get("subtype") or "")[:48],
+                            symbol=(s.get("ticker_symbol") or "")[:40] or None,
+                            name=(t.get("name") or s.get("name") or "")[:200],
+                            quantity=Decimal(str(quantity)) if quantity is not None else None,
+                            price=Decimal(str(price)) if price is not None else None,
+                            amount_cents=-(cents(t.get("amount")) or 0),  # Plaid: positive = cash out
+                        )
+                    )
+                offset += len(page)
+                if not page or offset >= (data.get("total_investment_transactions") or 0):
+                    break
+        except ConnectorError as e:
+            if e.code in NOT_APPLICABLE or e.code == "PRODUCT_NOT_READY":
+                return  # no brokerage activity here, or Plaid is still gathering it: next sync asks again
+            raise
+        result.investment_transactions += found
+        result.state["investments_through"] = end.isoformat()
 
     def _transactions(self, token: str, result: FetchResult) -> None:
         start = result.state.get("cursor")

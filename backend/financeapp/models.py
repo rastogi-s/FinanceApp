@@ -252,6 +252,36 @@ class HoldingSnapshot(Base):
     cost_basis_cents: Mapped[int | None] = mapped_column(BigInteger)
 
 
+class InvestmentTransaction(Base):
+    """A brokerage account's activity: buys, sells, dividends, interest, fees. Kept for dividend and interest income
+    (income.py). amount_cents follows the app's convention: > 0 is cash arriving in the account (a dividend paid)."""
+
+    __tablename__ = "investment_transactions"
+    __table_args__ = (UniqueConstraint("account_id", "external_id"), Index("ix_investment_transactions_date", "date"))
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id", ondelete="CASCADE"), index=True)
+    external_id: Mapped[str] = mapped_column(String(200))
+    date: Mapped[date] = mapped_column(Date)
+    type: Mapped[str] = mapped_column(String(24))  # buy | sell | cash | fee | transfer | cancel
+    subtype: Mapped[str] = mapped_column(String(48))  # e.g. "qualified dividend", "interest", "dividend reinvestment"
+    symbol: Mapped[str | None] = mapped_column(String(40))
+    name: Mapped[str] = mapped_column(String(200))
+    quantity: Mapped[Decimal | None]
+    price: Mapped[Decimal | None]
+    amount_cents: Mapped[int] = mapped_column(BigInteger)
+    source: Mapped[str] = mapped_column(String(16))  # plaid
+    created_at: Mapped[datetime] = mapped_column(default=now)
+
+
+class DividendHistory(Base):
+    """A symbol's dividends per share by ex-dividend date, from the quote service (only the ticker is sent)."""
+
+    __tablename__ = "dividend_history"
+    symbol: Mapped[str] = mapped_column(String(40), primary_key=True)
+    ex_date: Mapped[date] = mapped_column(Date, primary_key=True)
+    amount: Mapped[Decimal]  # dollars per share
+
+
 class SyncRun(Base):
     """One run of the sync, kept so 'seven nights in a row with no manual fix' can be checked."""
 

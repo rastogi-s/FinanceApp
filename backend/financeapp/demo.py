@@ -7,6 +7,7 @@ dates stay current. Money is integer cents, as it will be in the database.
 import random
 import statistics
 from datetime import UTC, date, datetime, timedelta
+from decimal import Decimal
 
 from financeapp import forecast, plan
 
@@ -50,7 +51,7 @@ HOLDINGS = [
     ("HSA cash", "HealthEquity cash", "Cash", "HealthEquity HSA", 6_200, 0.0),
 ]
 
-CASH = [("Chase checking", 14_350), ("Ally savings", 38_900)]
+CASH = [("Chase checking", 14_350), ("Ally savings", 38_900), ("Marcus 12-month CD", 25_000)]
 DEBTS = [("Amex Gold", 2_140), ("Chase Sapphire", 860)]
 
 
@@ -1016,3 +1017,116 @@ def taxes_page(today: date | None = None) -> dict:
     }
     profile = {**taxes.DEFAULTS, "filing_status": "single", "amounts": {"lt_gains": _cents(3_200)}}
     return taxes.estimate(taxes.table_for(today.year), profile, facts, today) | {"demo": True}
+
+
+# ---- dividends and interest
+
+# symbol: (dividend per share a year ago, payments a year, yearly growth, price). Roughly what each really pays.
+SAMPLE_DIVIDENDS = {  # ..., and how many days into the cycle the next ex-dividend date is
+    "VTI": (3.70, 4, 0.06, 318.40, 62),
+    "VXUS": (2.10, 4, 0.03, 71.20, 63),
+    "AAPL": (1.00, 4, 0.045, 339.50, 20),
+    "MSFT": (3.32, 4, 0.10, 512.30, 35),
+    "FXAIX": (3.15, 4, 0.055, 268.06, 70),
+    "BND": (2.62, 12, 0.04, 74.10, 10),
+}
+DEMO_REINVESTING = {"VTI", "FXAIX", "BND"}
+
+
+def _sample_income(today: date):
+    from financeapp import income
+
+    tax_advantaged = {"Fidelity 401(k)", "Fidelity IRA", "HealthEquity HSA"}
+    hs: dict[str, income.Holding] = {}
+    for symbol, name, cls, account, dollars, _ in HOLDINGS:
+        if symbol not in SAMPLE_DIVIDENDS:
+            continue
+        price = Decimal(str(SAMPLE_DIVIDENDS[symbol][3]))
+        shares = (Decimal(dollars) / price).quantize(Decimal("0.001"))
+        h = hs.setdefault(
+            symbol, income.Holding(symbol, name, "Funds" if symbol in ("VTI", "VXUS", "FXAIX") else cls, Decimal(0),
+                                   price, 0, 0, [])
+        )  # fmt: skip
+        h.shares += shares
+        h.value_cents += _cents(dollars)
+        h.cost_basis_cents = (h.cost_basis_cents or 0) + _cents(dollars * 0.68)
+        h.accounts.append(account)
+
+    hist: dict[str, list[tuple[date, Decimal]]] = {}
+    pays: list[income.Payment] = []
+    for symbol, (annual, freq, growth, _, ahead) in SAMPLE_DIVIDENDS.items():
+        step = 365 / freq
+        rows = []
+        n = int(10 * freq)
+        for k in range(n, 0, -1):
+            ex = today - timedelta(days=round(k * step - ahead))
+            years_back = (today - ex).days / 365
+            amount = annual / freq * (1 + growth) ** (1 - years_back)
+            if symbol == "VXUS" and ex.month == 12:
+                amount *= 1.6  # international funds pay most in December
+            rows.append((ex, Decimal(str(round(amount, 4)))))
+        hist[symbol] = rows
+        for symbol_, name, _, account, dollars, _ in HOLDINGS:
+            if symbol_ != symbol:
+                continue
+            shares = dollars / SAMPLE_DIVIDENDS[symbol][3]
+            for ex, amount in rows:
+                pay = ex + timedelta(days=12)
+                if today - timedelta(days=730) < pay <= today:
+                    tax = "ordinary" if symbol == "BND" else ("qualified" if account == "E*TRADE" else "unlabeled")
+                    pays.append(
+                        income.Payment(pay, 0, account, symbol, name, round(float(amount) * shares * 100),
+                                       "dividend", "brokerage", tax, account not in tax_advantaged)
+                    )  # fmt: skip
+    # A December capital gain distribution, and interest on the brokerage's cash.
+    december = date(today.year - 1, 12, 18)
+    pays.append(income.Payment(december, 0, "Fidelity IRA", "FXAIX", "Fidelity 500 Index Fund", 21_40,
+                               "capital_gain", "brokerage", "unlabeled", False))  # fmt: skip
+    month = date(today.year, today.month, 1)
+    for i in range(24):
+        d = _months_before(month, i) - timedelta(days=2)
+        pays.append(income.Payment(d, 0, "E*TRADE", None, "Interest on cash", 3_12 + i * 3, "interest", "brokerage",
+                                   "ordinary", True))  # fmt: skip
+    # Bank interest: Ally savings monthly, the CD pays monthly too.
+    cash = [
+        income.CashAccount(1, "Chase checking ••4417", "checking", _cents(14_350)),
+        income.CashAccount(2, "Ally savings ••2290", "savings", _cents(38_900)),
+        income.CashAccount(3, "Marcus 12-month CD ••7781", "cd", _cents(25_000), 4.4,
+                           today + timedelta(days=74), 12),
+    ]  # fmt: skip
+    for i in range(24):
+        d = _months_before(month, i) - timedelta(days=1)
+        rate = 3.8 + (0.6 if i > 10 else 0)  # rates came down about a year ago
+        pays.append(income.Payment(d, 2, "Ally savings ••2290", None, "Interest paid", round(38_900_00 * rate / 1200),
+                                   "interest", "bank", "ordinary", True))  # fmt: skip
+        if i < 9:
+            cd = round(25_000_00 * 4.4 / 1200)
+            pays.append(income.Payment(d, 3, "Marcus 12-month CD ••7781", None, "Interest paid", cd, "interest",
+                                       "bank", "ordinary", True))  # fmt: skip
+    pays.sort(key=lambda p: p.date)
+    return pays, list(hs.values()), hist, cash
+
+
+def _months_before(first: date, n: int) -> date:
+    y, m = divmod(first.month - 1 - n, 12)
+    return date(first.year + y, m + 1, 1)
+
+
+def income(today: date | None = None) -> dict:
+    from financeapp import income as income_
+
+    today = today or datetime.now(UTC).date()
+    pays, hs, hist, cash = _sample_income(today)
+    hs.sort(key=lambda h: -h.value_cents)
+    return {
+        **income_.build_from(pays, hs, hist, DEMO_REINVESTING, cash, today - timedelta(days=730), today),
+        "demo": True,
+    }
+
+
+def income_tax(year: int, today: date | None = None) -> dict:
+    from financeapp import income as income_
+
+    today = today or datetime.now(UTC).date()
+    pays, hs, _, _ = _sample_income(today)
+    return income_.tax_summary(pays, year, today, {h.symbol: h.asset_class for h in hs}, today - timedelta(days=730))
