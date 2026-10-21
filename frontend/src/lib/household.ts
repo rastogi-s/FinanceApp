@@ -52,16 +52,32 @@ export type Household = LinkedHousehold | { demo: false; linked: false };
 
 export type State = { status: "loading" } | { status: "error"; message: string } | { status: "ready"; household: Household };
 
-// Fetched once and shared by every page, so moving between tabs is instant. Cleared on sign-out and after changes.
+// Fetched once and shared by every page, so moving between tabs is instant. Cleared on sign-out and after changes,
+// and fetched again once it is a few minutes old, so a background sync shows up without reopening the app.
+const STALE_MS = 5 * 60_000;
 let cached: Promise<Household> | null = null;
+let cachedAt = 0;
 const listeners = new Set<() => void>();
 
+function stale(): boolean {
+  return cached !== null && Date.now() - cachedAt > STALE_MS;
+}
+
 function load(): Promise<Household> {
-  cached ??= api<Household>("/api/household");
-  cached.catch(() => {
-    cached = null; // try again next time
-  });
+  if (stale()) cached = null;
+  if (!cached) {
+    cached = api<Household>("/api/household");
+    cachedAt = Date.now();
+    cached.catch(() => {
+      cached = null; // try again next time
+    });
+  }
   return cached;
+}
+
+// Back to the app after a while (a home-screen app is often resumed, not reopened): show fresh numbers.
+function refreshIfStale() {
+  if (document.visibilityState === "visible" && stale()) resetHousehold(true);
 }
 
 /** Forget the household so the next page shows fresh numbers (after a sync, an import or a recategorize). */
@@ -76,8 +92,10 @@ export function useHousehold(): State {
   useEffect(() => {
     const l = () => setVersion((v) => v + 1);
     listeners.add(l);
+    document.addEventListener("visibilitychange", refreshIfStale);
     return () => {
       listeners.delete(l);
+      document.removeEventListener("visibilitychange", refreshIfStale);
     };
   }, []);
   useEffect(() => {
