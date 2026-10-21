@@ -56,6 +56,13 @@ export type Subscription = {
   months: number;
   went_up: boolean;
 };
+/** A utility (power, water, the city, phone and internet) or another bill: recurring, but not one to cancel. */
+export type Utility = Subscription & {
+  kind: "utility" | "bill";
+  usual_cents: number;
+  /** A bill that moves month to month came in well over its usual month. */
+  higher: boolean;
+};
 export type Rising = {
   category_id: number;
   category: string;
@@ -82,6 +89,7 @@ export type PlanState =
       ideas: {
         subscriptions: Subscription[];
         subscriptions_yearly_cents: number;
+        utilities?: Utility[];
         rising: Rising[];
       };
     };

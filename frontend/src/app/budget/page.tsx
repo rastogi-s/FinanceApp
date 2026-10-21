@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import {
   CalendarClock,
@@ -19,6 +19,7 @@ import {
 import { AIBudgetSheet } from "@/components/ai-budget-sheet";
 import { AddSheet, FREQUENCY_LABEL, LineSheet, PaycheckSheet } from "@/components/budget-sheets";
 import { Money, formatMoney } from "@/components/money";
+import { SavingsSheet } from "@/components/savings-sheet";
 import { HouseholdPage, Notice } from "@/components/page";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -51,6 +52,15 @@ function Budget() {
   const [paying, setPaying] = useState(false);
   const [drafting, setDrafting] = useState(false);
   const [sort, setSort] = useState<LineSort>(savedSort);
+  // Home's savings rate tile opens the breakdown straight away (/budget?savings=1).
+  const [saving, setSaving] = useState(
+    () => typeof window !== "undefined" && new URLSearchParams(window.location.search).get("savings") === "1",
+  );
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).has("savings")) {
+      window.history.replaceState(window.history.state, "", window.location.pathname);
+    }
+  }, []);
 
   if (error)
     return (
@@ -134,7 +144,7 @@ function Budget() {
       )}
 
       <div className="grid grid-cols-2 gap-4">
-        <Card>
+        <Card className="h-full">
           <CardHeader>
             <CardTitle>Safe to spend</CardTitle>
             <Wallet className="size-4 text-muted-foreground" aria-hidden />
@@ -154,14 +164,19 @@ function Budget() {
             )}
           </CardContent>
         </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle>Savings rate</CardTitle>
-            <PiggyBank className="size-4 text-muted-foreground" aria-hidden />
-          </CardHeader>
-          <CardContent>
-            {data.savings_rate ? (
-              <>
+        {data.savings_rate ? (
+          <button
+            type="button"
+            onClick={() => setSaving(true)}
+            aria-haspopup="dialog"
+            className="rounded-xl text-left focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+          >
+            <Card className="h-full transition-colors hover:bg-muted/40">
+              <CardHeader>
+                <CardTitle>Savings rate</CardTitle>
+                <PiggyBank className="size-4 text-muted-foreground" aria-hidden />
+              </CardHeader>
+              <CardContent>
                 <p className={cn("text-2xl font-semibold tracking-tight", data.savings_rate.percent < 0 && "text-negative")}>
                   {data.savings_rate.percent.toFixed(0)}%
                 </p>
@@ -169,12 +184,23 @@ function Budget() {
                   of {data.savings_rate.basis === "gross" ? "gross" : "take-home"} pay in{" "}
                   {monthName.format(new Date(data.savings_rate.month))}
                 </p>
-              </>
-            ) : (
+                <p className="mt-2 flex items-center gap-0.5 text-xs font-medium text-primary">
+                  See how it adds up <ChevronRight className="size-3.5" aria-hidden />
+                </p>
+              </CardContent>
+            </Card>
+          </button>
+        ) : (
+          <Card>
+            <CardHeader>
+              <CardTitle>Savings rate</CardTitle>
+              <PiggyBank className="size-4 text-muted-foreground" aria-hidden />
+            </CardHeader>
+            <CardContent>
               <p className="text-sm text-muted-foreground">Shows up after a month with income in it.</p>
-            )}
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+        )}
       </div>
 
       {data.forecast && <MonthEnd data={data} onPick={setEditing} />}
@@ -281,6 +307,7 @@ function Budget() {
         lines={data.lines}
         save={(lines) => change("/api/budget", "PUT", { lines, source: "ai" })}
       />
+      <SavingsSheet months={data.savings_history} open={saving && !!data.savings_rate} onOpenChange={setSaving} />
       <PaycheckSheet open={paying} budget={data} change={change} onClose={() => setPaying(false)} />
     </div>
   );

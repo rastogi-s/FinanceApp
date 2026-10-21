@@ -1,5 +1,23 @@
 [
   {
+    "version": "0.23.0",
+    "title": "See how your savings rate adds up",
+    "features": [
+      {
+        "id": "savings-rate-breakdown",
+        "title": "Tap your savings rate",
+        "body": "On Budget, tap Savings rate to see the month line by line: what came in, taxes, bills and everyday spending by category, what was saved, and where it went (savings, a brokerage, your 401(k)). Pick any recent month at the top. It flags things that would make the rate look too high, like payments to a card that isn't linked or Zelle transfers that may have paid for something. A paycheck that landed uncategorized now counts as pay here too, so Budget and Plan agree.",
+        "tryIt": "/budget"
+      },
+      {
+        "id": "utilities-not-subscriptions",
+        "title": "Utilities aren't subscriptions",
+        "body": "Ways to save more on Plan no longer calls power, water, the city, phone or internet a subscription. They're listed as Utilities with Price went up when a steady bill rises, or Higher than usual when one that moves with the season comes in high, and they're left out of what cancelling subscriptions would save.",
+        "tryIt": "/plan"
+      }
+    ]
+  },
+  {
     "version": "0.22.0",
     "title": "Holdings as a table, and a faster Portfolio",
     "features": [

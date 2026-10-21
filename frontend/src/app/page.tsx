@@ -168,7 +168,7 @@ function FirstTile({ h }: { h: LinkedHousehold }) {
 function SecondTile({ h }: { h: LinkedHousehold }) {
   if (h.savings_rate) {
     return (
-      <Link href="/budget" className="block">
+      <Link href="/budget?savings=1" className="block">
         <Card className="h-full transition-colors hover:bg-muted/40">
           <CardHeader>
             <CardTitle>Savings rate</CardTitle>

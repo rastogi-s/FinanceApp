@@ -22,17 +22,19 @@ from financeapp.models import Account, Category, Transaction
 
 WINDOW_DAYS = 5
 
-ONE_SIDED = re.compile(
-    # Paying a card from a bank account: the issuer's name next to a payment word.
+# Paying a card from a bank account: the issuer's name next to a payment word; and the card's side of it.
+CARD_PAYMENT = (
     r"(amex|american express|chase (credit|card)|citi|discover|capital one|barclay|synchrony|apple card|"
     r"bank of america|bofa|wells fargo card|us bank card|credit (card|crd)).{0,24}"
     r"(autopay|auto pay|e-?payment|epay|payment|pmt)|"
-    # The card's side of it.
-    r"payment thank you|payment received|autopay payment|"
+    r"payment thank you|payment received|autopay payment"
+)
+BROKERAGES = r"fidelity|e\*?trade|vanguard|schwab|robinhood|wealthfront|betterment"
+ONE_SIDED = re.compile(
+    CARD_PAYMENT + "|"
     # Moves between accounts, and into brokerages.
     r"online transfer|internet transfer|transfer (to|from)|xfer|funds transfer|"
-    r"(fidelity|e\*?trade|vanguard|schwab|robinhood|wealthfront|betterment).{0,24}"
-    r"(transfer|contribution|moneyline|ach|deposit|invest)",
+    rf"({BROKERAGES}).{{0,24}}(transfer|contribution|moneyline|ach|deposit|invest)",
     re.IGNORECASE,
 )
 
