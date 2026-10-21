@@ -6,6 +6,9 @@
 #   e2e/update-test.sh IMAGE      IMAGE is a locally built image of this app, e.g. financeapp:ci
 set -Eeuo pipefail
 IMAGE=$1
+# CI exports these for its own compose runs. A real server has only .env, and the systemd service sees only .env, so
+# leaving them set would make the manual runs here and the Update now run use different settings (and passwords).
+unset POSTGRES_PASSWORD FINANCEAPP_IMAGE FINANCEAPP_VERSION DEMO_MODE
 REPO=$(cd "$(dirname "$0")/.." && pwd)
 REG=localhost:5000/financeapp
 WORK=$(mktemp -d)
