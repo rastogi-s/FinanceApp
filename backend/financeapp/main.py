@@ -15,7 +15,9 @@ from financeapp.api import (
     ai_routes,
     alert_routes,
     auth_routes,
+    brief_routes,
     budget_routes,
+    mcp_routes,
     money_routes,
     plan_routes,
     portfolio_routes,
@@ -119,6 +121,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.db = database
     # Sign-in attempts per IP address: 20 in 5 minutes (on top of the per-account lockout).
     app.state.limiter = auth.RateLimiter(limit=20, window_seconds=300)
+    # Agents (MCP): 120 requests a minute per key, and 20 wrong keys in 5 minutes per IP address.
+    app.state.agent_limiter = auth.RateLimiter(limit=120, window_seconds=60)
+    app.state.agent_failures = auth.RateLimiter(limit=20, window_seconds=300)
     site = StaticSite(settings.static_dir, hsts=settings.hsts)
 
     @app.get("/health")
@@ -152,6 +157,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(alert_routes.router)
     app.include_router(portfolio_routes.router)
     app.include_router(plan_routes.router)
+    app.include_router(brief_routes.router)
+    app.include_router(mcp_routes.router)
 
     @app.api_route("/api/{rest:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
     def api_not_found(rest: str) -> JSONResponse:

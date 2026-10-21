@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Bell, BrainCircuit, ChevronRight, Landmark, ListChecks, LogOut, ShieldCheck, Sparkles, Users } from "lucide-react";
+import { Bell, Bot, BrainCircuit, ChevronRight, Landmark, ListChecks, LogOut, ShieldCheck, Sparkles, Users } from "lucide-react";
 import { PageTitle } from "@/components/page";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -48,10 +48,11 @@ export default function Settings() {
               warn={stale > 0}
               tab="accounts"
             />
-            <Row href="/settings/alerts" icon={<Bell />} title="Alerts" detail="Prices, budgets, quiet hours" tab="alerts" />
+            <Row href="/settings/alerts" icon={<Bell />} title="Alerts" detail="Prices, budgets, the morning brief" tab="alerts" />
             <Row href="/settings/people" icon={<Users />} title="People" detail="You and your partner" tab="people" />
             <Row href="/settings/security" icon={<ShieldCheck />} title="Security" detail="Passkeys, devices, activity" tab="security" />
-            <Row href="/settings/ai" icon={<BrainCircuit />} title="AI" detail="Reading files, providers, spending" tab="ai" />
+            <Row href="/settings/ai" icon={<BrainCircuit />} title="AI" detail="Reading files, the morning brief, providers" tab="ai" />
+            <Row href="/settings/agents" icon={<Bot />} title="Agents" detail="Ask your own AI about your money" tab="agents" />
             <Row
               href="/start"
               icon={<ListChecks />}

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { BellRing, Mail, Moon, Plus, Send, Smartphone } from "lucide-react";
 import { KIND_ICON, type Rule, type RuleIn, RuleSheet } from "@/components/alert-sheets";
+import { BriefSettingsCard } from "@/components/brief";
 import { SubPageTitle } from "@/components/page";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -150,6 +151,8 @@ export default function AlertsPage() {
               </Button>
             </CardContent>
           </Card>
+
+          <BriefSettingsCard demo={demo} />
 
           <Card className="md:col-span-2">
             <CardHeader>
