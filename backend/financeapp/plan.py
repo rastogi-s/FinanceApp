@@ -1,14 +1,17 @@
 """The Plan page: where today's savings lead, when work becomes optional, and ideas for saving more.
 
 Projection. Today's net worth grows each month at a yearly return after inflation, plus the monthly savings,
-for 30 years. Three bands, because no one knows future returns: 4%, 6% and 8% a year. Monthly savings is the
-average of what the true savings rate (budget.py) says was saved in the last few full months, unless the
-household typed in its own number.
+for 30 years, in three bands because no one knows future returns. Every starting number comes from the
+household's own data, says where it came from, and can be typed over:
+- monthly savings: from the true savings rate (budget.py) in months with pay stubs, else from the pay stubs
+  themselves against a typical month of spending, else take-home pay minus spending (derive_savings);
+- the middle return: from today's mix of stocks, bonds and cash (funds by their SEC filing), two points either
+  side for the low and high bands (derive_returns);
+- spending later: lean = bills and essentials, regular = the median month, fat = regular x 1.5, all from real
+  transactions (Spending).
 
 Financial independence. The number to reach is a year of spending divided by the withdrawal rate (4% by
-default: $60k a year needs $1.5M). Three spending levels, made from the household's own budget so they update by
-themselves: lean = bills and essentials only, regular = the median month of spending, fat = regular x 1.5. Any
-of them can be set to a fixed amount instead.
+default: $60k a year needs $1.5M).
 
 Ideas. Subscriptions are merchants charged about the same amount in at least three of the last few months.
 A rising category is one whose last full month came in well over its usual month. Both are plain arithmetic on
@@ -20,21 +23,35 @@ Everything here is computed again on every request; the only thing stored is the
 
 import statistics
 from collections import defaultdict
-from datetime import date
+from datetime import date, timedelta
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
 
 from financeapp import budget
 from financeapp.categorize import normalize_merchant
-from financeapp.models import Preference
+from financeapp.models import Fund, Preference
 
-RETURNS = {"low": 4.0, "mid": 6.0, "high": 8.0}  # % a year after inflation
+RETURNS = {"low": 4.0, "mid": 6.0, "high": 8.0}  # % a year after inflation, when there's no mix to go on
+EXPECTED = {"stocks": 6.5, "bonds": 2.0, "cash": 0.5, "other": 5.0}  # long-run guesses, % a year after inflation
+FUND_STOCKS = 0.9  # a fund with no filing looked up yet counts as this much stocks
+SPREAD = 2.0  # the low and high bands sit this far either side of the middle
+MIN_RETURN, MAX_RETURN = 1.0, 8.0
+DEFAULT_RETURN_NOTE = "A common long-run range for a mostly-stocks portfolio, after inflation."
+RECENT_DAYS = 90
 YEARS = 30
 MAX_YEARS = 60  # looking for the year the target is reached stops here
 LEVELS = ("lean", "regular", "fat")
 FAT = 1.5
 SAVINGS_MONTHS = 6
-DEFAULTS: dict = {"withdrawal_rate": 4.0, "level": "regular", "birth_year": None, "savings_cents": None, "spending": {}}
+DEFAULTS: dict = {
+    "withdrawal_rate": 4.0,
+    "level": "regular",
+    "birth_year": None,
+    "savings_cents": None,
+    "return_mid": None,
+    "spending": {},
+}
 
 IDEA_MONTHS = 5  # how far back subscriptions are looked for (the current month plus four full ones)
 SUBSCRIPTION_MIN_MONTHS = 3
@@ -85,9 +102,9 @@ def months_to(target: int, start: int, monthly: int, rate_percent: float) -> int
     return None
 
 
-def bands(start: int, monthly: int, year: int, years: int = YEARS) -> list[dict]:
+def bands(start: int, monthly: int, year: int, returns: dict, years: int = YEARS) -> list[dict]:
     return [
-        {"year": year + y, **{k: grow(start, monthly, rate, y * 12) for k, rate in RETURNS.items()}}
+        {"year": year + y, **{k: grow(start, monthly, rate, y * 12) for k, rate in returns.items()}}
         for y in range(years + 1)
     ]
 
@@ -96,49 +113,222 @@ def target_for(yearly_spending: int, withdrawal_rate: float) -> int:
     return round(yearly_spending / (withdrawal_rate / 100))
 
 
-# ---- the household's own numbers
+# ---- the household's own numbers: each default says where it came from
 
 
-def spending_levels(state: dict, ledger: budget.Ledger, months: list[date], overrides: dict) -> dict:
-    """Yearly spending at each level, and where each came from (the budget, or a number someone typed)."""
-    essentials = sum(line["limit_cents"] for line in state["lines"] if line["essential"])
-    per_month = [sum(v for (_, m), v in ledger.spent.items() if m == month) for month in months]
-    regular = round(statistics.median(per_month)) if per_month else 0
-    made = {"lean": essentials * 12, "regular": regular * 12, "fat": round(regular * 12 * FAT)}
+def month_label(m: date) -> str:
+    return m.strftime("%b %Y")
+
+
+def span(months: list[date]) -> str:
+    if len(months) == 1:
+        return month_label(months[0])
+    return f"{month_label(months[0])} to {month_label(months[-1])}"
+
+
+def dollars(cents: int) -> str:
+    return f"${round(cents / 100):,}"
+
+
+class Spending:
+    """What the household spends in a typical month: the median full month, or the last 90 days as a month."""
+
+    def __init__(self, ledger: budget.Ledger, months: list[date], on: date) -> None:
+        self.months = months
+        essential = {c.id for c in ledger.categories.values() if c.essential}
+        if months:
+            per_month = [sum(v for (_, m), v in ledger.spent.items() if m == month) for month in months]
+            lean = [
+                sum(v for (cid, m), v in ledger.spent.items() if m == month and cid in essential) for month in months
+            ]
+            self.monthly = round(statistics.median(per_month))
+            self.essentials = round(statistics.median(lean))
+            self.where = f"your median month of spending, {span(months)}"
+        else:
+            since = on - timedelta(days=RECENT_DAYS)
+            recent = [t for t in ledger.txns if t.date > since and ledger.is_spending(t)]
+            self.monthly = round(-sum(t.amount_cents for t in recent) * 30 / RECENT_DAYS)
+            self.essentials = round(
+                -sum(t.amount_cents for t in recent if t.category_id in essential) * 30 / RECENT_DAYS
+            )
+            self.where = "your spending in the last 90 days, as a month" if recent else "no spending seen yet"
+
+
+def spending_levels(spending: Spending, overrides: dict) -> dict:
+    """Yearly spending at each level, where each came from, and whether someone typed it in instead."""
+    made = {
+        "lean": (
+            spending.essentials * 12,
+            f"Bills and essentials (rent, groceries, utilities and the like) from {spending.where}.",
+        ),
+        "regular": (spending.monthly * 12, f"From {spending.where}."),
+        "fat": (round(spending.monthly * 12 * FAT), f"Regular spending and half again, from {spending.where}."),
+    }
     out = {}
     for level in LEVELS:
         typed = overrides.get(level)
-        out[level] = {"yearly_cents": typed if typed is not None else made[level], "typed": typed is not None}
+        cents, note = made[level]
+        out[level] = {
+            "yearly_cents": typed if typed is not None else cents,
+            "typed": typed is not None,
+            "derived_cents": cents,
+            "note": note,
+        }
     return out
 
 
-def monthly_savings(state: dict) -> int | None:
-    recent = state["savings_history"][-SAVINGS_MONTHS:]
-    if not recent:
-        return None
-    return round(sum(m["saved_cents"] for m in recent) / len(recent))
+def from_pay_stubs(state: dict, include_match: bool) -> tuple[int, int] | None:
+    """Each person's latest stub that says how often they're paid: (take-home, put away before pay) a month."""
+    seen: set = set()
+    net = put_away = 0
+    for p in state["paychecks"]:  # newest first
+        if p["user_id"] in seen or not p["frequency"]:
+            continue
+        seen.add(p["user_id"])
+        per_month = budget.PER_YEAR[p["frequency"]] / 12
+        net += round(p["net_cents"] * per_month)
+        put_away += round((p["savings_cents"] + (p["employer_match_cents"] if include_match else 0)) * per_month)
+    return (net, put_away) if seen else None
 
 
-def inputs(db: DbSession, state: dict, net_worth: int, on: date) -> dict:
-    """What the projection and the what-if sliders start from."""
+def derive_savings(state: dict, ledger: budget.Ledger, spending: Spending, on: date) -> dict:
+    """The monthly savings to project, from the best evidence there is, and a sentence on where it came from.
+
+    1. Months whose pay stubs are in (the true savings rate: gross pay - taxes - deductions - spending).
+    2. Pay stubs that say how often you're paid: take-home plus 401(k)/HSA a month, minus a typical month.
+    3. Full months of take-home pay landing in your accounts, minus spending.
+    4. The last 90 days: money in minus money spent.
+    """
+    history = state["savings_history"][-SAVINGS_MONTHS:]
+    gross = [m for m in history if m["basis"] == "gross"]
+    if gross:
+        months = [date.fromisoformat(m["month"]) for m in gross]
+        return {
+            "cents": round(sum(m["saved_cents"] for m in gross) / len(gross)),
+            "kind": "savings_rate",
+            "note": f"Average of {span(months)}: pay before taxes, minus taxes, paycheck deductions and spending.",
+        }
+    stubs = from_pay_stubs(state, state["include_match"])
+    if stubs and spending.monthly:
+        net, put_away = stubs
+        extra = f" and {dollars(put_away)} into your 401(k), HSA or ESPP" if put_away else ""
+        return {
+            "cents": net + put_away - spending.monthly,
+            "kind": "pay_stubs",
+            "note": f"Your pay stubs: {dollars(net)} take-home a month{extra}, minus {dollars(spending.monthly)} of "
+            f"spending ({spending.where}).",
+        }
+    if history:
+        months = [date.fromisoformat(m["month"]) for m in history]
+        return {
+            "cents": round(sum(m["saved_cents"] for m in history) / len(history)),
+            "kind": "take_home",
+            "note": f"Take-home pay landing in your accounts minus spending, {span(months)}. Add a pay stub to count "
+            "your 401(k) and HSA too.",
+        }
+    since = on - timedelta(days=RECENT_DAYS)
+    money_in = sum(t.amount_cents for t in ledger.txns if t.date > since and ledger.is_income(t))
+    if money_in > 0:
+        money_out = -sum(t.amount_cents for t in ledger.txns if t.date > since and ledger.is_spending(t))
+        return {
+            "cents": round((money_in - money_out) * 30 / RECENT_DAYS),
+            "kind": "recent",
+            "note": "The last 90 days: income landing in your accounts minus spending, as a month.",
+        }
+    return {"cents": None, "kind": "none", "note": "No pay or income seen yet."}
+
+
+def derive_returns(db: DbSession, holdings: list[dict], allocation: list[dict]) -> dict:
+    """A middle return from the household's own mix of stocks, bonds and cash, with two points either side.
+
+    Funds count as stocks in the share their SEC filing says (look-through), or 90% stocks when there's no filing
+    yet (most funds people hold are stock index funds).
+    """
+    weights = {k: 0 for k in EXPECTED}
+    funds = {f.symbol: f for f in db.scalars(select(Fund))} if holdings else {}
+    held = 0
+    for h in holdings:
+        cls = h["asset_class"]
+        v = max(h["value_cents"], 0)
+        held += v
+        if cls == "Cash":
+            weights["cash"] += v
+        elif cls == "Bonds":
+            weights["bonds"] += v
+        elif cls == "Funds":
+            f = funds.get(h["symbol"])
+            share = float(f.equity_weight) if f is not None and f.equity_weight is not None else FUND_STOCKS
+            weights["stocks"] += round(v * share)
+            weights["bonds"] += v - round(v * share)
+        else:
+            weights["stocks"] += v
+    for row in allocation:
+        if row["asset_class"] == "Other investments":
+            weights["other"] += max(row["cents"], 0)
+        elif row["asset_class"] == "Cash":
+            weights["cash"] += max(row["cents"], 0) - sum(
+                max(h["value_cents"], 0) for h in holdings if h["asset_class"] == "Cash"
+            )
+    total = sum(weights.values())
+    if total <= 0:
+        return {**RETURNS, "typed": False, "derived_mid": RETURNS["mid"], "note": DEFAULT_RETURN_NOTE, "mix": None}
+    mix = {k: v / total for k, v in weights.items()}
+    mid = sum(EXPECTED[k] * share for k, share in mix.items())
+    mid = min(max(round(mid * 2) / 2, MIN_RETURN), MAX_RETURN)
+    pct = {k: round(share * 100) for k, share in mix.items()}
+    parts = [f"{pct['stocks']}% stocks"] + [
+        f"{pct[k]}% {name}" for k, name in (("bonds", "bonds"), ("cash", "cash"), ("other", "other")) if pct[k]
+    ]
+    return {
+        "low": max(mid - SPREAD, 0.0),
+        "mid": mid,
+        "high": mid + SPREAD,
+        "typed": False,
+        "derived_mid": mid,
+        "note": f"From your mix today: {', '.join(parts)}. Long-run guesses after inflation: stocks 6.5%, bonds 2%, "
+        "cash 0.5% a year.",
+        "mix": pct,
+    }
+
+
+def inputs(db: DbSession, state: dict, net_worth: int, on: date, holdings: list[dict], allocation: list[dict]) -> dict:
+    """What the projection and the what-if sliders start from, each with a note on where it came from."""
     prefs = preferences(db)
     accounts = budget.counted_accounts(db)
     months = budget.full_months(db, [a.id for a in accounts], on)
-    ledger = budget.Ledger(db, accounts, months[0] if months else budget.month_start(on))
-    measured = monthly_savings(state)
+    first = min([*months, on - timedelta(days=RECENT_DAYS)])
+    ledger = budget.Ledger(db, accounts, first)
+    spending = Spending(ledger, months, on)
+    measured = derive_savings(state, ledger, spending, on)
+    returns = derive_returns(db, holdings, allocation)
+    typed_return = prefs.get("return_mid")
+    if typed_return is not None:
+        returns = {
+            **returns,
+            "low": max(typed_return - SPREAD, 0.0),
+            "mid": typed_return,
+            "high": typed_return + SPREAD,
+            "typed": True,
+        }
     typed = prefs["savings_cents"]
     return {
         "start_cents": net_worth,
         "year": on.year,
-        "monthly_savings_cents": typed if typed is not None else measured,
-        "measured_savings_cents": measured,
-        "savings_months": len(state["savings_history"][-SAVINGS_MONTHS:]),
+        "monthly_savings_cents": typed if typed is not None else measured["cents"],
+        "measured_savings_cents": measured["cents"],
+        "savings_source": {"kind": measured["kind"], "note": measured["note"]},
         "savings_typed": typed is not None,
-        "returns": RETURNS,
+        "returns": {k: returns[k] for k in ("low", "mid", "high")},
+        "returns_source": {
+            "typed": returns["typed"],
+            "derived_mid": returns["derived_mid"],
+            "note": returns["note"],
+            "mix": returns["mix"],
+        },
         "withdrawal_rate": prefs["withdrawal_rate"],
         "level": prefs["level"],
         "birth_year": prefs["birth_year"],
-        "levels": spending_levels(state, ledger, months, prefs["spending"]),
+        "levels": spending_levels(spending, prefs["spending"]),
         "months_used": len(months),
         "emergency": state["emergency"],
     }
@@ -157,7 +347,7 @@ def projection(i: dict) -> dict | None:
         fire = {k: (i["year"] * 12 + m) // 12 if m is not None else None for k, m in reached.items()}
     return {
         "monthly_savings_cents": monthly,
-        "bands": bands(i["start_cents"], monthly, i["year"]),
+        "bands": bands(i["start_cents"], monthly, i["year"], i["returns"]),
         "target_cents": target,
         "fire_year": fire,
     }

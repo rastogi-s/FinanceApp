@@ -1,6 +1,6 @@
 [
   {
-    "version": "0.15.0",
+    "version": "0.16.0",
     "title": "One row per investment, and a nudge when prices dip",
     "features": [
       {
@@ -24,7 +24,7 @@
     ]
   },
   {
-    "version": "0.14.0",
+    "version": "0.15.0",
     "title": "Find anything you spent",
     "features": [
       {
@@ -44,6 +44,18 @@
         "title": "Search and sort holdings",
         "body": "Portfolio holdings can be searched by ticker or name, sorted by size, today's move or total gain, and narrowed to one account or kind of holding. Your real exposure has a box to find any company, so you can see how much Apple you really own.",
         "tryIt": "/portfolio"
+      }
+    ]
+  },
+  {
+    "version": "0.14.0",
+    "title": "A plan that starts from your own numbers",
+    "features": [
+      {
+        "id": "plan-defaults",
+        "title": "Every plan number, worked out for you",
+        "body": "Monthly savings now comes from your pay stubs (take-home plus 401(k) and HSA) against a typical month of spending, even with only one recent stub; the market return comes from your own mix of stocks, bonds and cash; and spending later comes from your real transactions. Each slider says where its number came from, and \"Use it\" takes you back after a what-if.",
+        "tryIt": "/plan"
       }
     ]
   },
