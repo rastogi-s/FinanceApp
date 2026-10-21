@@ -25,7 +25,7 @@ export type SavingsMonth = {
   match_cents: number;
   stubs: number;
 };
-export type Version = { id: number; source: "draft" | "edit" | "restore"; by: string | null; at: string; total_cents: number };
+export type Version = { id: number; source: "draft" | "edit" | "restore" | "ai"; by: string | null; at: string; total_cents: number };
 export type Frequency = "weekly" | "biweekly" | "semimonthly" | "monthly";
 export type Schedule = {
   user_id: number | null;

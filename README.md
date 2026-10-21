@@ -206,6 +206,12 @@ Claude Desktop and other apps that start servers from a config file can use `npx
 "Authorization: Bearer <key>"`. The tools: overview, accounts, transactions, spending by category, budget,
 holdings, net worth history, alerts and the morning brief.
 
+**Draft with AI** (Budget) suggests a limit for each line from your spending by month, the budget as it stands
+(and which lines you changed by hand), your pay stubs, savings rate and savings goal. Only totals go, never
+merchants, names or accounts, and the sheet shows exactly what will be sent before anything is. Each suggestion
+comes with its reason; tick the ones you want and they're saved as a new budget version marked "Drafted with AI",
+so the old one is a tap away in History.
+
 Each account has an "authoritative" switch for when the same account comes in two ways (say, an upload and a
 link): only the authoritative one counts toward net worth. Enter a statement balance on any account to check the
 synced number against it; the Phase 1 gate is every account within 1%.

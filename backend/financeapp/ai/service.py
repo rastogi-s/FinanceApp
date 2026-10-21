@@ -42,6 +42,11 @@ TASKS = {
         "Turns the morning's totals into a few plain sentences. Only totals, categories and tickers are sent.",
         pictures=False,
     ),
+    "plan_budget": Task(
+        "Drafting the budget",
+        "Suggests a limit for each budget line from your spending by month, pay stubs and savings goal (totals only).",
+        pictures=False,
+    ),
 }
 
 # Dollars per million tokens (input, output), from each provider's price list. A model that isn't here is priced
