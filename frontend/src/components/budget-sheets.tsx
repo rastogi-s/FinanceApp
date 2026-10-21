@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { Check, FileUp } from "lucide-react";
 import { Money, formatMoney } from "@/components/money";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select } from "@/components/ui/input";
@@ -8,8 +9,9 @@ import { Sheet } from "@/components/ui/sheet";
 import { Switch } from "@/components/ui/switch";
 import { toast } from "@/components/ui/toast";
 import { parseDollars } from "@/lib/accounts";
+import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { type BudgetLine, type BudgetState, linesWith } from "@/lib/budget";
+import { type BudgetLine, type BudgetState, type Frequency, linesWith } from "@/lib/budget";
 import { cn } from "@/lib/utils";
 
 type Change = (path: string, method: string, body?: unknown) => Promise<BudgetState>;
@@ -203,12 +205,33 @@ export function PaycheckSheet({
       open={open}
       onOpenChange={(o) => !o && onClose()}
       title="Add a pay stub"
-      description="Five numbers from the stub. Amounts for this one paycheck, not year to date."
+      description="Upload the PDF, or type five numbers from it. Amounts for this one paycheck, not year to date."
     >
       {open && <PaycheckForm key={who} who={who} setPerson={setPerson} budget={budget} change={change} onClose={onClose} />}
     </Sheet>
   );
 }
+
+const FREQUENCIES = [
+  ["weekly", "Weekly"],
+  ["biweekly", "Every 2 weeks"],
+  ["semimonthly", "Twice a month"],
+  ["monthly", "Monthly"],
+] as const;
+export const FREQUENCY_LABEL: Record<string, string> = Object.fromEntries(FREQUENCIES);
+
+type Read = {
+  date: string | null;
+  period_start: string | null;
+  period_end: string | null;
+  frequency: Frequency | null;
+  gross_cents: number | null;
+  taxes_cents: number | null;
+  savings_cents: number | null;
+  net_cents: number | null;
+  employer_match_cents: number | null;
+  warnings: string[];
+};
 
 function PaycheckForm({
   who,
@@ -224,10 +247,14 @@ function PaycheckForm({
   onClose: () => void;
 }) {
   const demo = useDemo();
-  const [date, setDate] = useState(today);
-  const [values, setValues] = useState(() => {
-    const last = budget.paychecks.find((p) => p.user_id === who);
-    return last
+  const last = budget.paychecks.find((p) => p.user_id === who);
+  const schedule = budget.schedules.find((s) => s.user_id === who);
+  // The next payday on their schedule, once it has come; otherwise today.
+  const [date, setDate] = useState(() => (schedule && schedule.next_date <= today() ? schedule.next_date : today()));
+  const [frequency, setFrequency] = useState<Frequency | null>(last?.frequency ?? null);
+  const [period, setPeriod] = useState<{ start: string | null; end: string | null }>({ start: null, end: null });
+  const [values, setValues] = useState(() =>
+    last
       ? {
           gross: dollars(last.gross_cents),
           taxes: dollars(last.taxes_cents),
@@ -235,9 +262,41 @@ function PaycheckForm({
           net: dollars(last.net_cents),
           match: last.employer_match_cents ? dollars(last.employer_match_cents) : "",
         }
-      : { gross: "", taxes: "", savings: "", net: "", match: "" };
-  });
+      : { gross: "", taxes: "", savings: "", net: "", match: "" },
+  );
   const [busy, setBusy] = useState(false);
+  const [reading, setReading] = useState(false);
+  const [read, setRead] = useState<{ name: string; warnings: string[] } | null>(null);
+  const [readError, setReadError] = useState<string | null>(null);
+  const input = useRef<HTMLInputElement>(null);
+
+  const upload = async (file: File) => {
+    if (demo) return toast("Reading pay stubs is off while the app shows sample data.");
+    setReading(true);
+    setReadError(null);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const r = await api<Read>("/api/paychecks/read", { form });
+      const amount = (c: number | null) => (c === null ? "" : c ? dollars(c) : "0");
+      setValues({
+        gross: amount(r.gross_cents),
+        taxes: amount(r.taxes_cents),
+        savings: amount(r.savings_cents),
+        net: amount(r.net_cents),
+        match: r.employer_match_cents ? dollars(r.employer_match_cents) : "",
+      });
+      if (r.date) setDate(r.date);
+      if (r.frequency) setFrequency(r.frequency);
+      setPeriod({ start: r.period_start, end: r.period_end });
+      setRead({ name: file.name, warnings: r.warnings });
+    } catch (e) {
+      setReadError((e as Error).message);
+    } finally {
+      setReading(false);
+      if (input.current) input.current.value = "";
+    }
+  };
 
   const cents = {
     gross: parseDollars(values.gross),
@@ -257,6 +316,9 @@ function PaycheckForm({
       await change("/api/paychecks", "POST", {
         user_id: who,
         date,
+        frequency,
+        period_start: period.start,
+        period_end: period.end,
         gross_cents: cents.gross,
         taxes_cents: cents.taxes,
         savings_cents: cents.savings,
@@ -273,7 +335,18 @@ function PaycheckForm({
   };
 
   const field = (key: keyof typeof values, label: string, hint?: string) => (
-    <Field id={`pay-${key}`} label={label} hint={hint} error={values[key] && cents[key] === null ? "Type an amount, like 4,500.00." : null}>
+    <Field
+      id={`pay-${key}`}
+      label={label}
+      hint={hint}
+      error={
+        values[key] && cents[key] === null
+          ? "Type an amount, like 4,500.00."
+          : read && key !== "match" && !values[key]
+            ? "Not found on the stub. Type it in."
+            : null
+      }
+    >
       <Input
         inputMode="decimal"
         autoComplete="off"
@@ -292,9 +365,45 @@ function PaycheckForm({
         save();
       }}
     >
+      <div className="rounded-2xl border border-dashed p-4">
+        <input
+          ref={input}
+          type="file"
+          accept="application/pdf,.pdf"
+          className="sr-only"
+          id="stub-file"
+          aria-label="Pay stub PDF"
+          tabIndex={-1}
+          onChange={(e) => e.target.files?.[0] && upload(e.target.files[0])}
+        />
+        <div className="flex items-center gap-3">
+          <FileUp className="size-5 shrink-0 text-primary" aria-hidden />
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium">{read ? `Filled in from ${read.name}` : "Have the PDF? Upload it"}</p>
+            <p className="text-xs text-muted-foreground">
+              {read ? "Check the numbers against the stub, then save." : "The numbers fill in by themselves. The file isn't kept."}
+            </p>
+          </div>
+          <Button type="button" size="sm" variant="secondary" disabled={reading} onClick={() => input.current?.click()}>
+            {reading ? "Reading…" : read ? "Another" : "Upload"}
+          </Button>
+        </div>
+        {readError && (
+          <p className="mt-3 text-sm text-negative" role="alert">
+            {readError}
+          </p>
+        )}
+        {read && read.warnings.length > 0 && (
+          <ul className="mt-3 grid gap-1 text-sm text-warning" role="status">
+            {read.warnings.map((w) => (
+              <li key={w}>{w}</li>
+            ))}
+          </ul>
+        )}
+      </div>
       <div className={cn("grid gap-4", budget.people.length > 1 ? "grid-cols-2" : "grid-cols-1")}>
         <Field id="pay-date" label="Pay date">
-          <Input type="date" value={date} max={today()} onChange={(e) => setDate(e.target.value)} />
+          <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
         </Field>
         {budget.people.length > 1 && (
           <Field id="pay-person" label="Whose pay">
@@ -308,6 +417,26 @@ function PaycheckForm({
           </Field>
         )}
       </div>
+      <fieldset>
+        <legend className="mb-2 text-sm font-medium">How often you&apos;re paid</legend>
+        <div className="flex flex-wrap gap-2">
+          {FREQUENCIES.map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              aria-pressed={frequency === value}
+              onClick={() => setFrequency(frequency === value ? null : value)}
+              className={cn(
+                "inline-flex h-9 items-center gap-1.5 rounded-full border px-3.5 text-sm font-medium transition-colors",
+                frequency === value ? "border-transparent bg-primary text-primary-foreground" : "bg-card hover:bg-muted",
+              )}
+            >
+              {frequency === value && <Check className="size-4" aria-hidden />}
+              {label}
+            </button>
+          ))}
+        </div>
+      </fieldset>
       {field("gross", "Gross pay")}
       {field("taxes", "Taxes", "Federal, state, Social Security and Medicare together.")}
       {field("savings", "Saved before pay", "401(k), HSA and ESPP contributions.")}

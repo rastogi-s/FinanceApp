@@ -1,0 +1,82 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>
+endobj
+4 0 obj
+<< /Length 1673 >>
+stream
+BT
+/F1 10 Tf
+1 0 0 1 50 760 Tm (ACME CORP) Tj
+1 0 0 1 50 744 Tm (Earnings Statement) Tj
+1 0 0 1 50 728 Tm (Period Beginning:) Tj
+1 0 0 1 160 728 Tm (09/28/2026) Tj
+1 0 0 1 50 712 Tm (Period Ending:) Tj
+1 0 0 1 160 712 Tm (10/11/2026) Tj
+1 0 0 1 50 696 Tm (Pay Date:) Tj
+1 0 0 1 160 696 Tm (10/16/2026) Tj
+1 0 0 1 50 680 Tm (Earnings) Tj
+1 0 0 1 300 680 Tm (this period) Tj
+1 0 0 1 450 680 Tm (year to date) Tj
+1 0 0 1 50 664 Tm (Regular) Tj
+1 0 0 1 300 664 Tm (4,500.00) Tj
+1 0 0 1 450 664 Tm (85,500.00) Tj
+1 0 0 1 50 648 Tm (Gross Pay) Tj
+1 0 0 1 300 648 Tm ($4,500.00) Tj
+1 0 0 1 450 648 Tm (85,500.00) Tj
+1 0 0 1 50 632 Tm (Statutory Deductions) Tj
+1 0 0 1 50 616 Tm (Federal Income Tax) Tj
+1 0 0 1 300 616 Tm (-540.00) Tj
+1 0 0 1 450 616 Tm (10,260.00) Tj
+1 0 0 1 50 600 Tm (Social Security Tax) Tj
+1 0 0 1 300 600 Tm (-279.00) Tj
+1 0 0 1 450 600 Tm (5,301.00) Tj
+1 0 0 1 50 584 Tm (Medicare Tax) Tj
+1 0 0 1 300 584 Tm (-65.25) Tj
+1 0 0 1 450 584 Tm (1,239.75) Tj
+1 0 0 1 50 568 Tm (CA State Income Tax) Tj
+1 0 0 1 300 568 Tm (-190.75) Tj
+1 0 0 1 450 568 Tm (3,624.25) Tj
+1 0 0 1 50 552 Tm (CA SDI Tax) Tj
+1 0 0 1 300 552 Tm (-54.00) Tj
+1 0 0 1 450 552 Tm (1,026.00) Tj
+1 0 0 1 50 536 Tm (Other Deductions) Tj
+1 0 0 1 50 520 Tm (401K) Tj
+1 0 0 1 300 520 Tm (-450.00*) Tj
+1 0 0 1 450 520 Tm (8,550.00) Tj
+1 0 0 1 50 504 Tm (HSA) Tj
+1 0 0 1 300 504 Tm (-150.00*) Tj
+1 0 0 1 450 504 Tm (2,850.00) Tj
+1 0 0 1 50 488 Tm (Medical) Tj
+1 0 0 1 300 488 Tm (-120.00*) Tj
+1 0 0 1 450 488 Tm (2,280.00) Tj
+1 0 0 1 50 472 Tm (Net Pay) Tj
+1 0 0 1 300 472 Tm ($2,651.00) Tj
+1 0 0 1 50 456 Tm (Employer 401K Match) Tj
+1 0 0 1 300 456 Tm (225.00) Tj
+1 0 0 1 450 456 Tm (4,275.00) Tj
+ET
+endstream
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+xref
+0 6
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000241 00000 n 
+0000001966 00000 n 
+trailer
+<< /Size 6 /Root 1 0 R >>
+startxref
+2036
+%%EOF

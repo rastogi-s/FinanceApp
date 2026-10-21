@@ -1,7 +1,8 @@
 // End-to-end test of a real (not demo) install, the way a person uses it on a phone: first-run setup with the
 // code from the server log, an authenticator app (TOTP), a passkey (Chrome's virtual authenticator standing in for
 // Face ID), uploading a brokerage positions file and two bank files, checking the numbers on Home, fixing a
-// category in two taps, inviting a partner, and signing back in with the passkey and then with password + code.
+// category in two taps, uploading a pay stub PDF, inviting a partner, and signing back in with the passkey and
+// then with password + code.
 // Every step is screenshotted and checked for JavaScript and console errors (which include anything the
 // Content-Security-Policy blocked) and serious accessibility problems. Runs in CI on every pull request.
 //
@@ -181,6 +182,21 @@ try {
     await main().getByRole("button", { name: /Blue Bottle Coffee/ }).first().click();
     await page.getByRole("dialog").getByRole("button", { name: "Groceries" }).click();
     await page.getByText(/Moved to Groceries, with 1 other/).waitFor();
+  });
+
+  await check("pay-stub-upload", async () => {
+    await page.locator("nav:visible [data-tab=budget]").click();
+    await page.waitForURL((u) => u.pathname === "/budget");
+    await button("Add a pay stub").click();
+    await page.locator("#stub-file").setInputFiles(join(FIXTURES, "paystub_adp.pdf"));
+    await page.getByText("Filled in from paystub_adp.pdf").waitFor();
+    if ((await page.getByLabel("Gross pay").inputValue()) !== "4500") throw new Error("gross pay wasn't filled in from the stub");
+    if ((await page.getByRole("button", { name: "Every 2 weeks" }).getAttribute("aria-pressed")) !== "true")
+      throw new Error("biweekly pay wasn't picked up from the stub");
+  });
+  await check("pay-stub-saved", async () => {
+    await page.getByRole("dialog").getByRole("button", { name: "Save pay stub" }).click();
+    await page.getByText(/Every 2 weeks · next payday/).waitFor();
   });
 
   await check("security", async () => {

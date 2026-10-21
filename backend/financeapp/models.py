@@ -306,6 +306,10 @@ class Paycheck(Base):
     __tablename__ = "paychecks"
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))  # whose pay
+    # Before "date", which would otherwise hide the date type for these annotations.
+    frequency: Mapped[str | None] = mapped_column(String(16))  # weekly | biweekly | semimonthly | monthly
+    period_start: Mapped[date | None] = mapped_column(Date)
+    period_end: Mapped[date | None] = mapped_column(Date)
     date: Mapped[date] = mapped_column(Date, index=True)  # pay date
     gross_cents: Mapped[int] = mapped_column(BigInteger)
     taxes_cents: Mapped[int] = mapped_column(BigInteger)  # federal, state, Social Security and Medicare
