@@ -52,6 +52,28 @@ class PriceRule(BaseModel):
         return p
 
 
+class DipRule(BaseModel):
+    kind: Literal["dip"]
+    symbol: str | None = Field(default=None, max_length=12)  # None: every stock and fund held
+    from_high_percent: float | None = Field(default=None, ge=2, le=50)
+    below_average: Literal[50, 200] | None = None
+
+    @model_validator(mode="after")
+    def one_condition(self):
+        if self.symbol is not None:
+            self.symbol = self.symbol.strip().upper() or None
+        if self.symbol is not None and not quotes.TICKER.match(self.symbol):
+            raise ValueError("That doesn't look like a ticker symbol.")
+        if (self.from_high_percent is None) == (self.below_average is None):
+            raise ValueError("Pick one: under the 52-week high, or under an average.")
+        return self
+
+    def params(self) -> dict:
+        if self.from_high_percent is not None:
+            return {"symbol": self.symbol, "from_high_percent": round(self.from_high_percent, 1)}
+        return {"symbol": self.symbol, "below_average": self.below_average}
+
+
 class BudgetRule(BaseModel):
     kind: Literal["budget"]
     category_id: int | None = None  # None: the whole everyday budget (for a heads-up: every category on its own)
@@ -72,7 +94,7 @@ class ConcentrationRule(BaseModel):
         return {"percent": round(self.percent, 1)}
 
 
-RuleIn = Annotated[PriceRule | BudgetRule | ConcentrationRule, Field(discriminator="kind")]
+RuleIn = Annotated[PriceRule | DipRule | BudgetRule | ConcentrationRule, Field(discriminator="kind")]
 
 
 class RuleBody(BaseModel):
@@ -105,6 +127,12 @@ def describe(r: AlertRule, categories: dict[int, str]) -> str:
         if "below" in p:
             return f"{p['symbol']} goes below {alerts.money(p['below'])}"
         return f"{p['symbol']} moves {alerts.percent(p['move_percent'])} or more in a day"
+    if r.kind == "dip":
+        who = p.get("symbol") or "Anything you hold"
+        if "from_high_percent" in p:
+            step = alerts.percent(p["from_high_percent"])
+            return f"{who} falls {step} under its 52-week high, and each {step} more"
+        return f"{who} drops under its {p['below_average']}-day average"
     if r.kind == "budget" and p.get("forecast"):
         if p.get("category_id") is None:
             return "Any category is on pace to go over its budget"
@@ -163,10 +191,10 @@ def check_category(db: DbSession, rule: RuleIn) -> None:
 
 
 def recheck(request: Request, db: DbSession, rule: AlertRule) -> None:
-    """Looks at a new or changed price rule right away, so it doesn't wait for the next round of prices."""
-    if rule.kind == "price" and rule.enabled:
+    """Looks at a new or changed price or dip rule right away, so it doesn't wait for the next round of prices."""
+    if rule.kind in ("price", "dip") and rule.enabled:
         db.flush()
-        alerts.evaluate(db, {"price"})
+        alerts.evaluate(db, {rule.kind})
         alerts.send_pending(db, settings_of(request))
 
 

@@ -49,7 +49,7 @@ export default function Settings() {
               warn={stale > 0}
               tab="accounts"
             />
-            <Row href="/settings/alerts" icon={<Bell />} title="Alerts" detail="Prices, budgets, the morning brief" tab="alerts" />
+            <Row href="/settings/alerts" icon={<Bell />} title="Alerts" detail="Prices, dips, budgets, the morning brief" tab="alerts" />
             <Row href="/settings/people" icon={<Users />} title="People" detail="You and your partner" tab="people" />
             <Row href="/settings/security" icon={<ShieldCheck />} title="Security" detail="Passkeys, devices, activity" tab="security" />
             <Row href="/settings/ai" icon={<BrainCircuit />} title="AI" detail="Reading files, the morning brief, providers" tab="ai" />

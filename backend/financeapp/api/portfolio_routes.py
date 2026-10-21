@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session as DbSession
 from financeapp import demo, household, lookthrough, portfolio, quotes, security
 from financeapp.api.alert_routes import rule_json
 from financeapp.api.deps import Signed, audit, settings_of, signed_in
-from financeapp.models import AlertRule, Category, Fund, Preference, now
+from financeapp.models import AlertRule, Category, Fund, Preference, Quote, now
 
 log = logging.getLogger("financeapp")
 router = APIRouter(prefix="/api")
@@ -146,9 +146,10 @@ def detail(
     categories = dict(db.execute(select(Category.id, Category.name)).all())
     rules = [
         rule_json(r, categories)
-        for r in db.scalars(select(AlertRule).where(AlertRule.kind == "price"))
+        for r in db.scalars(select(AlertRule).where(AlertRule.kind.in_(["price", "dip"])))
         if r.params.get("symbol") == symbol
     ]
+    trend = db.get(Quote, symbol)
     is_fund = fund is not None or (market or {}).get("type") in ("ETF", "MUTUALFUND")
     return {
         "symbol": symbol,
@@ -169,6 +170,8 @@ def detail(
             "year_low": (market or {}).get("year_low"),
             "year_high": (market or {}).get("year_high"),
             "volume": (market or {}).get("volume"),
+            "average_50": float(trend.average_50) if trend and trend.average_50 else None,
+            "average_200": float(trend.average_200) if trend and trend.average_200 else None,
             "dividend_yield": _safe(lambda: security.dividend_yield(symbol, price)) if market else None,
             **({} if is_fund else _safe(lambda: security.profile(settings, symbol)) or {}),
         },

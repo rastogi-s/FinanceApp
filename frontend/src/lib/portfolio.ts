@@ -94,6 +94,8 @@ export type Security = {
     day_high?: number | null;
     year_low?: number | null;
     year_high?: number | null;
+    average_50?: number | null;
+    average_200?: number | null;
     volume?: number | null;
     dividend_yield?: number | null;
     market_cap?: number;
