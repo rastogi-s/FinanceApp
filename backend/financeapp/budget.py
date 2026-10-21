@@ -23,6 +23,7 @@ from datetime import date, timedelta
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session as DbSession
 
+from financeapp import forecast
 from financeapp.models import (
     Account,
     Balance,
@@ -269,6 +270,7 @@ def build(db: DbSession) -> dict:
             )
         elif spent > 0 and c.kind not in ("transfer", "income") and c.name != "Taxes":
             unbudgeted.append({"category_id": c.id, "category": c.name, "kind": c.kind, "spent_cents": spent})
+    forecast.for_lines(ledger, months, this_month, end, lines)
     no_category = ledger.spent.get((None, this_month), 0)
     if no_category > 0:
         unbudgeted.append(
@@ -315,6 +317,7 @@ def build(db: DbSession) -> dict:
         "lines": lines,
         "unbudgeted": unbudgeted,
         "safe_to_spend": safe,
+        "forecast": forecast.summary(lines),
         "savings_rate": history[-1] if history else None,
         "savings_history": history,
         "emergency": {
