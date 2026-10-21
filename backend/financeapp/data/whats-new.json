@@ -1,5 +1,22 @@
 [
   {
+    "version": "0.24.0",
+    "title": "Taxes this year",
+    "features": [
+      {
+        "id": "tax-projection",
+        "title": "What you'll owe or get back",
+        "body": "A new Taxes page (open it from Plan) estimates this year's federal and North Carolina income tax, Social Security and Medicare from your pay stubs, interest, dividends and the gains you type in, then compares it with what's withheld to show the balance due or refund. It says what to put on a W-4 or NC-4 for the paychecks left, and when an estimated payment would avoid a penalty. Answer how you file, add a spouse's pay, pick standard or itemized deductions, and tap any number to type your own. The tax tables and their IRS and NC sources are listed at the bottom. An estimate, not tax advice.",
+        "tryIt": "/taxes"
+      },
+      {
+        "id": "paystub-tax-detail",
+        "title": "Pay stubs keep their taxes by kind",
+        "body": "Uploading a pay stub PDF now also reads federal, state, Social Security and Medicare, pre-tax 401(k) and HSA, and the year-to-date column, so the Taxes page starts from exact numbers. You can type them on the stub form too, under Taxes by kind. Stubs saved before this are split by the usual rates until you add a new one."
+      }
+    ]
+  },
+  {
     "version": "0.23.0",
     "title": "See how your savings rate adds up",
     "features": [

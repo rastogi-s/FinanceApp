@@ -969,3 +969,50 @@ def alerts() -> dict:
             {"id": i, "name": n} for i, (n, k) in enumerate(CATEGORY_NAMES, 1) if k in ("fixed", "flexible")
         ],
     }
+
+
+def taxes_page(today: date | None = None) -> dict:
+    """The Taxes page in demo mode: the real estimate, run on the sample household's pay stubs (matching budget())."""
+    from financeapp import taxes
+    from financeapp.models import Paycheck
+
+    today = today or datetime.now(UTC).date()
+    paycheck = today.replace(day=1) - timedelta(days=1)
+    gross = _cents(4_500)
+    stubs = []
+    for i in range(3):
+        when = paycheck - timedelta(days=14 * i)
+        paid_so_far = (when - date(when.year, 1, 1)).days // 14 + 1
+        this = {
+            "federal": _cents(510),
+            "state": _cents(152),
+            "social_security": _cents(270.60),
+            "medicare": _cents(63.29),
+            "retirement": _cents(450),
+            "hsa": _cents(135),
+        }
+        ytd = {k: v * paid_so_far for k, v in this.items()} | {"gross": gross * paid_so_far}
+        stubs.append(
+            Paycheck(
+                id=-i - 1,
+                user_id=0,
+                frequency="biweekly",
+                date=when,
+                gross_cents=gross,
+                taxes_cents=this["federal"] + this["state"] + this["social_security"] + this["medicare"],
+                savings_cents=this["retirement"] + this["hsa"],
+                net_cents=_cents(3_100),
+                employer_match_cents=_cents(225),
+                detail={"this": this, "ytd": ytd},
+            )
+        )
+    facts = {
+        "viewer_id": 0,
+        "people": {0: "Sample"},
+        "stubs": {0: stubs},
+        "investments": {"interest_cents": _cents(1_270), "dividends_cents": _cents(2_340), "basis": "trailing"},
+        "unrealized_gain_cents": _cents(41_800),
+        "birth_year": 1990,
+    }
+    profile = {**taxes.DEFAULTS, "filing_status": "single", "amounts": {"lt_gains": _cents(3_200)}}
+    return taxes.estimate(taxes.table_for(today.year), profile, facts, today) | {"demo": True}

@@ -7,6 +7,10 @@ else the sum of the federal, state, Social Security and Medicare lines. Savings 
 lines; employer contributions go to the match instead. How often you're paid comes from the stub's own words
 ("Biweekly") or the length of the pay period.
 
+For the Taxes page each line is also sorted into a detail (federal, state, Social Security, Medicare, pre-tax 401(k),
+Roth, HSA, ESPP, pre-tax health benefits, stock pay), with the year-to-date column when the stub prints one: the last
+amount on a line, when there are two or more.
+
 Only PDFs with text in them can be read here; a scanned or photographed stub has none, and is read with AI
 (ai/extract.py) if the household has set it up. Nothing is stored: the file is read in memory and the numbers go
 back to the form for someone to check and save.
@@ -40,6 +44,15 @@ TAX = re.compile(
 )
 SAVINGS = re.compile(r"\b(40[13]\s*\(?[kb]\)?|457\s*\(?b?\)?|hsa|health\s+savings|espp|stock\s+purchase)\b", re.I)
 EMPLOYER = re.compile(r"\b(employer|company|er)\b.*\b(match|contrib|contribution|401|hsa)\b|\bmatch\b", re.I)
+TAXABLE = re.compile(r"\btaxable\b", re.I)  # "Federal Taxable Wages" is a wage total, not a tax
+BENEFITS = re.compile(
+    r"\b(medical|dental|vision|health\s+ins(urance)?|fsa|flexible\s+spending|dependent\s+care|section\s+125)\b", re.I
+)
+STOCK = re.compile(
+    r"\brsus?\b|\brestricted\s+stock|\bstock\s+(award|vest(ing)?|units?|comp(ensation)?)|\bespp\s+(gain|income|disq)|"
+    r"\bdisqualifying\b|\bnso\b|\bstock\s+option",
+    re.I,
+)
 YTD_ONLY = re.compile(r"\b(year\s+to\s+date|ytd)\b", re.I)
 
 PAY_DATE = re.compile(r"\b(pay|check|payment|advice|deposit)\s*date\b", re.I)
@@ -69,6 +82,9 @@ class Stub:
     savings_cents: int | None = None
     net_cents: int | None = None
     employer_match_cents: int | None = None
+    # For the Taxes page: this paycheck's amounts and the year to date, by kind (see DETAIL).
+    detail: dict[str, int] = field(default_factory=dict)
+    ytd: dict[str, int] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
 
 
@@ -120,6 +136,43 @@ def text_of(data: bytes) -> list[str]:
     return lines
 
 
+DETAIL = (
+    "federal", "state", "local", "state_other", "social_security", "medicare",  # taxes
+    "retirement", "roth", "hsa", "espp", "benefits",  # taken out before pay
+    "stock",  # RSU and ESPP income, already inside gross pay
+)  # fmt: skip
+
+
+def tax_kind(line: str) -> str:
+    if re.search(r"\bsocial\s+security\b|\boasdi\b|\bss\s+tax\b|\bfica\b(?!.*\bmed)", line, re.I):
+        return "social_security"
+    if re.search(r"\bmedicare\b|\bmed\s+tax\b|\bfed\s*med\b|\bfica\s+med", line, re.I):
+        return "medicare"
+    if re.search(r"\b(sdi|fli|pfl|vpdi|disability|family\s+leave)\b", line, re.I):
+        return "state_other"
+    if re.search(r"\b(city|local|county|school\s+district)\b", line, re.I):
+        return "local"
+    if re.search(r"\bfed(eral)?\b|\bfit\b|\bfwt\b", line, re.I):
+        return "federal"
+    return "state"
+
+
+def savings_kind(line: str) -> str:
+    if re.search(r"\broth\b", line, re.I):
+        return "roth"
+    if re.search(r"\bhsa\b|\bhealth\s+savings\b", line, re.I):
+        return "hsa"
+    if re.search(r"\bespp\b|\bstock\s+purchase\b", line, re.I):
+        return "espp"
+    return "retirement"
+
+
+def ytd_amount(line: str, label: re.Match) -> int | None:
+    """The year-to-date column: the last amount on the line, when there's more than one."""
+    found = amounts(line[label.end() :])
+    return found[-1] if len(found) >= 2 and found[-1] >= found[0] else None
+
+
 def first_amount(line: str, label: re.Match) -> int | None:
     """The first amount after the label (this paycheck's, not the year to date)."""
     found = amounts(line[label.end() :])
@@ -155,25 +208,45 @@ def read(data: bytes) -> Stub:
     tax_sum = 0
     savings = 0
     match = 0
+
+    def add(kind: str, line: str, m: re.Match, value: int) -> None:
+        stub.detail[kind] = stub.detail.get(kind, 0) + value
+        if (ytd := ytd_amount(line, m)) is not None:
+            stub.ytd[kind] = stub.ytd.get(kind, 0) + ytd
+
     for line in lines:
         if YTD_ONLY.match(line):
             continue
-        if stub.gross_cents is None and (m := GROSS.search(line)):
+        if stub.gross_cents is None and not TAXABLE.search(line) and (m := GROSS.search(line)):
             stub.gross_cents = first_amount(line, m)
+            if stub.gross_cents is not None and (ytd := ytd_amount(line, m)) is not None:
+                stub.ytd["gross"] = ytd
         elif stub.net_cents is None and (m := NET.search(line)):
             stub.net_cents = first_amount(line, m)
         elif stub.taxes_cents is None and (m := TAX_TOTAL.search(line)):
             stub.taxes_cents = first_amount(line, m)
+        elif TAXABLE.search(line):
+            continue
+        elif (
+            (m := STOCK.search(line))
+            and not re.search(r"\b(offset|refund|tax)\b", line, re.I)
+            and (value := first_amount(line, m))
+        ):
+            add("stock", line, m, value)
         elif (m := SAVINGS.search(line)) and (value := first_amount(line, m)) is not None:
             if EMPLOYER.search(line):
                 match += value
             else:
                 savings += value
+                add(savings_kind(line), line, m, value)
         elif EMPLOYER.search(line) and (m := EMPLOYER.search(line)) and (value := first_amount(line, m)) is not None:
             match += value
         elif (m := TAX.search(line)) and (value := first_amount(line, m)) is not None:
             tax_lines += 1
             tax_sum += value
+            add(tax_kind(line), line, m, value)
+        elif (m := BENEFITS.search(line)) and (value := first_amount(line, m)):
+            add("benefits", line, m, value)
 
         if stub.pay_date is None and (m := PAY_DATE.search(line)) and (found := dates(line[m.end() :])):
             stub.pay_date = found[0]
@@ -223,6 +296,7 @@ def to_json(stub: Stub) -> dict:
         "savings_cents": stub.savings_cents,
         "net_cents": stub.net_cents,
         "employer_match_cents": stub.employer_match_cents,
+        "detail": {"this": stub.detail, "ytd": stub.ytd},
         "warnings": stub.warnings,
     }
 

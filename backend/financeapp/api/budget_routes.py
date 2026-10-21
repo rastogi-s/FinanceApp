@@ -4,7 +4,7 @@ import datetime
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
 
@@ -154,6 +154,31 @@ def patch_category(category_id: int, body: CategoryPatch, request: Request, who:
 # ---- pay stubs
 
 
+class StubAmounts(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    gross: int | None = Field(default=None, ge=0, le=MAX_CENTS)  # year to date only
+    federal: int | None = Field(default=None, ge=0, le=MAX_CENTS)
+    state: int | None = Field(default=None, ge=0, le=MAX_CENTS)
+    local: int | None = Field(default=None, ge=0, le=MAX_CENTS)
+    state_other: int | None = Field(default=None, ge=0, le=MAX_CENTS)
+    social_security: int | None = Field(default=None, ge=0, le=MAX_CENTS)
+    medicare: int | None = Field(default=None, ge=0, le=MAX_CENTS)
+    retirement: int | None = Field(default=None, ge=0, le=MAX_CENTS)
+    roth: int | None = Field(default=None, ge=0, le=MAX_CENTS)
+    hsa: int | None = Field(default=None, ge=0, le=MAX_CENTS)
+    espp: int | None = Field(default=None, ge=0, le=MAX_CENTS)
+    benefits: int | None = Field(default=None, ge=0, le=MAX_CENTS)
+    stock: int | None = Field(default=None, ge=0, le=MAX_CENTS)
+
+
+class StubDetail(BaseModel):
+    """What the Taxes page uses: this paycheck's taxes and deductions by kind, and the stub's year-to-date column."""
+
+    model_config = ConfigDict(extra="forbid")
+    this: StubAmounts = StubAmounts()
+    ytd: StubAmounts = StubAmounts()
+
+
 class PaycheckIn(BaseModel):
     user_id: int | None = None  # whose pay; the person entering it when left out
     date: datetime.date
@@ -165,6 +190,7 @@ class PaycheckIn(BaseModel):
     frequency: Literal["weekly", "biweekly", "semimonthly", "monthly"] | None = None
     period_start: datetime.date | None = None
     period_end: datetime.date | None = None
+    detail: StubDetail | None = None
 
     @model_validator(mode="after")
     def adds_up(self) -> "PaycheckIn":
@@ -227,7 +253,12 @@ def add_paycheck(body: PaycheckIn, request: Request, who: Signed = Depends(signe
     user_id = body.user_id if body.user_id is not None else who.user.id
     if db.get(User, user_id) is None:
         raise HTTPException(422, "No such person.")
-    db.add(Paycheck(**body.model_dump(exclude={"user_id"}), user_id=user_id, created_by=who.user.id))
+    detail = body.detail.model_dump(exclude_none=True) if body.detail else {}
+    db.add(
+        Paycheck(
+            **body.model_dump(exclude={"user_id", "detail"}), detail=detail, user_id=user_id, created_by=who.user.id
+        )
+    )
     db.flush()
     audit(db, request, "paycheck_added", who.user.id)
     return budget.build(db)

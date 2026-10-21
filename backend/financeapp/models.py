@@ -24,6 +24,7 @@ from sqlalchemy import (
     UniqueConstraint,
     Uuid,
     false,
+    text,
 )
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -316,6 +317,9 @@ class Paycheck(Base):
     savings_cents: Mapped[int] = mapped_column(BigInteger)  # 401(k), HSA and ESPP taken out before pay
     net_cents: Mapped[int] = mapped_column(BigInteger)  # what landed in the bank
     employer_match_cents: Mapped[int] = mapped_column(BigInteger, default=0)
+    # {"this": {...}, "ytd": {...}}: federal, state, social_security, medicare, retirement (pre-tax), hsa, benefits,
+    # stock... in cents, as far as the stub showed them (paystub.DETAIL); "ytd" also has "gross". Read by taxes.py.
+    detail: Mapped[dict] = mapped_column(default=dict, server_default=text("'{}'::jsonb"))
     created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     created_at: Mapped[datetime] = mapped_column(default=now)
 

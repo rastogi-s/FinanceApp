@@ -3,6 +3,7 @@
 import { useRef, useState } from "react";
 import { AlertTriangle, ArrowLeftRight, CheckCircle2, FileUp, Info, Sparkles } from "lucide-react";
 import { type AIOffer, AIOfferCard, shrinkPicture } from "@/components/ai-offer";
+import type { StubDetail } from "@/components/budget-sheets";
 import { Money } from "@/components/money";
 import { Button } from "@/components/ui/button";
 import { Input, Select } from "@/components/ui/input";
@@ -53,6 +54,7 @@ type Stub = {
   savings_cents: number | null;
   net_cents: number | null;
   employer_match_cents: number | null;
+  detail?: StubDetail;
   warnings: string[];
 };
 type Answer = Preview | { ai_offer: AIOffer } | { paystub: Stub; format: string; ai_cost?: number };
@@ -461,6 +463,7 @@ function StubPreview({ stub, cost, onCancel, onSaved }: { stub: Stub; cost?: num
           savings_cents: stub.savings_cents ?? 0,
           net_cents: stub.net_cents,
           employer_match_cents: stub.employer_match_cents ?? 0,
+          detail: stub.detail,
         },
       });
       resetHousehold();

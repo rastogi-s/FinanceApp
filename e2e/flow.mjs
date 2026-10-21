@@ -214,6 +214,21 @@ try {
     await page.getByText(/Every 2 weeks · next payday/).waitFor();
   });
 
+  await check("taxes-first-questions", async () => {
+    await page.goto(BASE + "/taxes");
+    await main().getByText("Two questions first").waitFor();
+    await main().getByRole("button", { name: "Married filing jointly" }).click();
+    await main().getByRole("button", { name: "Save", exact: true }).click();
+    await page.getByText("Saved. The estimate uses your answers now.").waitFor();
+    if (!(await main().getByText(/latest stub/i).count())) throw new Error("the pay stub isn't counted on Taxes");
+  });
+  await check("taxes-type-a-number", async () => {
+    await main().getByRole("button", { name: /Long-term gains/ }).click();
+    await page.getByRole("dialog").getByLabel("For the whole year").fill("5000");
+    await page.getByRole("dialog").getByRole("button", { name: "Save" }).click();
+    await main().getByRole("button", { name: /Long-term gains.*Typed in/ }).waitFor();
+  });
+
   await check("security", async () => {
     await page.goto(BASE + "/settings/security");
     await page.getByText("Last used").or(page.getByText("Added")).first().waitFor();
