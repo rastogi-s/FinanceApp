@@ -281,3 +281,41 @@ def test_a_nonsense_answer_is_refused_and_still_counted(client, home, fake):  # 
     assert r.status_code == 502 and "expected format" in r.json()["detail"]
     usage = client.get("/api/ai").json()["usage"]
     assert usage[0]["task"] == "Reading uploads" and usage[0]["cost"] > 0
+
+
+def count(schema, test) -> int:
+    if isinstance(schema, list):
+        return sum(count(s, test) for s in schema)
+    if not isinstance(schema, dict):
+        return 0
+    return int(test(schema)) + sum(count(v, test) for v in schema.values())
+
+
+def optional_fields(schema) -> int:
+    if isinstance(schema, list):
+        return sum(optional_fields(s) for s in schema)
+    if not isinstance(schema, dict):
+        return 0
+    own = 0
+    if schema.get("type") == "object" and "properties" in schema:
+        own = len(set(schema["properties"]) - set(schema.get("required", [])))
+    return own + sum(optional_fields(v) for v in schema.values())
+
+
+def test_claude_gets_a_schema_without_unions(fake):  # noqa: F811
+    """Claude refuses schemas with many union-typed fields (a 400 seen reading a pay stub photo), so nullable fields
+    go to it as optional ones, and an answer that leaves them out still reads."""
+    from financeapp.ai import providers
+
+    doc = documents.open_document(png())
+    out = extract.build_request(doc, [], [], "a pay stub")
+    fake.answer = json.dumps({"kind": "paystub", "transactions": [], "holdings": [], "paystub": {"gross": 4500}})
+    reply = providers.complete(providers.Endpoint("anthropic", CLAUDE_KEY, None), "claude-opus-5-5", out.request)
+    sent = json.loads(fake.sent[-1].content)["output_config"]["format"]["schema"]
+    assert count(sent, lambda s: "anyOf" in s or isinstance(s.get("type"), list)) == 0
+    assert optional_fields(sent) <= 24  # Claude's limit on optional fields
+    assert sent["required"] == ["kind", "transactions", "holdings"] and sent["additionalProperties"] is False
+    answer = extract.parse_answer(reply.text)
+    assert answer.paystub.gross == 4500 and answer.paystub.net is None and answer.institution is None
+    # Other providers still get the strict, all-required schema.
+    assert count(extract.SCHEMA, lambda s: "anyOf" in s) == 21
