@@ -161,7 +161,7 @@ try {
     await button("Add account").click();
     await button("Upload a file").click();
     await page.locator('input[type="file"]').setInputFiles(join(FIXTURES, "statement.pdf"));
-    await page.getByText(/AI isn't set up for Reading uploads/).waitFor();
+    await page.getByText(/AI isn't set up for reading uploads/i).waitFor();
     await page.getByRole("link", { name: "Settings, AI" }).waitFor();
     await button("Back").click();
     await page.keyboard.press("Escape");
