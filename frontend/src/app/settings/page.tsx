@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { ChevronRight, Landmark, LogOut, ShieldCheck, Sparkles, Users } from "lucide-react";
+import { BrainCircuit, ChevronRight, Landmark, LogOut, ShieldCheck, Sparkles, Users } from "lucide-react";
 import { PageTitle } from "@/components/page";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -45,6 +45,7 @@ export default function Settings() {
             />
             <Row href="/settings/people" icon={<Users />} title="People" detail="You and your partner" tab="people" />
             <Row href="/settings/security" icon={<ShieldCheck />} title="Security" detail="Passkeys, devices, activity" tab="security" />
+            <Row href="/settings/ai" icon={<BrainCircuit />} title="AI" detail="Reading files, providers, spending" tab="ai" />
           </ul>
         </Card>
 

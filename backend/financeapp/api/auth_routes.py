@@ -694,6 +694,12 @@ ACTION_TEXT = {
     "budget_saved": "Budget saved",
     "paycheck_added": "Pay stub added",
     "paycheck_removed": "Pay stub removed",
+    "ai_provider_added": "AI provider added",
+    "ai_provider_changed": "AI provider changed",
+    "ai_key_changed": "AI key changed",
+    "ai_provider_removed": "AI provider removed",
+    "ai_settings_changed": "AI settings changed",
+    "ai_read_file": "File read with AI",
 }
 
 

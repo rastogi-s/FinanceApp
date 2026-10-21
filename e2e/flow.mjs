@@ -205,6 +205,23 @@ try {
     await main().getByText("Account created").waitFor();
   });
 
+  await check("ai-settings", async () => {
+    await page.goto(BASE + "/settings/ai");
+    await main().getByText("No AI yet").waitFor();
+  });
+
+  await check("ai-add-provider-guided", async () => {
+    await button("Add a provider").click();
+    await page.getByRole("dialog").getByRole("button", { name: /Local or other/ }).click();
+    // Nothing listens there, so the check fails and says why, and nothing is saved.
+    await page.getByLabel("Server address").fill("http://localhost:9/v1");
+    await page.getByRole("dialog").getByRole("button", { name: "Check and save" }).click();
+    await page.getByRole("dialog").getByText("Couldn't reach your server").waitFor();
+    errors = errors.filter((e) => !/status of 422/.test(e)); // the refusal the browser logs is the expected answer
+    await page.keyboard.press("Escape");
+    await main().getByText("No AI yet").waitFor();
+  });
+
   await check("invite-partner", async () => {
     await page.goto(BASE + "/settings/people");
     await button("Invite someone").click();
