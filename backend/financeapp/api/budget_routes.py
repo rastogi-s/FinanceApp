@@ -9,6 +9,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
 
 from financeapp import budget, demo, paystub
+from financeapp.ai import documents, extract, reading
+from financeapp.ai.providers import ProviderError
+from financeapp.ai.service import AIUnavailable
 from financeapp.api.deps import Signed, audit, signed_in
 from financeapp.models import BudgetLine, BudgetVersion, Category, Paycheck, User
 
@@ -137,14 +140,48 @@ class PaycheckIn(BaseModel):
 
 
 @router.post("/paychecks/read")
-async def read_paycheck(file: UploadFile, who: Signed = Depends(signed_in)) -> dict:
-    """Reads an uploaded pay stub PDF into the form's numbers. Nothing is saved, and the file isn't kept."""
+async def read_paycheck(
+    file: UploadFile, request: Request, read_with_ai: bool = False, who: Signed = Depends(signed_in)
+) -> dict:
+    """Reads an uploaded pay stub into the form's numbers. Nothing is saved, and the file isn't kept. A PDF with text
+    is read here; a scan, a photo or a layout the reader doesn't know comes back as an offer to read it with AI, and
+    the browser sends it again with read_with_ai=true if the person agrees."""
     no_demo(who)
+    db = db_of(request)
     data = await file.read(paystub.MAX_BYTES + 1)
+    if len(data) > paystub.MAX_BYTES:
+        raise HTTPException(422, "That file is over 5 MB. A pay stub is usually much smaller.")
+    kind = documents.sniff(data)
+    why = "Photos and screenshots of pay stubs need AI to read."
+    if kind == "pdf" and not read_with_ai:
+        try:
+            return paystub.to_json(paystub.read(data))
+        except paystub.StubError as e:
+            if "password" in str(e) or "couldn't be opened" in str(e):
+                raise HTTPException(422, str(e)) from None
+            why = (
+                "This PDF is a scan, with no text in it for the app to read by itself."
+                if "scan" in str(e)
+                else "The app can't read this pay stub's layout by itself."
+            )
+    elif kind not in ("pdf", "png", "jpeg", "webp", "heic"):
+        raise HTTPException(422, "Upload the pay stub as a PDF, a screenshot or a photo.")
     try:
-        return paystub.to_json(paystub.read(data))
-    except paystub.StubError as e:
+        doc = documents.open_document(data)
+    except documents.DocumentError as e:
         raise HTTPException(422, str(e)) from None
+    if not read_with_ai:
+        return {"ai_offer": reading.offer(db, doc, reading.outgoing_for(db, doc, "a pay stub"), why)}
+    try:
+        r = reading.read(request.app.state.db, db, who.user.id, doc, "a pay stub")
+        audit(db, request, "ai_read_file", who.user.id, model=r.model, kind=r.answer.kind)
+        if r.answer.kind != "paystub" or r.answer.paystub is None:
+            raise HTTPException(422, "That doesn't look like a pay stub.")
+        return extract.to_paystub(r.answer, r.model) | {"ai_cost": r.cost}
+    except AIUnavailable as e:
+        raise HTTPException(409, str(e)) from None
+    except ProviderError as e:
+        raise HTTPException(502, str(e)) from None
 
 
 @router.post("/paychecks")

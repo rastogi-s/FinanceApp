@@ -1,5 +1,23 @@
 [
   {
+    "version": "0.4.0",
+    "title": "AI, on your terms",
+    "features": [
+      {
+        "id": "ai-providers",
+        "title": "Bring your own AI",
+        "body": "Settings, AI takes Claude, OpenAI, Gemini, or a server on your own network like Ollama. Keys are encrypted, nothing is sent until you turn a provider on, and a monthly cap keeps the cost in check.",
+        "tryIt": "/settings/ai"
+      },
+      {
+        "id": "smart-upload",
+        "title": "Upload any statement",
+        "body": "Excel files, PDF statements, scanned pay stubs and screenshots now work too. When the built-in readers don't know a file, the app shows exactly what AI would see, with names and account numbers taken out, and asks first. Nothing is saved until you check it.",
+        "tryIt": "/settings/accounts"
+      }
+    ]
+  },
+  {
     "version": "0.3.0",
     "title": "Your budget",
     "features": [

@@ -9,11 +9,14 @@ from pydantic import BaseModel, Field
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session as DbSession
 
-from financeapp import auth, crypto, demo, household, notify, sync
+from financeapp import auth, crypto, demo, household, notify, paystub, sync
+from financeapp.ai import documents, extract, reading
+from financeapp.ai.providers import ProviderError
+from financeapp.ai.service import AIUnavailable
 from financeapp.api.deps import Signed, audit, owner, recent, settings_of, signed_in
 from financeapp.categorize import categorize, normalize_merchant
 from financeapp.connectors.base import ConnectorError, HoldingData, TransactionData
-from financeapp.connectors.files import MAX_BYTES, FileError, parse
+from financeapp.connectors.files import MAX_BYTES, FileError, ParsedFile, parse
 from financeapp.models import (
     Account,
     Balance,
@@ -431,16 +434,68 @@ def _account_candidates(db: DbSession) -> list[Account]:
     return list(db.scalars(select(Account).join(Connection).where(Connection.provider.in_(["file", "manual"]))))
 
 
+def _builtin(data: bytes, name: str, kind: str) -> tuple[ParsedFile | None, dict | None, str]:
+    """What the app reads by itself: CSV and OFX, spreadsheets laid out like a CSV it knows, and text pay stub PDFs.
+    Returns (import, pay stub, why not) with at most one of the first two set."""
+    if kind == "text":
+        try:
+            return parse(data, name, sync.today()), None, ""
+        except FileError:
+            return None, None, "This file's layout isn't one the app knows by itself."
+    if kind == "zip":
+        try:
+            doc = documents.open_spreadsheet(data)
+        except documents.DocumentError as e:
+            raise HTTPException(422, str(e)) from None
+        for sheet in doc.sheets:
+            try:
+                return parse(sheet.encode(), name, sync.today()), None, ""
+            except FileError:
+                continue
+        return None, None, "This spreadsheet's layout isn't one the app knows by itself."
+    if kind == "pdf":
+        try:
+            return None, paystub.to_json(paystub.read(data)), ""
+        except paystub.StubError:
+            return None, None, "The app can't read this PDF by itself."
+    return None, None, "Screenshots and photos need AI to read."
+
+
 @router.post("/imports")
-async def upload(file: UploadFile, request: Request, who: Signed = Depends(signed_in)) -> dict:
+async def upload(
+    file: UploadFile, request: Request, read_with_ai: bool = False, who: Signed = Depends(signed_in)
+) -> dict:
+    """Reads an upload into a preview. What the app can't read by itself comes back as an offer to read it with AI
+    (what would be sent, to whom); the browser uploads it again with read_with_ai=true if the person agrees."""
     no_demo(who)
     db = db_of(request)
     data = await file.read(MAX_BYTES + 1)
+    if len(data) > MAX_BYTES:
+        raise HTTPException(422, "That file is over 5 MB. Download a shorter date range and try again.")
     name = (file.filename or "upload")[-200:]
-    try:
-        parsed = parse(data, name, sync.today())
-    except FileError as e:
-        raise HTTPException(422, str(e)) from None
+    kind = documents.sniff(data)
+    parsed, stub, why = (None, None, "") if read_with_ai else _builtin(data, name, kind)
+    if stub is not None:
+        return {"paystub": stub, "format": "Pay stub"}
+    ai = None
+    if parsed is None:
+        try:
+            doc = documents.open_document(data)
+        except documents.DocumentError as e:
+            raise HTTPException(422, str(e)) from None
+        if not read_with_ai:
+            return {"ai_offer": reading.offer(db, doc, reading.outgoing_for(db, doc), why)}
+        try:
+            r = reading.read(request.app.state.db, db, who.user.id, doc)
+            audit(db, request, "ai_read_file", who.user.id, model=r.model, kind=r.answer.kind)
+            if r.answer.kind == "paystub":
+                return {"paystub": extract.to_paystub(r.answer, r.model), "format": "Pay stub", "ai_cost": r.cost}
+            parsed = extract.to_parsed(r.answer, sync.today(), r.names, r.emails, r.model)
+        except AIUnavailable as e:
+            raise HTTPException(409, str(e)) from None
+        except ProviderError as e:
+            raise HTTPException(502, str(e)) from None
+        ai = {"model": r.model, "cost": r.cost}
     all_accounts = list(db.scalars(select(Account)))
     targets = _account_candidates(db)
     out_accounts = []
@@ -512,6 +567,7 @@ async def upload(file: UploadFile, request: Request, who: Signed = Depends(signe
         "warnings": parsed.warnings,
         "accounts": out_accounts,
         "targets": [{"id": a.id, "name": household.display_name(a), "type": a.type} for a in targets],
+        "ai": ai,
     }
 
 

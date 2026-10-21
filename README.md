@@ -162,7 +162,9 @@ them. To restore one, bring the private key over for the moment you need it:
   network). Requests never follow redirects. A monthly spending cap (default $5) refuses a request that could go
   over it, and every request is logged with its tokens and cost, never its content.
 - **Uploads checked.** Files are capped at 5 MB and parsed on the server (the raw file is never kept); you see a
-  preview before anything is saved.
+  preview before anything is saved. Spreadsheets are opened with hardened XML parsing and a zip-bomb limit, and
+  pictures are re-encoded (which drops location and camera details). A file is only sent to AI after you've seen
+  exactly what would go and said yes.
 
 ## Linking accounts
 
@@ -170,7 +172,7 @@ them. To restore one, bring the private key over for the moment you need it:
 | --- | --- | --- |
 | Plaid | Banks and cards (Chase, Amex, Ally...) | Hosted Link; `/transactions/sync` with a cursor. The free Trial plan covers a household. |
 | SnapTrade | Brokerages (E*TRADE, Fidelity, Schwab, Robinhood...) | One SnapTrade user for the household; read-only connections. Covers E*TRADE, so its own API isn't needed. |
-| File upload | Anything | Fidelity and E*TRADE positions CSVs, any bank's transactions CSV, OFX/QFX. Fidelity 401(k)s, which no aggregator reaches well, go this way. |
+| File upload | Anything | Fidelity and E*TRADE positions CSVs, any bank's transactions CSV or Excel file, OFX/QFX. With AI set up: PDF statements, scans and screenshots. Fidelity 401(k)s, which no aggregator reaches well, go this way. |
 
 ## AI
 

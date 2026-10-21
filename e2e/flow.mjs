@@ -156,6 +156,17 @@ try {
     await page.getByText("Saved 5 new transactions").waitFor();
   });
 
+  // A statement PDF isn't a layout the built-in readers know, so the app offers AI, and says it isn't set up yet.
+  await check("upload-pdf-offers-ai", async () => {
+    await button("Add account").click();
+    await button("Upload a file").click();
+    await page.locator('input[type="file"]').setInputFiles(join(FIXTURES, "statement.pdf"));
+    await page.getByText(/AI isn't set up for reading uploads/i).waitFor();
+    await page.getByRole("link", { name: "Settings, AI" }).waitFor();
+    await button("Back").click();
+    await page.keyboard.press("Escape");
+  });
+
   await check("statement-check", async () => {
     await main().getByRole("button", { name: /Individual/ }).first().click();
     await page.getByLabel("Statement balance").fill("29834.56");

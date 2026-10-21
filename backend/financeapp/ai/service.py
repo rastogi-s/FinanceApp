@@ -71,7 +71,12 @@ class AIUnavailable(RuntimeError):
 def settings(db: DbSession) -> dict:
     p = db.get(Preference, PREF_KEY)
     value = p.value if p else {}
-    return {"monthly_cap_cents": value.get("monthly_cap_cents", DEFAULT_CAP_CENTS), "routes": value.get("routes", {})}
+    return {
+        "monthly_cap_cents": value.get("monthly_cap_cents", DEFAULT_CAP_CENTS),
+        "routes": value.get("routes", {}),
+        # Extra words taken out of anything sent, on top of the household's names (a surname, a child's name...).
+        "hide_words": value.get("hide_words", []),
+    }
 
 
 def save_settings(db: DbSession, **changes) -> dict:

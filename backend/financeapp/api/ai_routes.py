@@ -92,6 +92,7 @@ def overview(db: DbSession, who: Signed) -> dict:
         "providers": [provider_json(p) for p in rows],
         "tasks": tasks,
         "cap_cents": s["monthly_cap_cents"],
+        "hide_words": s["hide_words"],
         "spent": dollars(service.spent_this_month(db)),
         "guessed": db.scalar(select(AIUsage.id).where(AIUsage.at >= month, AIUsage.priced.is_(False)).limit(1))
         is not None,
@@ -137,6 +138,7 @@ def get_ai(request: Request, who: Signed = Depends(signed_in)) -> dict:
                 for k, t in TASKS.items()
             ],
             "cap_cents": service.DEFAULT_CAP_CENTS,
+            "hide_words": [],
             "spent": 0,
             "guessed": False,
             "usage": [],
@@ -319,6 +321,7 @@ class RouteIn(BaseModel):
 class SettingsIn(BaseModel):
     monthly_cap_cents: int | None = Field(default=None, ge=0, le=service.MAX_CAP_CENTS)
     routes: dict[str, RouteIn | None] | None = None
+    hide_words: list[str] | None = Field(default=None, max_length=50)
 
 
 @router.put("/settings")
@@ -344,6 +347,9 @@ def save_settings(body: SettingsIn, request: Request, who: Signed = Depends(owne
                 raise HTTPException(422, str(e)) from None
             routes[task_id] = r.model_dump(exclude_none=True) | {"model": r.model.strip()}
         changes["routes"] = routes
+    if body.hide_words is not None:
+        words = {w.strip()[:60] for w in body.hide_words}
+        changes["hide_words"] = sorted(w for w in words if len(w) >= 2)
     service.save_settings(db, **changes)
     audit(db, request, "ai_settings_changed", who.user.id, cap_cents=body.monthly_cap_cents)
     return overview(db, who)
