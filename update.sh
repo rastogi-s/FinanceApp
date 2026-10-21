@@ -43,7 +43,7 @@ env_set() {
 }
 
 [ -f docker-compose.yml ] || die "run this next to docker-compose.yml"
-[ -f .env ] || die "no .env here; copy .env.example to .env and fill it in"
+[ -f .env ] || die "no .env here; copy env.example to .env and fill it in"
 docker compose version >/dev/null 2>&1 || die "docker compose is not installed"
 chmod 600 .env
 
@@ -92,7 +92,7 @@ verify_signature() {
 backup() {
   local recipient version file
   recipient=$(env_get BACKUP_AGE_RECIPIENT)
-  [ -n "$recipient" ] || die "BACKUP_AGE_RECIPIENT is not set in .env (see .env.example)"
+  [ -n "$recipient" ] || die "BACKUP_AGE_RECIPIENT is not set in .env (see env.example)"
   command -v age >/dev/null || die "age is not installed (sudo apt install age)"
   docker compose --progress quiet up -d --wait postgres >/dev/null
   version=$(running_version)

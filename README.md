@@ -66,23 +66,30 @@ On a small Linux VM (Debian or Ubuntu):
 
 1. Install Docker (with the Compose plugin), Tailscale, `age` and cosign
    (`sudo apt install age`; cosign from [its releases](https://github.com/sigstore/cosign/releases)).
-2. Log the server in to the image registry with a GitHub token that can only read packages:
-   `docker login ghcr.io -u rastogi-s` (classic token, `read:packages` scope only).
-3. Put the server files in `/opt/financeapp`: `docker-compose.yml`, `update.sh`, `.env.example` and the two
-   `financeapp-update.*` files from the latest GitHub Release (checked against its `SHA256SUMS.txt`).
-4. `cp .env.example .env && chmod 600 .env`, then fill it in. Make the backup key **on your own computer**:
+2. Put the server files from the latest GitHub Release in `/opt/financeapp` and check them against its
+   `SHA256SUMS.txt` (the image is public, so the server needs no registry login):
+
+   ```bash
+   sudo mkdir -p /opt/financeapp && sudo chown $USER /opt/financeapp && cd /opt/financeapp
+   for f in docker-compose.yml update.sh env.example financeapp-update.service financeapp-update.timer SHA256SUMS.txt; do
+     curl -fsSLO https://github.com/rastogi-s/FinanceApp/releases/latest/download/$f
+   done
+   sha256sum -c SHA256SUMS.txt && chmod +x update.sh
+   ```
+
+3. `cp env.example .env && chmod 600 .env`, then fill it in. Make the backup key **on your own computer**:
    `age-keygen -o finance-backup.key`, put the printed public key in `BACKUP_AGE_RECIPIENT`, and keep
    `finance-backup.key` in your password manager, not on the server.
-5. `./update.sh`, which installs the latest release and checks it is healthy.
-6. `sudo tailscale serve --bg --https=443 http://127.0.0.1:8080`, then add the `*.ts.net` name it prints to
+4. `./update.sh`, which installs the latest release and checks it is healthy.
+5. `sudo tailscale serve --bg --https=443 http://127.0.0.1:8080`, then add the `*.ts.net` name it prints to
    `ALLOWED_HOSTS` in `.env`, set `HSTS=true`, and run `docker compose up -d`.
-7. Open that address on your phone. It asks for the **setup code**, which the app prints in its log on first
+6. Open that address on your phone. It asks for the **setup code**, which the app prints in its log on first
    start: `docker compose logs app | grep "setup code"` (it changes on every restart until someone has set up,
    and expires after 24 hours). Then add a code app and a passkey, and add the address to your home screen.
-8. **Copy `ENCRYPTION_KEY` from `.env` to your password manager.** `update.sh` made it on the first run.
-9. Invite your partner from Settings → People: it makes a one-time link (valid 48 hours) to send them.
-10. Link accounts from Settings → Accounts (fill in the Plaid and SnapTrade keys in `.env` first, then
-    `docker compose up -d`), or upload a CSV or OFX file from your bank or broker.
+7. **Copy `ENCRYPTION_KEY` from `.env` to your password manager.** `update.sh` made it on the first run.
+8. Invite your partner from Settings → People: it makes a one-time link (valid 48 hours) to send them.
+9. Link accounts from Settings → Accounts (fill in the Plaid and SnapTrade keys in `.env` first, then
+   `docker compose up -d`), or upload a CSV or OFX file from your bank or broker.
 
 Passkeys and the `__Host-` session cookie need HTTPS, which `tailscale serve` provides (browsers also allow them
 on `http://localhost`). The address you sign in at is the passkey's home: passkeys made at
