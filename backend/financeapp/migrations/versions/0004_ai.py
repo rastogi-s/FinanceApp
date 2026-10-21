@@ -1,15 +1,15 @@
 """ai: AI providers (keys encrypted) and the usage log
 
-Revision ID: 0004_ai
-Revises: 0002
+Revision ID: 0004
+Revises: 0003
 """
 
 import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
-revision = "0004_ai"
-down_revision = "0002"
+revision = "0004"
+down_revision = "0003"
 branch_labels = None
 depends_on = None
 
