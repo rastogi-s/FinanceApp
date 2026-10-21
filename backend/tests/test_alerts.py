@@ -306,3 +306,17 @@ def test_demo_alerts(tmp_path):
         r = c.get("/api/alerts")
         assert r.status_code == 200 and r.json()["rules"]
         assert c.post("/api/alerts/rules", json={"rule": {"kind": "concentration", "percent": 5}}).status_code == 403
+
+
+@needs_db
+def test_failed_test_message_says_why_and_shows_in_settings(client, home, monkeypatch):
+    home.setup()
+    h = csrf(client)
+    monkeypatch.setattr(notify, "configured", lambda settings: True)
+    monkeypatch.setattr(notify, "_ntfy", lambda *a, **k: (_ for _ in ()).throw(notify.SendError("No topic.")))
+    settings = client.app.state.settings
+    monkeypatch.setattr(settings, "ntfy_url", "https://ntfy.sh/topic")
+    r = client.post("/api/alerts/test", headers=h)
+    assert r.status_code == 502 and r.json()["detail"] == "No topic."
+    d = client.get("/api/alerts").json()["delivery"]
+    assert d["ok"] is False and d["reason"] == "No topic."

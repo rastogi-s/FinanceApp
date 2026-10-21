@@ -18,12 +18,14 @@ import { useAuth } from "@/lib/auth";
 import { type Alert, KIND_DOT, resetHousehold, useApi } from "@/lib/household";
 import { cn } from "@/lib/utils";
 
+type Delivery = { at: string; ok: boolean; channel: string | null; reason: string | null };
 type Quiet = { enabled: boolean; start: string; end: string; timezone: string };
 type AlertsState = {
   rules: Rule[];
   events: Alert[];
   quiet: Quiet;
   channels: { ntfy: boolean; email: boolean };
+  delivery?: Delivery | null;
   symbols: string[];
   categories: { id: number; name: string }[];
 };
@@ -94,8 +96,11 @@ export default function AlertsPage() {
     try {
       const r = await api<{ channel: string }>("/api/alerts/test", { method: "POST" });
       toast(r.channel === "ntfy" ? "Sent. Check your phone." : "Sent by email.");
+      if (s) setLocal({ ...s, delivery: { at: new Date().toISOString(), ok: true, channel: r.channel, reason: null } });
     } catch (e) {
-      toast((e as Error).message, "error");
+      const reason = (e as Error).message;
+      toast(reason, "error");
+      if (s) setLocal({ ...s, delivery: { at: new Date().toISOString(), ok: false, channel: null, reason } });
     } finally {
       setTesting(false);
     }
@@ -120,6 +125,7 @@ export default function AlertsPage() {
             <CardContent className="grid grid-cols-1 gap-3">
               <Channel icon={<Smartphone />} title="Phone (ntfy)" on={s.channels.ntfy} hint="NTFY_URL in .env, then subscribe to the topic in the ntfy app." />
               <Channel icon={<Mail />} title="Email" on={s.channels.email} hint={s.channels.ntfy ? "Used if the phone can't be reached." : "SMTP settings and ALERT_EMAIL in .env."} />
+              <LastSend delivery={s.delivery} />
               <Button variant="secondary" size="sm" className="mt-1 justify-self-start" onClick={test} disabled={testing || (!s.channels.ntfy && !s.channels.email)}>
                 <Send /> Send a test
               </Button>
@@ -243,6 +249,27 @@ export default function AlertsPage() {
         </>
       )}
     </>
+  );
+}
+
+function LastSend({ delivery }: { delivery?: Delivery | null }) {
+  if (!delivery) {
+    return <p className="text-xs text-muted-foreground">Nothing sent since the app last started. Send a test to check the phone gets it.</p>;
+  }
+  const at = when.format(new Date(delivery.at));
+  if (!delivery.ok) {
+    return (
+      <div role="status" className="rounded-lg border border-negative/30 bg-negative/5 px-3 py-2 text-xs">
+        <p className="font-medium text-negative">Last message didn&apos;t go out · {at}</p>
+        {delivery.reason && <p className="mt-0.5 text-muted-foreground">{delivery.reason}</p>}
+      </div>
+    );
+  }
+  return (
+    <p className="text-xs text-muted-foreground">
+      Last message went out {delivery.channel === "email" ? "by email" : "to ntfy"} · {at}
+      {delivery.channel === "email" && delivery.reason ? ` (ntfy didn't work: ${delivery.reason})` : ""}
+    </p>
   );
 }
 
