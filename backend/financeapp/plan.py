@@ -30,7 +30,7 @@ from sqlalchemy.orm import Session as DbSession
 
 from financeapp import budget
 from financeapp.categorize import normalize_merchant
-from financeapp.models import Fund, Preference
+from financeapp.models import Category, Fund, Preference, Transaction
 
 RETURNS = {"low": 4.0, "mid": 6.0, "high": 8.0}  # % a year after inflation, when there's no mix to go on
 EXPECTED = {"stocks": 6.5, "bonds": 2.0, "cash": 0.5, "other": 5.0}  # long-run guesses, % a year after inflation
@@ -133,11 +133,16 @@ def dollars(cents: int) -> str:
 class Spending:
     """What the household spends in a typical month: the median full month, or the last 90 days as a month."""
 
-    def __init__(self, ledger: budget.Ledger, months: list[date], on: date) -> None:
+    def __init__(self, ledger: budget.Ledger, months: list[date], on: date, rows: list[dict] | None = None) -> None:
         self.months = months
         essential = {c.id for c in ledger.categories.values() if c.essential}
         if months:
-            per_month = [sum(v for (_, m), v in ledger.spent.items() if m == month) for month in months]
+            # The month rows leave out pay that landed uncategorized, which the ledger would take for a refund.
+            per_month = (
+                [r["spending_cents"] for r in rows]
+                if rows
+                else [sum(v for (_, m), v in ledger.spent.items() if m == month) for month in months]
+            )
             lean = [
                 sum(v for (cid, m), v in ledger.spent.items() if m == month and cid in essential) for month in months
             ]
@@ -222,7 +227,79 @@ def line(label: str, cents: float) -> dict:
     return {"label": label, "cents": round(cents)}
 
 
-def derive_savings(state: dict, ledger: budget.Ledger, spending: Spending, on: date) -> dict:
+def month_row(ledger: budget.Ledger, m: date, payers: set[str], moved: int) -> dict:
+    """One month of money in and out, with pay told apart from other money coming in.
+
+    Pay is a paycheck deposit or any deposit from one of `payers` (even one left uncategorized, which would
+    otherwise count as a refund against spending). Transfers between the household's own accounts are already
+    left out of the ledger and of spending; `moved` is how much of that came in, shown so it's clear it wasn't.
+    """
+    pay = other = taxes = spent = 0
+    for t in ledger.month(m):
+        if ledger.is_taxes(t):
+            taxes -= t.amount_cents
+        elif t.amount_cents > 0 and ledger.kind(t) in ("income", "other") and is_pay(ledger, t, payers):
+            pay += t.amount_cents
+        elif ledger.is_income(t):
+            other += t.amount_cents
+        elif ledger.is_spending(t):
+            spent -= t.amount_cents
+    return {
+        "month": m.isoformat(),
+        "pay_cents": pay,
+        "other_in_cents": other,
+        "taxes_cents": taxes,
+        "spending_cents": spent,
+        "moved_cents": moved,
+    }
+
+
+def payer(t: Transaction) -> str:
+    return normalize_merchant(t.merchant or t.description)
+
+
+def is_pay(ledger: budget.Ledger, t: Transaction, payers: set[str]) -> bool:
+    c = ledger.categories.get(t.category_id) if t.category_id else None
+    return (c is not None and c.name == "Paycheck") or payer(t) in payers
+
+
+def pay_merchants(ledger: budget.Ledger, paychecks: list[dict]) -> set[str]:
+    """Who pays the household: payers of paycheck deposits and of deposits matching a pay stub's take-home."""
+    deposits = [t for t in ledger.txns if t.amount_cents > 0 and ledger.kind(t) in ("income", "other")]
+    payers = {payer(t) for t in deposits if is_pay(ledger, t, set())}
+    for p in paychecks:
+        on = date.fromisoformat(p["date"])
+        payers.update(
+            payer(t)
+            for t in deposits
+            if abs(t.amount_cents - p["net_cents"]) <= budget.MATCH_CENTS
+            and abs((t.date - on).days) <= budget.MATCH_DAYS
+        )
+    payers.discard("")
+    return payers
+
+
+def moved_in(db: DbSession, accounts: list, months: list[date]) -> dict[date, int]:
+    """Money arriving from the household's own accounts each month (both sides of a transfer, or a card payment)."""
+    if not months or not accounts:
+        return {}
+    transfer_ids = [c.id for c in db.scalars(select(Category).where(Category.kind == "transfer"))]
+    rows = db.scalars(
+        select(Transaction).where(
+            Transaction.account_id.in_([a.id for a in accounts]),
+            Transaction.date >= months[0],
+            Transaction.date < budget.add_months(months[-1], 1),
+            Transaction.amount_cents > 0,
+            (Transaction.transfer_group_id.is_not(None)) | (Transaction.category_id.in_(transfer_ids)),
+        )
+    )
+    out: dict[date, int] = defaultdict(int)
+    for t in rows:
+        out[budget.month_start(t.date)] += t.amount_cents
+    return out
+
+
+def derive_savings(state: dict, ledger: budget.Ledger, spending: Spending, on: date, rows: list[dict]) -> dict:
     """The monthly savings to project, from the best evidence there is, a sentence on where it came from, and the
     sum it adds up from (breakdown lines that add up to the total).
 
@@ -259,27 +336,29 @@ def derive_savings(state: dict, ledger: budget.Ledger, spending: Spending, on: d
             "breakdown": [b for b in breakdown if b["cents"] or b["label"] == "Spending"],
         }
     stubs = from_pay_stubs(state, state["include_match"])
-    if history:
-        months = [date.fromisoformat(m["month"]) for m in history]
-        came_in, taxes, spent = (
-            avg(history, "income_cents"),
-            avg(history, "taxes_cents"),
-            avg(history, "spending_cents"),
-        )
+    if any(r["pay_cents"] or r["other_in_cents"] for r in rows):  # spending alone says nothing about saving
+        months = [date.fromisoformat(r["month"]) for r in rows]
         put_away = stubs["put_away"] if stubs else 0
-        breakdown = [line("Take-home pay and other money landing in your accounts", came_in)]
+        breakdown = [line("Pay landing in your accounts", avg(rows, "pay_cents"))]
+        other = avg(rows, "other_in_cents")
+        if other:
+            breakdown.append(line("Other money in (interest, refunds, money from other people)", other))
         if put_away:
             breakdown.append(line("Into your 401(k), HSA or ESPP before pay, from your pay stubs", put_away))
+        taxes = avg(rows, "taxes_cents")
         if taxes:
             breakdown.append(line("Taxes paid from your accounts", -taxes))
-        breakdown.append(line("Spending", -spent))
+        breakdown.append(line("Spending", -avg(rows, "spending_cents")))
         return {
-            "cents": avg(history, "saved_cents") + put_away,
+            "cents": sum(b["cents"] for b in breakdown),
             "kind": "take_home",
             "short": "what lands, plus your 401(k) and HSA" if put_away else "what lands minus spending",
-            "note": f"Average month, {span(months)}."
+            "note": f"Average month, {span(months)}. Money moved between your own accounts and card payments "
+            "aren't counted as money in or as spending."
             + ("" if stubs else " Add a pay stub to count your 401(k) and HSA too, which never reach the bank."),
             "breakdown": breakdown,
+            "excluded": line("Moved between your own accounts, not counted", avg(rows, "moved_cents")),
+            "months": rows,
         }
     if stubs and spending.monthly:
         breakdown = [line("Take-home pay, from your pay stubs", stubs["net"])]
@@ -371,8 +450,11 @@ def inputs(db: DbSession, state: dict, net_worth: int, on: date, holdings: list[
     months = budget.full_months(db, [a.id for a in accounts], on)
     first = min([*months, on - timedelta(days=RECENT_DAYS)])
     ledger = budget.Ledger(db, accounts, first)
-    spending = Spending(ledger, months, on)
-    measured = derive_savings(state, ledger, spending, on)
+    payers = pay_merchants(ledger, state["paychecks"])
+    moved = moved_in(db, accounts, months)
+    rows = [month_row(ledger, m, payers, moved.get(m, 0)) for m in months]
+    spending = Spending(ledger, months, on, rows)
+    measured = derive_savings(state, ledger, spending, on, rows)
     returns = derive_returns(db, holdings, allocation)
     typed_return = prefs.get("return_mid")
     if typed_return is not None:
@@ -389,7 +471,11 @@ def inputs(db: DbSession, state: dict, net_worth: int, on: date, holdings: list[
         "year": on.year,
         "monthly_savings_cents": typed if typed is not None else measured["cents"],
         "measured_savings_cents": measured["cents"],
-        "savings_source": {k: measured[k] for k in ("kind", "short", "note", "breakdown")},
+        "savings_source": {
+            **{k: measured[k] for k in ("kind", "short", "note", "breakdown")},
+            "excluded": measured.get("excluded"),
+            "months": measured.get("months", []),
+        },
         "savings_typed": typed is not None,
         "returns": {k: returns[k] for k in ("low", "mid", "high")},
         "returns_source": {

@@ -279,3 +279,75 @@ def test_demo_plan_and_guide(tmp_path):
         assert c.get("/api/guide").json()["complete"] is True
         assert c.patch("/api/plan/settings", json={"level": "lean"}).status_code == 403
         assert c.put("/api/guide", json={"hidden": True}).status_code == 403
+
+
+def add_to(client, external_id: str, rows: list[tuple[str, str, float, str | None]], kind: str = "credit") -> None:
+    """Like add_transactions, into another account (made on first use)."""
+    import uuid
+
+    from financeapp.models import Category, Connection, Transaction
+
+    with db_of(client).session() as db:
+        account = db.scalar(select(Account).where(Account.external_id == external_id))
+        if account is None:
+            conn = Connection(provider="manual", institution="Card co", state={})
+            db.add(conn)
+            db.flush()
+            account = Account(
+                connection_id=conn.id, external_id=external_id, name=external_id, institution="Card co", type=kind
+            )
+            db.add(account)
+            db.flush()
+        categories = {c.name: c.id for c in db.scalars(select(Category))}
+        for day, merchant, dollars, category in rows:
+            db.add(
+                Transaction(
+                    account_id=account.id,
+                    external_id=uuid.uuid4().hex,
+                    date=date.fromisoformat(day),
+                    amount_cents=round(dollars * 100),
+                    merchant=merchant,
+                    description=merchant,
+                    category_id=categories[category] if category else None,
+                    category_source="user" if category else "none",
+                    source="manual",
+                )
+            )
+
+
+def test_savings_stitches_accounts_and_leaves_out_transfers(client, home):
+    """The card has history from April, checking only from August: only months both cover count. A paycheck that
+    landed uncategorized still counts as pay once a stub matches it, and money moved from savings isn't income."""
+    home.setup()
+    card = [(f"2026-{m:02}-{d:02}", "Grocer", -50, "Groceries") for m in range(4, 10) for d in range(1, 25)]
+    add_to(client, "card", card)
+    rows = []
+    for m in (8, 9):
+        rows += [(f"2026-{m:02}-{d:02}", "Coffee", -5, "Dining out") for d in range(1, 21)]
+        rows += [(f"2026-{m:02}-01", "ACME CORP", 3_500, None), (f"2026-{m:02}-15", "ACME CORP", 3_500, None)]
+    rows.append(("2026-10-01", "ACME CORP", 3_500, None))
+    add_transactions(client, rows)
+    add_transactions(client, [("2026-09-20", "From savings", 5_000, "Transfer")], transfer=True)
+    link_balance(client, 1_000)
+    with db_of(client).session() as db:
+        db.add(
+            Paycheck(
+                date=date(2026, 10, 1),
+                frequency="semimonthly",
+                gross_cents=5_000_00,
+                taxes_cents=1_000_00,
+                savings_cents=500_00,
+                net_cents=3_500_00,
+            )
+        )
+    s = client.get("/api/plan").json()["inputs"]
+    src = s["savings_source"]
+    assert [r["month"] for r in src["months"]] == ["2026-08-01", "2026-09-01"]
+    assert src["kind"] == "take_home"
+    lines = {b["label"]: b["cents"] for b in src["breakdown"]}
+    assert lines["Pay landing in your accounts"] == 7_000_00
+    assert lines["Spending"] == -(24 * 50_00 + 20 * 5_00)
+    assert lines["Into your 401(k), HSA or ESPP before pay, from your pay stubs"] == 500_00 * 2
+    assert not any("Other money" in k for k in lines)
+    assert src["excluded"]["cents"] == 5_000_00 // 2
+    assert s["monthly_savings_cents"] == sum(lines.values())

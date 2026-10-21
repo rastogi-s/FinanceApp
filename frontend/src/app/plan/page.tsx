@@ -17,7 +17,7 @@ import { Slider } from "@/components/ui/slider";
 import { toast } from "@/components/ui/toast";
 import { api } from "@/lib/api";
 import { resetHousehold, useApi } from "@/lib/household";
-import { LEVEL_NAMES, type Level, type PlanInputs, type PlanState, type Scenario, project } from "@/lib/plan";
+import { LEVEL_NAMES, type Level, type PlanInputs, type PlanState, type SavingsMonth, type Scenario, project } from "@/lib/plan";
 import { cn } from "@/lib/utils";
 
 const monthName = new Intl.DateTimeFormat("en-US", {
@@ -289,6 +289,8 @@ function PlanView({ p, onSaved }: { p: Linked; onSaved: (p: PlanState) => void }
               <Source
                 note={i.savings_source.note}
                 breakdown={i.savings_source.breakdown}
+                excluded={i.savings_source.excluded}
+                months={i.savings_source.months}
                 differs={i.measured_savings_cents !== null && s.monthly !== i.measured_savings_cents}
                 typed={i.savings_typed && s.monthly === i.monthly_savings_cents}
                 derived={i.measured_savings_cents !== null ? <Money cents={i.measured_savings_cents} /> : null}
@@ -392,6 +394,8 @@ function PlanView({ p, onSaved }: { p: Linked; onSaved: (p: PlanState) => void }
 function Source({
   note,
   breakdown,
+  excluded,
+  months,
   differs,
   typed,
   derived,
@@ -399,6 +403,8 @@ function Source({
 }: {
   note: string;
   breakdown?: { label: string; cents: number }[];
+  excluded?: { label: string; cents: number } | null;
+  months?: SavingsMonth[];
   differs: boolean;
   typed: boolean;
   derived: React.ReactNode;
@@ -406,7 +412,7 @@ function Source({
 }) {
   return (
     <>
-      {breakdown && breakdown.length > 0 && <Breakdown lines={breakdown} />}
+      {breakdown && breakdown.length > 0 && <Breakdown lines={breakdown} excluded={excluded ?? null} months={months ?? []} />}
       {typed && <span className="font-medium text-foreground">You typed this in. </span>}
       {differs && derived !== null ? <>The app works out {derived}. </> : null}
       {note}
@@ -422,27 +428,104 @@ function Source({
   );
 }
 
-/** The sum the app's number comes from: money in, then what comes off it, then the total. */
-function Breakdown({ lines }: { lines: { label: string; cents: number }[] }) {
+const shortMonth = new Intl.DateTimeFormat("en-US", { month: "short", year: "numeric", timeZone: "UTC" });
+
+/**
+ * The sum the app's number comes from: money in, then what comes off it, then the total. Below it, what was left
+ * out as transfers between the household's own accounts, and each month on its own, to check against the bank.
+ */
+function Breakdown({
+  lines,
+  excluded,
+  months,
+}: {
+  lines: { label: string; cents: number }[];
+  excluded: { label: string; cents: number } | null;
+  months: SavingsMonth[];
+}) {
   const total = lines.reduce((sum, l) => sum + l.cents, 0);
   return (
-    <dl className="money mb-2 grid grid-cols-[1fr_auto] gap-x-4 gap-y-1 rounded-lg bg-muted/50 px-3 py-2.5 text-xs tabular-nums">
-      {lines.map((l) => (
-        <div key={l.label} className="contents">
-          <dt className="text-muted-foreground">{l.label}</dt>
-          <dd className={l.cents < 0 ? "text-right text-foreground" : "text-right text-positive"}>
-            {l.cents < 0 ? "−" : "+"}
-            <Money cents={Math.abs(l.cents)} />
+    <div className="mb-2 rounded-lg bg-muted/50 px-3 py-2.5">
+      <dl className="money grid grid-cols-[1fr_auto] gap-x-4 gap-y-1 text-xs tabular-nums">
+        {lines.map((l) => (
+          <div key={l.label} className="contents">
+            <dt className="text-muted-foreground">{l.label}</dt>
+            <dd className={l.cents < 0 ? "text-right text-foreground" : "text-right text-positive"}>
+              {l.cents < 0 ? "−" : "+"}
+              <Money cents={Math.abs(l.cents)} />
+            </dd>
+          </div>
+        ))}
+        <div className="contents">
+          <dt className="border-t pt-1 font-medium text-foreground">Saved in an average month</dt>
+          <dd className="border-t pt-1 text-right font-medium text-foreground">
+            <Money cents={total} />
           </dd>
         </div>
-      ))}
-      <div className="contents">
-        <dt className="border-t pt-1 font-medium text-foreground">Saved in an average month</dt>
-        <dd className="border-t pt-1 text-right font-medium text-foreground">
-          <Money cents={total} />
-        </dd>
-      </div>
-    </dl>
+        {excluded !== null && excluded.cents > 0 && (
+          <div className="contents">
+            <dt className="pt-1 text-muted-foreground">{excluded.label}</dt>
+            <dd className="pt-1 text-right text-muted-foreground">
+              <Money cents={excluded.cents} />
+            </dd>
+          </div>
+        )}
+      </dl>
+      {months.length > 0 && (
+        <details className="group mt-2 text-xs">
+          <summary className="cursor-pointer font-medium text-primary select-none">See each month</summary>
+          <div className="mt-2 overflow-x-auto">
+            <table className="money w-full text-right tabular-nums">
+              <caption className="sr-only">Money in and out each month</caption>
+              <thead className="text-muted-foreground">
+                <tr>
+                  <th scope="col" className="py-1 text-left font-normal">
+                    Month
+                  </th>
+                  <th scope="col" className="py-1 font-normal">
+                    Pay
+                  </th>
+                  <th scope="col" className="py-1 font-normal">
+                    Other in
+                  </th>
+                  <th scope="col" className="py-1 font-normal">
+                    Spent
+                  </th>
+                  <th scope="col" className="py-1 font-normal">
+                    Transfers
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {months.map((m) => (
+                  <tr key={m.month} className="border-t border-border/60">
+                    <th scope="row" className="py-1 text-left font-normal text-muted-foreground">
+                      {shortMonth.format(new Date(m.month + "T00:00:00Z"))}
+                    </th>
+                    <td className="py-1">
+                      <Money cents={m.pay_cents} />
+                    </td>
+                    <td className="py-1">
+                      <Money cents={m.other_in_cents} />
+                    </td>
+                    <td className="py-1">
+                      <Money cents={m.spending_cents + m.taxes_cents} />
+                    </td>
+                    <td className="py-1 text-muted-foreground">
+                      <Money cents={m.moved_cents} />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <p className="mt-1.5 text-muted-foreground">
+              Transfers are money arriving from your own accounts, like a move from savings or a card payment. They aren&apos;t counted. If
+              a month&apos;s pay looks wrong, open Spending and check how its deposits are categorized.
+            </p>
+          </div>
+        </details>
+      )}
+    </div>
   );
 }
 

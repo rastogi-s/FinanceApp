@@ -25,6 +25,7 @@ from financeapp.transfers import match_transfers
 log = logging.getLogger("financeapp")
 SYNC_LOCK = 72_416_002
 STALE_AFTER = 2
+TRANSFER_DAYS = 400  # all the history the 6-month averages look at, so an older card payment isn't spending
 
 
 def connector_for(provider: str, settings: Settings) -> Connector | None:
@@ -249,7 +250,7 @@ def _run(database: Database, settings: Settings, trigger: str, only: list[int] |
                     )
 
     with database.session() as db:
-        pairs = match_transfers(db, on - timedelta(days=90))
+        pairs = match_transfers(db, on - timedelta(days=TRANSFER_DAYS))
         changed = categorize(db)
         r = db.get_one(SyncRun, run_id)
         r.finished_at = now()
