@@ -2,8 +2,8 @@
 
 Net worth = cash + investments - card and loan balances, using each account's latest balance, and only accounts
 marked authoritative (so an account that comes in through two sources is counted once). Transfers between your own
-accounts are left out of spending. The budget, savings rate and "safe to spend" come from budget.py; projections
-arrive in a later phase, and until then that part is null and the Plan page says so.
+accounts are left out of spending. The budget, savings rate and "safe to spend" come from budget.py; the projection
+comes from plan.py, and is null until there's a savings number to project (the Plan page says so).
 """
 
 from collections import defaultdict
@@ -12,7 +12,7 @@ from datetime import UTC, date, datetime, timedelta
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
 
-from financeapp import alerts, budget, portfolio
+from financeapp import alerts, budget, plan, portfolio
 from financeapp.models import Account, AlertEvent, Balance, Category, Connection, SyncRun, Transaction, now
 from financeapp.sync import today
 
@@ -32,8 +32,8 @@ def signed(a: Account, cents: int) -> int:
     return -cents if a.type in DEBT else cents
 
 
-def net_worth_history(db: DbSession, accounts: list[Account], end: date) -> list[dict]:
-    start = end - timedelta(days=HISTORY_DAYS - 1)
+def net_worth_history(db: DbSession, accounts: list[Account], end: date, days: int = HISTORY_DAYS) -> list[dict]:
+    start = end - timedelta(days=days - 1)
     ids = [a.id for a in accounts]
     if not ids:
         return []
@@ -72,9 +72,14 @@ def counted(db: DbSession) -> list[Account]:
 
 
 def build(db: DbSession) -> dict:
+    return build_with_plan(db)[0]
+
+
+def build_with_plan(db: DbSession) -> tuple[dict, dict | None]:
+    """The household, and what its projection was made from (plan.inputs), for the Plan page."""
     accounts = counted(db)
     if not accounts:
-        return {"demo": False, "linked": False}
+        return {"demo": False, "linked": False}, None
     end = today()
     history = net_worth_history(db, accounts, end)
     net = history[-1]["cents"] if history else 0
@@ -190,13 +195,15 @@ def build(db: DbSession) -> dict:
     synced_times = [c.last_synced_at for c in connections if c.last_synced_at]
     as_of = max(synced_times) if synced_times else datetime.now(UTC)
 
+    budget_state = budget.build(db)
+    plan_inputs = plan.inputs(db, budget_state, net, end)
     return {
         "demo": False,
         "linked": True,
         "as_of": as_of.isoformat(),
         "net_worth": {"cents": net, "change_today_cents": net - yesterday, "history": history},
         "spending": {"month_cents": spent_month, "last_month_same_day_cents": spent_last, "needs_review": review},
-        **budget.for_household(budget.build(db)),
+        **budget.for_household(budget_state),
         "alerts": [
             alerts.event_json(e)
             for e in db.scalars(
@@ -213,7 +220,7 @@ def build(db: DbSession) -> dict:
         "allocation": [
             {"asset_class": k, "cents": v} for k, v in sorted(allocation.items(), key=lambda kv: -kv[1]) if v
         ],
-        "projection": None,
+        "projection": plan.projection(plan_inputs),
         "health": {
             "stale": [
                 {"id": c.id, "institution": c.institution, "error": c.last_error}
@@ -222,4 +229,4 @@ def build(db: DbSession) -> dict:
             ],
             "last_sync_ok": last_run.ok if last_run else None,
         },
-    }
+    }, plan_inputs

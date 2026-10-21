@@ -1,5 +1,35 @@
 [
   {
+    "version": "0.7.0",
+    "title": "Your plan, and a guide to get set up",
+    "features": [
+      {
+        "id": "projection",
+        "title": "When work becomes optional",
+        "body": "Plan now shows the year your savings could cover your spending, as a range from 4% to 8% returns after inflation, on a chart that runs from your net worth so far into the future. Drag across it to read any year, and add your birth year to see it as an age.",
+        "tryIt": "/plan"
+      },
+      {
+        "id": "what-if",
+        "title": "What if you saved more, or spent less?",
+        "body": "Move the sliders for monthly savings, spending later (lean, regular or comfortable, made from your own budget), market returns and the withdrawal rate, and the date moves as you drag. Save the one you like as your plan.",
+        "tryIt": "/plan"
+      },
+      {
+        "id": "ideas",
+        "title": "Ways to save more",
+        "body": "Plan lists the subscriptions you pay every month, flags the ones whose price went up, shows how much sooner you'd get there without them, and points out categories creeping up on their usual month. Worked out on your server, no AI.",
+        "tryIt": "/plan"
+      },
+      {
+        "id": "guide",
+        "title": "A guide to get set up",
+        "body": "A short checklist takes you from the first sign-in to a working app: Face ID, accounts, the budget, a test alert, then the extras. Each step ticks itself off. It sits on Home until you're done, and in Settings after.",
+        "tryIt": "/start"
+      }
+    ]
+  },
+  {
     "version": "0.5.0",
     "title": "Live prices, alerts and what's really inside your funds",
     "features": [

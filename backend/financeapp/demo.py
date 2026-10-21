@@ -5,7 +5,10 @@ dates stay current. Money is integer cents, as it will be in the database.
 """
 
 import random
+import statistics
 from datetime import UTC, date, datetime, timedelta
+
+from financeapp import plan
 
 SEED = 20261019
 
@@ -122,18 +125,6 @@ def household(today: date | None = None) -> dict:
         by_class[asset_class] = by_class.get(asset_class, 0) + _cents(dollars)
     by_class["Cash"] = by_class.get("Cash", 0) + _cents(cash)
 
-    # Projection: today's net worth growing with monthly savings, at 4%, 6% and 8% a year.
-    monthly_savings = 4_200
-    bands = []
-    for years in range(0, 26):
-        point = {"year": today.year + years}
-        for label, rate in (("low", 0.04), ("mid", 0.06), ("high", 0.08)):
-            r = rate / 12
-            months = years * 12
-            grown = net_worth / 100 * (1 + r) ** months + monthly_savings * (((1 + r) ** months - 1) / r)
-            point[label] = _cents(grown)
-        bands.append(point)
-
     return {
         "demo": True,
         "linked": True,
@@ -192,7 +183,7 @@ def household(today: date | None = None) -> dict:
             for s, n, c, a, v, p in HOLDINGS
         ],
         "allocation": [{"asset_class": k, "cents": v} for k, v in sorted(by_class.items(), key=lambda kv: -kv[1])],
-        "projection": {"monthly_savings_cents": _cents(monthly_savings), "bands": bands},
+        "projection": plan.projection(_plan_inputs(today, net_worth)),
     }
 
 
@@ -429,6 +420,94 @@ def budget(today: date | None = None) -> dict:
             for i, (n, k) in enumerate(CATEGORY_NAMES, 1)
             if k in ("fixed", "flexible")
         ],
+    }
+
+
+# ---- the Plan page
+
+SUBSCRIPTIONS = [  # merchant, category, monthly dollars, went up
+    ("Peloton", "Subscriptions", 44.00, False),
+    ("New York Times", "Subscriptions", 25.00, False),
+    ("Netflix", "Subscriptions", 22.99, True),
+    ("Spotify", "Subscriptions", 11.99, False),
+    ("iCloud+", "Subscriptions", 2.99, False),
+]
+
+
+def _plan_inputs(today: date, net_worth: int) -> dict:
+    b = budget(today)
+    essentials = sum(line["limit_cents"] for line in b["lines"] if line["essential"])
+    regular = _cents(statistics.median(spent for *_, spent in SAVINGS))
+    saved = [m["saved_cents"] for m in b["savings_history"]]
+    return {
+        "start_cents": net_worth,
+        "year": today.year,
+        "monthly_savings_cents": round(sum(saved) / len(saved)),
+        "measured_savings_cents": round(sum(saved) / len(saved)),
+        "savings_months": len(saved),
+        "savings_typed": False,
+        "returns": plan.RETURNS,
+        "withdrawal_rate": 4.0,
+        "level": "regular",
+        "birth_year": today.year - 36,
+        "levels": {
+            "lean": {"yearly_cents": essentials * 12, "typed": False},
+            "regular": {"yearly_cents": regular * 12, "typed": False},
+            "fat": {"yearly_cents": round(regular * 12 * plan.FAT), "typed": False},
+        },
+        "months_used": 6,
+        "emergency": b["emergency"],
+    }
+
+
+def plan_page(today: date | None = None) -> dict:
+    """The Plan page in demo mode, matching household()."""
+    today = today or datetime.now(UTC).date()
+    h = household(today)
+    net_worth = h["net_worth"]["cents"]
+    rng = random.Random(SEED + 1)  # noqa: S311 - sample data, not security
+    # Two years, a point a week: savings plus a bumpy market, ending at today's value.
+    history = []
+    value = net_worth
+    for i in range(105):
+        history.append({"date": (today - timedelta(days=7 * i)).isoformat(), "cents": value})
+        value -= _cents(1_150 + rng.uniform(-4_500, 5_200))
+    history.reverse()
+    month_start = today.replace(day=1)
+    last_month = _last_month(month_start)
+    subs = [
+        {
+            "merchant": m,
+            "category": c,
+            "monthly_cents": _cents(d),
+            "yearly_cents": _cents(d * 12),
+            "last_date": (month_start + timedelta(days=i * 3)).isoformat(),
+            "months": 5,
+            "went_up": up,
+        }
+        for i, (m, c, d, up) in enumerate(SUBSCRIPTIONS)
+    ]
+    return {
+        "demo": True,
+        "linked": True,
+        "net_worth_cents": net_worth,
+        "history": history,
+        "inputs": _plan_inputs(today, net_worth),
+        "projection": h["projection"],
+        "ideas": {
+            "subscriptions": subs,
+            "subscriptions_yearly_cents": sum(s["yearly_cents"] for s in subs),
+            "rising": [
+                {
+                    "category_id": 7,
+                    "category": "Dining out",
+                    "month": last_month.isoformat(),
+                    "spent_cents": _cents(612),
+                    "usual_cents": _cents(410),
+                    "change_cents": _cents(202),
+                }
+            ],
+        },
     }
 
 

@@ -32,6 +32,7 @@ const PLACES = [
   ["people", "/settings/people", "direct"],
   ["ai", "/settings/ai", "direct"],
   ["alerts", "/settings/alerts", "direct"],
+  ["start", "/start", "direct"],
   ["holding-stock", "/portfolio/holding?s=AAPL", "direct"],
   ["holding-fund", "/portfolio/holding?s=VTI", "direct"],
 ];
