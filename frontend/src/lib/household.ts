@@ -86,6 +86,16 @@ export function resetHousehold(reload = false) {
   if (reload) listeners.forEach((l) => l());
 }
 
+/** Pull to refresh: sync with the banks, then fresh numbers on every page, including the ones that fetch their own. */
+export async function refreshAll(): Promise<void> {
+  // Sync problems show on Settings → Accounts; a sync already running or sample data still gets fresh numbers.
+  const shown = await (cached ?? Promise.reject()).catch(() => null);
+  if (!shown?.demo) await api("/api/sync", { method: "POST" }).catch(() => {});
+  resetHousehold(true);
+  window.dispatchEvent(new Event("app-refresh"));
+  await load().catch(() => {});
+}
+
 export function useHousehold(): State {
   const [state, setState] = useState<State>({ status: "loading" });
   const [version, setVersion] = useState(0);
@@ -132,6 +142,10 @@ export function useApi<T>(path: string | null): { data: T | null; error: string 
     };
   }, [path, version]);
   const reload = useCallback(() => setVersion((v) => v + 1), []);
+  useEffect(() => {
+    window.addEventListener("app-refresh", reload);
+    return () => window.removeEventListener("app-refresh", reload);
+  }, [reload]);
   return { data, error, reload };
 }
 
