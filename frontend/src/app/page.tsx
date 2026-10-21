@@ -8,6 +8,7 @@ import { HouseholdPage } from "@/components/page";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
+import { monthName } from "@/lib/budget";
 import type { LinkedHousehold } from "@/lib/household";
 
 const time = new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit" });
@@ -125,7 +126,7 @@ export default function Home() {
   );
 }
 
-/** "Safe to spend" once budgets exist (next phase); until then, what's been spent this month. */
+/** "Safe to spend" once there's an everyday budget; until then, what's been spent this month. */
 function FirstTile({ h }: { h: LinkedHousehold }) {
   if (h.safe_to_spend) {
     const perDay = Math.floor(h.safe_to_spend.cents / Math.max(h.safe_to_spend.days_left, 1));
@@ -169,16 +170,20 @@ function FirstTile({ h }: { h: LinkedHousehold }) {
 function SecondTile({ h }: { h: LinkedHousehold }) {
   if (h.savings_rate) {
     return (
-      <Card>
-        <CardHeader>
-          <CardTitle>Savings rate</CardTitle>
-          <TrendingUp className="size-4 text-positive" aria-hidden />
-        </CardHeader>
-        <CardContent>
-          <p className="text-2xl font-semibold tracking-tight">{h.savings_rate.percent.toFixed(0)}%</p>
-          <p className="mt-1 text-xs text-muted-foreground">of gross pay this month</p>
-        </CardContent>
-      </Card>
+      <Link href="/budget" className="block">
+        <Card className="h-full transition-colors hover:bg-muted/40">
+          <CardHeader>
+            <CardTitle>Savings rate</CardTitle>
+            <TrendingUp className="size-4 text-positive" aria-hidden />
+          </CardHeader>
+          <CardContent>
+            <p className="text-2xl font-semibold tracking-tight">{h.savings_rate.percent.toFixed(0)}%</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              of {h.savings_rate.basis === "gross" ? "gross" : "take-home"} pay in {monthName.format(new Date(h.savings_rate.month))}
+            </p>
+          </CardContent>
+        </Card>
+      </Link>
     );
   }
   const review = h.spending?.needs_review ?? 0;

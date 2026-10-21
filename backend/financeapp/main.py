@@ -11,7 +11,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from financeapp import auth, crypto
-from financeapp.api import auth_routes, money_routes
+from financeapp.api import auth_routes, budget_routes, money_routes
 from financeapp.config import PACKAGE_DIR, Settings, get_settings
 from financeapp.db import Database
 from financeapp.scheduler import Scheduler
@@ -139,6 +139,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.include_router(auth_routes.router)
     app.include_router(money_routes.router)
+    app.include_router(budget_routes.router)
 
     @app.api_route("/api/{rest:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
     def api_not_found(rest: str) -> JSONResponse:

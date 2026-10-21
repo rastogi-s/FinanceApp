@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
 
-export type Budget = { category: string; kind: "fixed" | "flexible"; limit_cents: number; spent_cents: number };
+export type Budget = { category: string; category_id?: number; kind: "fixed" | "flexible"; limit_cents: number; spent_cents: number };
 export type Transaction = {
   id: string;
   date: string;
@@ -34,9 +34,9 @@ export type LinkedHousehold = {
   as_of: string;
   net_worth: { cents: number; change_today_cents: number; history: { date: string; cents: number }[] };
   spending?: { month_cents: number; last_month_same_day_cents: number; needs_review: number };
-  // Budgets, the savings rate and projections arrive in later phases: null (or empty) until then.
+  // Null (or empty) until there's a budget, income, or (for projections) a later phase.
   safe_to_spend: { cents: number; days_left: number } | null;
-  savings_rate: { percent: number; month: string } | null;
+  savings_rate: { percent: number; month: string; basis: "gross" | "take_home" } | null;
   budgets: Budget[];
   budgets_closest: Budget[];
   alerts: Alert[];

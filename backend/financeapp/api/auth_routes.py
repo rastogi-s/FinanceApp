@@ -691,6 +691,9 @@ ACTION_TEXT = {
     "sync": "Synced",
     "import": "File imported",
     "recategorized": "Category changed",
+    "budget_saved": "Budget saved",
+    "paycheck_added": "Pay stub added",
+    "paycheck_removed": "Pay stub removed",
 }
 
 
