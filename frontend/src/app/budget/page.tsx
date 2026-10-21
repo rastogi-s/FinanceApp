@@ -12,6 +12,7 @@ import {
   Plus,
   ShieldCheck,
   Sparkles,
+  Target,
   Trash2,
   TrendingUp,
   Wallet,
@@ -662,8 +663,14 @@ function Emergency({ data, run }: { data: BudgetState; run: Run }) {
             </p>
             <Progress value={e.have_cents} max={e.target_cents} label="Emergency fund target reached" tone="goal" />
             <p className="text-sm text-muted-foreground">
-              Your cash covers {months >= 10 ? Math.floor(months) : months.toFixed(1)} months of essentials (
-              <Money cents={e.monthly_cents} /> a month: bills plus the everyday categories marked essential).
+              {e.picked ? "The accounts you picked cover" : "Your cash covers"} {months >= 10 ? Math.floor(months) : months.toFixed(1)} months of
+              essentials (<Money cents={e.monthly_cents} /> a month: bills plus the everyday categories marked essential).
+              {e.set_aside_cents > 0 && !e.picked && (
+                <>
+                  {" "}
+                  Not counting <Money cents={e.set_aside_cents} /> set aside for other goals.
+                </>
+              )}
             </p>
           </>
         ) : (
@@ -671,32 +678,55 @@ function Emergency({ data, run }: { data: BudgetState; run: Run }) {
             Once the budget has bills or essentials in it, this shows how many months your cash covers.
           </p>
         )}
-        <div className="flex items-center justify-between gap-3 rounded-2xl border px-4 py-2.5">
-          <span className="text-sm font-medium">Target</span>
-          <div className="flex items-center gap-1">
-            <Button
-              variant="ghost"
-              size="icon"
-              aria-label="One month fewer"
-              disabled={e.months <= 1}
-              onClick={() => setMonths(e.months - 1)}
-            >
-              <Minus />
-            </Button>
-            <span className="w-20 text-center text-sm" aria-live="polite">
-              {e.months} months
+        <Link
+          href="/goals"
+          className="flex items-center gap-3 rounded-2xl border px-4 py-3 text-sm transition-colors hover:bg-muted"
+        >
+          <Target className="size-4 text-muted-foreground" aria-hidden />
+          <span className="flex-1">
+            <span className="block font-medium">Saving for something else?</span>
+            <span className="block text-xs text-muted-foreground">
+              Set money aside for a house, a car or a trip in Goals, so it isn&apos;t counted here.
             </span>
-            <Button
-              variant="ghost"
-              size="icon"
-              aria-label="One month more"
-              disabled={e.months >= 36}
-              onClick={() => setMonths(e.months + 1)}
-            >
-              <Plus />
-            </Button>
+          </span>
+          <ChevronRight className="size-4 text-muted-foreground" aria-hidden />
+        </Link>
+        {e.target_typed ? (
+          <p className="text-sm text-muted-foreground">
+            The target is a set amount, <Money cents={e.target_cents} />. Change it on the{" "}
+            <Link href="/goals" className="font-medium text-primary">
+              Goals
+            </Link>{" "}
+            page.
+          </p>
+        ) : (
+          <div className="flex items-center justify-between gap-3 rounded-2xl border px-4 py-2.5">
+            <span className="text-sm font-medium">Target</span>
+            <div className="flex items-center gap-1">
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label="One month fewer"
+                disabled={e.months <= 1}
+                onClick={() => setMonths(e.months - 1)}
+              >
+                <Minus />
+              </Button>
+              <span className="w-20 text-center text-sm" aria-live="polite">
+                {e.months} months
+              </span>
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label="One month more"
+                disabled={e.months >= 36}
+                onClick={() => setMonths(e.months + 1)}
+              >
+                <Plus />
+              </Button>
+            </div>
           </div>
-        </div>
+        )}
       </CardContent>
     </Card>
   );

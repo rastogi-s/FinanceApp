@@ -35,6 +35,7 @@ export type PlanInputs = {
     monthly_cents: number;
     target_cents: number;
     have_cents: number;
+    set_aside_cents?: number;
   };
 };
 

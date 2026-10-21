@@ -17,6 +17,7 @@ from financeapp.api import (
     auth_routes,
     brief_routes,
     budget_routes,
+    goal_routes,
     income_routes,
     mcp_routes,
     money_routes,
@@ -164,6 +165,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(income_routes.router)
     app.include_router(plan_routes.router)
     app.include_router(tax_routes.router)
+    app.include_router(goal_routes.router)
     app.include_router(brief_routes.router)
     app.include_router(mcp_routes.router)
     app.include_router(update_routes.router)

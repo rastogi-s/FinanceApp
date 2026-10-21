@@ -354,6 +354,35 @@ class Paycheck(Base):
     created_at: Mapped[datetime] = mapped_column(default=now)
 
 
+class Goal(Base):
+    """Something the household is saving for: a house down payment, a car, the emergency fund (always there, one of
+    it). Money counts toward a goal through goal_funding; see goals.py for how a balance is shared out."""
+
+    __tablename__ = "goals"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    kind: Mapped[str] = mapped_column(String(16))  # emergency | saving
+    name: Mapped[str] = mapped_column(String(60))
+    icon: Mapped[str] = mapped_column(String(16))
+    color: Mapped[str] = mapped_column(String(16))
+    priority: Mapped[int] = mapped_column(Integer, default=2)  # 1 high, 2 medium, 3 low
+    # The emergency fund's target is months of essentials (the budget's setting) unless one is typed in.
+    target_cents: Mapped[int | None] = mapped_column(BigInteger)
+    target_date: Mapped[date | None] = mapped_column(Date)
+    rate_percent: Mapped[Decimal | None]  # what the money earns a year; None: the app's default
+    monthly_cents: Mapped[int | None] = mapped_column(BigInteger)  # what goes in each month; None: the app works it out
+    created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    created_at: Mapped[datetime] = mapped_column(default=now)
+
+
+class GoalFunding(Base):
+    """Money in an account set aside for a goal: a fixed amount of it, or (cents None) whatever is left of it."""
+
+    __tablename__ = "goal_funding"
+    goal_id: Mapped[int] = mapped_column(ForeignKey("goals.id", ondelete="CASCADE"), primary_key=True)
+    account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id", ondelete="CASCADE"), primary_key=True, index=True)
+    cents: Mapped[int | None] = mapped_column(BigInteger)
+
+
 class Preference(Base):
     """Household settings that aren't secrets or server config, e.g. how many months the emergency fund covers."""
 
@@ -427,11 +456,11 @@ class Quote(Base):
 
 
 class AlertRule(Base):
-    """A price, dip, budget or concentration rule (see alerts.py for the params of each)."""
+    """A price, dip, budget, concentration or goal rule (see alerts.py for the params of each)."""
 
     __tablename__ = "alert_rules"
     id: Mapped[int] = mapped_column(primary_key=True)
-    kind: Mapped[str] = mapped_column(String(16))  # price | dip | budget | concentration
+    kind: Mapped[str] = mapped_column(String(16))  # price | dip | budget | concentration | goal
     params: Mapped[dict] = mapped_column(default=dict)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     # Which conditions have fired and not re-armed yet, so a rule never sends the same thing twice.

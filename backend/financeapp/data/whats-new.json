@@ -1,5 +1,29 @@
 [
   {
+    "version": "0.27.0",
+    "title": "Savings goals",
+    "features": [
+      {
+        "id": "goals",
+        "title": "Save for a house, a car or a trip",
+        "body": "Plan has a new Goals page. Make a goal with an amount, an optional date and a priority, and pick the money toward it: an amount of an account (say $40,000 of your savings) or the rest of one. Each goal shows how far along it is, what it needs a month to make its date, and when it gets there at what you actually save. Slide the monthly amount to see the date move.",
+        "tryIt": "/goals"
+      },
+      {
+        "id": "goals-emergency",
+        "title": "Your emergency fund counts only emergency money",
+        "body": "Cash set aside for another goal no longer counts as your emergency fund, so a down payment you're saving doesn't look like six months of cover. You can also pick exactly which accounts are your emergency fund.",
+        "tryIt": "/budget"
+      },
+      {
+        "id": "goals-alerts",
+        "title": "Milestone alerts",
+        "body": "Your phone hears when a goal reaches 25%, 50%, 75% and 100%. Turn it off or pick one goal in Settings, then Alerts.",
+        "tryIt": "/settings/alerts"
+      }
+    ]
+  },
+  {
     "version": "0.25.0",
     "title": "Dividends and interest",
     "features": [

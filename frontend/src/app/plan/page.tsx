@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { ChevronRight, Landmark, LifeBuoy, Pencil, RotateCcw, Scissors, Telescope, TrendingUp } from "lucide-react";
+import { ChevronRight, Landmark, Pencil, RotateCcw, Scissors, Target, Telescope, TrendingUp } from "lucide-react";
 import { PlanChart } from "@/components/plan-chart";
 import { Money, formatMoney } from "@/components/money";
 import { Notice, PageTitle } from "@/components/page";
@@ -10,12 +10,12 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Field, Input } from "@/components/ui/input";
-import { Progress } from "@/components/ui/progress";
 import { Sheet } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Slider } from "@/components/ui/slider";
 import { toast } from "@/components/ui/toast";
 import { api } from "@/lib/api";
+import { COLORS, type GoalsState, ICONS } from "@/lib/goals";
 import { resetHousehold, useApi } from "@/lib/household";
 import { LEVEL_NAMES, type Level, type PlanInputs, type PlanState, type SavingsMonth, type Scenario, type Utility, project } from "@/lib/plan";
 import { cn } from "@/lib/utils";
@@ -151,7 +151,7 @@ function PlanView({ p, onSaved }: { p: Linked; onSaved: (p: PlanState) => void }
           The app works it out from your pay stubs, or from paychecks landing in a linked account, against what you spend. It hasn&apos;t
           seen any pay yet.
         </Notice>
-        <Emergency e={i.emergency} />
+        <GoalsCard />
         <TaxesLink />
         <Ideas p={p} s={s} />
         <About open={aboutOpen} onOpenChange={setAboutOpen} p={p} save={save} saving={saving} askSavings />
@@ -385,7 +385,7 @@ function PlanView({ p, onSaved }: { p: Linked; onSaved: (p: PlanState) => void }
       </Card>
 
       <Ideas p={p} s={s} />
-      <Emergency e={i.emergency} />
+      <GoalsCard />
       <TaxesLink />
       <About open={aboutOpen} onOpenChange={setAboutOpen} p={p} save={save} saving={saving} />
     </div>
@@ -659,28 +659,74 @@ function Utilities({ utilities }: { utilities: Utility[] }) {
   );
 }
 
-function Emergency({ e }: { e: PlanInputs["emergency"] }) {
-  if (!e.monthly_cents) return null;
-  const months = e.have_cents / e.monthly_cents;
+/** Goals at a glance (the emergency fund is one): each one's progress, and the way to the Goals page. */
+function GoalsCard() {
+  const { data } = useApi<GoalsState>("/api/goals");
   return (
-    <Link href="/budget" className="block">
-      <Card className="transition-colors hover:bg-muted/40">
-        <CardHeader>
-          <CardTitle>Emergency fund</CardTitle>
-          <LifeBuoy className="size-4 text-muted-foreground" aria-hidden />
-        </CardHeader>
-        <CardContent className="grid grid-cols-1 gap-2">
-          <p className="text-sm">
-            <span className="font-medium">{months >= 10 ? Math.floor(months) : months.toFixed(1)} months</span> of essentials in cash, of{" "}
-            {e.months} you aimed for.
-          </p>
-          <Progress value={e.have_cents} max={e.target_cents} tone="goal" label="Emergency fund" />
-          <p className="text-xs text-muted-foreground">
-            <Money cents={e.have_cents} /> of <Money cents={e.target_cents} />
-          </p>
-        </CardContent>
-      </Card>
-    </Link>
+    <Card>
+      <CardHeader>
+        <CardTitle>Goals</CardTitle>
+        <Button asChild variant="ghost" size="sm" className="-mt-1.5 -mr-2">
+          <Link href="/goals">
+            {data && data.goals.length > 1 ? "All goals" : "Add a goal"} <ChevronRight />
+          </Link>
+        </Button>
+      </CardHeader>
+      <CardContent>
+        {!data ? (
+          <Skeleton className="h-24 rounded-xl" />
+        ) : (
+          <ul className="grid grid-cols-1 gap-3">
+            {data.goals.slice(0, 5).map((g) => {
+              const Icon = ICONS[g.icon] ?? Target;
+              const color = COLORS[g.color] ?? COLORS.teal;
+              const ratio = g.target_cents > 0 ? Math.min(g.saved_cents / g.target_cents, 1) : 0;
+              return (
+                <li key={g.id}>
+                  <Link href="/goals" className="flex items-center gap-3 rounded-xl py-0.5">
+                    <span className={cn("grid size-9 shrink-0 place-items-center rounded-xl", color.tile)} aria-hidden>
+                      <Icon className="size-4" />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="flex items-baseline justify-between gap-2 text-sm">
+                        <span className="truncate font-medium">{g.name}</span>
+                        <span className="shrink-0 text-xs text-muted-foreground">
+                          <Money cents={g.saved_cents} style="compact" />
+                          {g.target_cents > 0 && (
+                            <>
+                              {" "}
+                              of <Money cents={g.target_cents} style="compact" />
+                            </>
+                          )}
+                        </span>
+                      </span>
+                      <span
+                        role="progressbar"
+                        aria-label={`${g.name} progress`}
+                        aria-valuemin={0}
+                        aria-valuemax={100}
+                        aria-valuenow={Math.round(ratio * 100)}
+                        className="mt-1.5 block h-1.5 w-full overflow-hidden rounded-full bg-muted"
+                      >
+                        <span
+                          className={cn("block h-full rounded-full", ratio >= 1 ? "bg-positive" : color.bar)}
+                          style={{ width: `${ratio * 100}%` }}
+                        />
+                      </span>
+                    </span>
+                  </Link>
+                </li>
+              );
+            })}
+            {data.goals.length === 1 && (
+              <li className="text-xs text-muted-foreground">
+                Saving for a house or a car? Make it a goal, so the money set aside for it isn&apos;t counted as your emergency fund.
+              </li>
+            )}
+          </ul>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
