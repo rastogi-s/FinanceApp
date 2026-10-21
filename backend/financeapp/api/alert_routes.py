@@ -27,7 +27,16 @@ def no_demo(who: Signed) -> None:
         raise HTTPException(403, "Not available with sample data.")
 
 
-class PriceRule(BaseModel):
+class Rule(BaseModel):
+    # How hard the phone should try to get attention (see alerts.PRIORITIES). Not part of what the rule watches,
+    # so changing it doesn't let the rule fire again.
+    priority: Literal["high", "default", "low"] = alerts.DEFAULT_PRIORITY
+
+    def stored(self) -> dict:
+        return {**self.params(), "priority": self.priority}  # type: ignore[attr-defined]
+
+
+class PriceRule(Rule):
     kind: Literal["price"]
     symbol: str = Field(min_length=1, max_length=12)
     above: float | None = Field(default=None, gt=0, lt=10_000_000)
@@ -52,7 +61,7 @@ class PriceRule(BaseModel):
         return p
 
 
-class DipRule(BaseModel):
+class DipRule(Rule):
     kind: Literal["dip"]
     symbol: str | None = Field(default=None, max_length=12)  # None: every stock and fund held
     from_high_percent: float | None = Field(default=None, ge=2, le=50)
@@ -74,7 +83,7 @@ class DipRule(BaseModel):
         return {"symbol": self.symbol, "below_average": self.below_average}
 
 
-class BudgetRule(BaseModel):
+class BudgetRule(Rule):
     kind: Literal["budget"]
     category_id: int | None = None  # None: the whole everyday budget (for a heads-up: every category on its own)
     percent: int = Field(default=90, ge=10, le=200)
@@ -86,7 +95,7 @@ class BudgetRule(BaseModel):
         return {"category_id": self.category_id, "percent": self.percent}
 
 
-class ConcentrationRule(BaseModel):
+class ConcentrationRule(Rule):
     kind: Literal["concentration"]
     percent: float = Field(ge=1, le=100)
 
@@ -147,8 +156,9 @@ def rule_json(r: AlertRule, categories: dict[int, str]) -> dict:
     return {
         "id": r.id,
         "kind": r.kind,
-        "params": r.params,
+        "params": {k: v for k, v in r.params.items() if k != "priority"},
         "enabled": r.enabled,
+        "priority": alerts.priority_of(r),
         "summary": describe(r, categories),
         # Fired and not re-armed yet: what the app shows as "Triggered".
         "triggered": any(k.get("on") for k in (r.state or {}).get("keys", {}).values()) and r.kind == "price",
@@ -207,7 +217,7 @@ def add_rule(body: RuleBody, request: Request, who: Signed = Depends(signed_in))
         raise HTTPException(422, f"That's {MAX_RULES} rules already. Remove one first.")
     check_category(db, body.rule)
     r = AlertRule(
-        kind=body.rule.kind, params=body.rule.params(), enabled=body.enabled, state={}, created_by=who.user.id
+        kind=body.rule.kind, params=body.rule.stored(), enabled=body.enabled, state={}, created_by=who.user.id
     )
     db.add(r)
     db.flush()
@@ -224,9 +234,10 @@ def change_rule(rule_id: int, body: RuleBody, request: Request, who: Signed = De
     if r is None:
         raise HTTPException(404, "That rule is gone.")
     check_category(db, body.rule)
-    if (r.kind, r.params) != (body.rule.kind, body.rule.params()):
+    watched = {k: v for k, v in r.params.items() if k != "priority"}
+    if (r.kind, watched) != (body.rule.kind, body.rule.params()):
         r.state = {}  # a different rule now: it can fire again
-    r.kind, r.params, r.enabled = body.rule.kind, body.rule.params(), body.enabled
+    r.kind, r.params, r.enabled = body.rule.kind, body.rule.stored(), body.enabled
     audit(db, request, "alert_rule_changed", who.user.id, rule=r.id, kind=r.kind)
     recheck(request, db, r)
     return state(db, request)

@@ -1,6 +1,6 @@
 [
   {
-    "version": "0.21.0",
+    "version": "0.22.0",
     "title": "Holdings as a table, and a faster Portfolio",
     "features": [
       {
@@ -14,6 +14,18 @@
         "title": "Portfolio loads faster",
         "body": "Your real exposure, largest positions and the connections graph now open in a moment instead of after a long wait, and stay ready when you come back. Searching for a company still finds every one you own through your funds.",
         "tryIt": "/portfolio"
+      }
+    ]
+  },
+  {
+    "version": "0.21.0",
+    "title": "Alerts that pop up",
+    "features": [
+      {
+        "id": "alert-priority",
+        "title": "Choose how loud each alert is",
+        "body": "Price, dip, budget and portfolio alerts now arrive as a banner with a sound, and on iPhone as Time Sensitive, so a Focus you allow them in won't hold them back. Before, they went out at normal priority and could land silently. Open any alert in Settings, Alerts to make it Pop up, Normal or Quiet. What's held over quiet hours still arrives in the morning as one normal message.",
+        "tryIt": "/settings/alerts"
       }
     ]
   },
