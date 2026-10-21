@@ -351,3 +351,85 @@ def test_savings_stitches_accounts_and_leaves_out_transfers(client, home):
     assert not any("Other money" in k for k in lines)
     assert src["excluded"]["cents"] == 5_000_00 // 2
     assert s["monthly_savings_cents"] == sum(lines.values())
+
+
+def test_savings_rate_breakdown_agrees_with_plan(client, home):
+    """Budget's savings rate counts the same pay, other money in and spending as Plan's month rows, and says where
+    the savings went: into a linked savings account, a brokerage, cards that aren't linked, and elsewhere."""
+    from financeapp import transfers
+
+    home.setup()
+    history(client)
+    add_transactions(
+        client,
+        [
+            ("2026-08-15", "ACME CORP", 3_000, "Paycheck"),
+            # Pay that landed uncategorized: still pay (it used to count as a $6,000 refund against spending).
+            ("2026-09-01", "ACME CORP", 3_000, None),
+            ("2026-09-15", "ACME CORP", 3_000, None),
+            ("2026-09-30", "Bank interest", 10, "Interest & dividends"),
+            ("2026-09-12", "Zelle from Mom", 900, "Other income"),
+            ("2026-09-16", "FIDELITY MONEYLINE", -1_000, "Transfer"),
+            ("2026-09-20", "CHASE CREDIT CRD AUTOPAY", -400, "Transfer"),
+            ("2026-09-22", "Zelle to Sam", -300, "Transfer"),
+            ("2026-09-18", "Move to savings", -500, None),
+        ],
+    )
+    add_to(client, "savings", [("2026-09-18", "From checking", 500, None)], kind="depository")
+    with db_of(client).session() as db:
+        db.scalar(select(Account).where(Account.external_id == "savings")).subtype = "savings"
+        assert transfers.match_transfers(db, date(2026, 9, 1)) == 1
+
+    b = client.get("/api/budget").json()
+    rate = b["savings_rate"]
+    assert rate["month"] == "2026-09-01" and rate["basis"] == "take_home"
+    # $6,000 pay + $10 interest + $900 other in, $2,000 rent + $550 groceries spent.
+    assert rate["income_cents"] == 691_000 and rate["spending_cents"] == 255_000 and rate["saved_cents"] == 436_000
+    assert rate["percent"] == 63.1
+    bd = rate["breakdown"]
+    assert {x["label"]: x["cents"] for x in bd["money_in"]} == {
+        "Pay (take-home)": 600_000,
+        "Other money in": 90_000,
+        "Interest & dividends": 1_000,
+    }
+    out = {x["label"]: x for x in bd["money_out"]}
+    assert out["Bills"]["cents"] == 200_000 and out["Everyday"]["items"] == [{"label": "Groceries", "cents": 55_000}]
+    assert sum(x["cents"] for x in bd["money_out"]) == rate["spending_cents"]
+    went = {x["label"]: x["cents"] for x in bd["went"]}
+    assert went == {
+        "Into savings": 50_000,
+        "Into Fidelity": 100_000,
+        "Paid to cards that aren't linked": 40_000,
+        "Sent to accounts that aren't linked": 30_000,
+        "Stayed in your everyday accounts": 436_000 - 220_000,
+    }
+    assert sum(went.values()) == rate["saved_cents"]
+    assert [n["kind"] for n in bd["notes"]] == ["take_home", "unlinked_cards", "other_transfers", "other_income"]
+
+    # Plan's September row is the same money.
+    rows = {r["month"]: r for r in client.get("/api/plan").json()["inputs"]["savings_source"]["months"]}
+    sep = rows["2026-09-01"]
+    assert sep["pay_cents"] + sep["other_in_cents"] == rate["income_cents"]
+    assert sep["spending_cents"] + sep["taxes_cents"] == rate["spending_cents"] + rate["taxes_cents"]
+
+
+def test_utilities_are_not_subscriptions(client, home):
+    home.setup()
+    rows = [("2026-06-01", "Corner shop", -5, "Shopping")]
+    power = {6: -150, 7: -210, 8: -230, 9: -190, 10: -183.07}  # moves with the weather
+    for m in range(6, 11):
+        rows.append((f"2026-{m:02}-05", "Spotify", -11.99, "Subscriptions"))
+        rows.append((f"2026-{m:02}-11", "Duke Energy", power[m], "Utilities"))
+        rows.append((f"2026-{m:02}-14", "City of Durham", -96.55 if m == 10 else -88.10, "Shopping"))
+        rows.append((f"2026-{m:02}-20", "Verizon", -70, "Subscriptions"))
+        rows.append((f"2026-{m:02}-01", "State Farm", -120, "Insurance"))
+    add_transactions(client, rows)
+    ideas = client.get("/api/plan").json()["ideas"]
+    assert [s["merchant"] for s in ideas["subscriptions"]] == ["Spotify"]
+    assert ideas["subscriptions_yearly_cents"] == 1199 * 12
+    bills = {u["merchant"]: u for u in ideas["utilities"]}
+    assert set(bills) == {"Duke Energy", "City of Durham", "Verizon", "State Farm"}
+    assert bills["City of Durham"]["kind"] == "utility" and bills["City of Durham"]["went_up"] is True
+    assert bills["Verizon"]["kind"] == "utility" and bills["State Farm"]["kind"] == "bill"
+    duke = bills["Duke Energy"]
+    assert duke["went_up"] is False and duke["higher"] is False and duke["usual_cents"] == 200_00

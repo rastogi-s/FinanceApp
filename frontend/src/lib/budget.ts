@@ -37,6 +37,15 @@ export type SavingsMonth = {
   saved_cents: number;
   match_cents: number;
   stubs: number;
+  /** The month line by line: money in, money out (spending by group), where the savings went, what to check. */
+  breakdown?: SavingsBreakdown;
+};
+export type SavingsLine = { label: string; cents: number; items?: { label: string; cents: number }[] };
+export type SavingsBreakdown = {
+  money_in: SavingsLine[];
+  money_out: SavingsLine[];
+  went: (SavingsLine & { kind: "retirement" | "savings" | "invest" | "loan" | "card" | "other" | "moved_in" | "left" })[];
+  notes: { kind: "take_home" | "unlinked_cards" | "other_transfers" | "other_income"; cents?: number }[];
 };
 export type Version = { id: number; source: "draft" | "edit" | "restore" | "ai"; by: string | null; at: string; total_cents: number };
 export type Frequency = "weekly" | "biweekly" | "semimonthly" | "monthly";

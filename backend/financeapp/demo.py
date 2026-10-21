@@ -316,6 +316,49 @@ SAVINGS = [  # month offset, gross, taxes, deductions, spending (dollars): the l
 ]
 
 
+DEMO_BILLS = [("Rent & mortgage", 2_850), ("Insurance", 310), ("Utilities", 240), ("Phone & internet", 130),
+              ("Subscriptions", 106)]  # fmt: skip
+DEMO_EVERYDAY = [("Groceries", 0.3), ("Dining out", 0.16), ("Shopping", 0.16), ("Transport", 0.12),
+                 ("Travel", 0.1), ("Entertainment", 0.08), ("Health", 0.05), ("Personal care", 0.03)]  # fmt: skip
+DEMO_PUT_AWAY = 1_850  # 401(k) and HSA from the month's paychecks
+
+
+def _savings_breakdown(gross: int, taxes: int, other: int, spent: int) -> dict:
+    """A month's savings sheet for the sample household (dollars in, cents out)."""
+    bills = sum(d for _, d in DEMO_BILLS)
+    everyday = spent - bills
+    items = [{"label": n, "cents": _cents(round(everyday * share))} for n, share in DEMO_EVERYDAY]
+    items[0]["cents"] += _cents(everyday) - sum(i["cents"] for i in items)
+    saved = gross - taxes - other - spent
+    went = [
+        {
+            "label": "Into your 401(k), HSA or ESPP from your paychecks",
+            "cents": _cents(DEMO_PUT_AWAY),
+            "kind": "retirement",
+        },
+        {"label": "Into Ally savings", "cents": _cents(1_500), "kind": "savings"},
+        {"label": "Into Vanguard brokerage", "cents": _cents(1_000), "kind": "invest"},
+    ]
+    left = _cents(saved) - sum(w["cents"] for w in went)
+    went.append({"label": "Stayed in your everyday accounts" if left >= 0 else "Came out of your everyday accounts",
+                 "cents": left, "kind": "left"})  # fmt: skip
+    return {
+        "money_in": [{"label": "Pay before taxes, 4 pay stubs", "cents": _cents(gross)}],
+        "money_out": [
+            {"label": "Taxes", "cents": _cents(taxes)},
+            {"label": "Other paycheck deductions (health insurance and the like)", "cents": _cents(other)},
+            {
+                "label": "Bills",
+                "cents": _cents(bills),
+                "items": [{"label": n, "cents": _cents(d)} for n, d in DEMO_BILLS],
+            },
+            {"label": "Everyday", "cents": _cents(everyday), "items": items},
+        ],
+        "went": went,
+        "notes": [],
+    }
+
+
 def budget(today: date | None = None) -> dict:
     """The Budget page in demo mode, matching household()."""
     today = today or datetime.now(UTC).date()
@@ -370,6 +413,7 @@ def budget(today: date | None = None) -> dict:
             "saved_cents": _cents(gross - taxes - other - spent),
             "match_cents": 0,
             "stubs": 4,
+            "breakdown": _savings_breakdown(gross, taxes, other, spent),
         }
         for offset, gross, taxes, other, spent in SAVINGS
     ]
@@ -454,6 +498,12 @@ SUBSCRIPTIONS = [  # merchant, category, monthly dollars, went up
     ("Netflix", "Subscriptions", 22.99, True),
     ("Spotify", "Subscriptions", 11.99, False),
     ("iCloud+", "Subscriptions", 2.99, False),
+]
+
+UTILITIES = [  # merchant, category, latest, usual, price went up, higher than usual
+    ("City Power & Light", "Utilities", 182.40, 141.00, False, True),
+    ("Comcast", "Phone & internet", 89.99, 79.99, True, False),
+    ("City Water & Sewer", "Utilities", 64.10, 61.80, False, False),
 ]
 
 
@@ -549,6 +599,21 @@ def plan_page(today: date | None = None) -> dict:
         "ideas": {
             "subscriptions": subs,
             "subscriptions_yearly_cents": sum(s["yearly_cents"] for s in subs),
+            "utilities": [
+                {
+                    "merchant": m,
+                    "category": c,
+                    "kind": "utility",
+                    "monthly_cents": _cents(now),
+                    "yearly_cents": _cents(now * 12),
+                    "usual_cents": _cents(usual),
+                    "last_date": (month_start + timedelta(days=4 + i * 5)).isoformat(),
+                    "months": 5,
+                    "went_up": up,
+                    "higher": higher,
+                }
+                for i, (m, c, now, usual, up, higher) in enumerate(UTILITIES)
+            ],
             "rising": [
                 {
                     "category_id": 7,

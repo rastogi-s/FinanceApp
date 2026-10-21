@@ -14,13 +14,16 @@ Financial independence. The number to reach is a year of spending divided by the
 default: $60k a year needs $1.5M).
 
 Ideas. Subscriptions are merchants charged about the same amount in at least three of the last few months.
-A rising category is one whose last full month came in well over its usual month. Both are plain arithmetic on
-the household's own transactions; no AI and nothing leaves the server.
+Utilities (power, gas, water, trash, the city, phone and internet) and other bills (rent, insurance, loans) recur
+too, but they aren't something to cancel: they're listed on their own, flagged when the price goes up. A rising
+category is one whose last full month came in well over its usual month. All of it is plain arithmetic on the
+household's own transactions; no AI and nothing leaves the server.
 
 Everything here is computed again on every request; the only thing stored is the household's choices
 (the "plan" preference).
 """
 
+import re
 import statistics
 from collections import defaultdict
 from datetime import date, timedelta
@@ -57,6 +60,16 @@ IDEA_MONTHS = 5  # how far back subscriptions are looked for (the current month 
 SUBSCRIPTION_MIN_MONTHS = 3
 SUBSCRIPTION_SPREAD = 0.15  # each charge within 15% of the usual one
 SUBSCRIPTION_NEW_PRICE = 0.50  # the newest charge may have gone up or down this much
+HIGHER_SHARE = 0.15  # a utility that varies month to month: 15% over its usual...
+HIGHER_CENTS = 10_00  # ...and at least $10 more
+UTILITY_CATEGORIES = ("Utilities", "Phone & internet")
+BILL_CATEGORIES = ("Rent & mortgage", "Insurance", "Loan payments", "Childcare & education")
+UTILITY = re.compile(
+    r"\benergy\b|electric|\bpower\b|natural gas|\bgas co|water|sewer|trash|\bwaste\b|sanitation|utilit|"
+    r"\b(city|town|county|village) of\b|municipal|comcast|xfinity|verizon|at&t|t-mobile|spectrum|cox comm|"
+    r"google fi|mint mobile|frontier comm|centurylink|optimum",
+    re.IGNORECASE,
+)
 RISING_SHARE = 0.20  # 20% over the usual month...
 RISING_CENTS = 50_00  # ...and at least $50 more
 RISING_BASE_MONTHS = 3
@@ -228,55 +241,21 @@ def line(label: str, cents: float) -> dict:
 
 
 def month_row(ledger: budget.Ledger, m: date, payers: set[str], moved: int) -> dict:
-    """One month of money in and out, with pay told apart from other money coming in.
-
-    Pay is a paycheck deposit or any deposit from one of `payers` (even one left uncategorized, which would
-    otherwise count as a refund against spending). Transfers between the household's own accounts are already
-    left out of the ledger and of spending; `moved` is how much of that came in, shown so it's clear it wasn't.
-    """
-    pay = other = taxes = spent = 0
-    for t in ledger.month(m):
-        if ledger.is_taxes(t):
-            taxes -= t.amount_cents
-        elif t.amount_cents > 0 and ledger.kind(t) in ("income", "other") and is_pay(ledger, t, payers):
-            pay += t.amount_cents
-        elif ledger.is_income(t):
-            other += t.amount_cents
-        elif ledger.is_spending(t):
-            spent -= t.amount_cents
+    """One month of money in and out (budget.flows, the same sums as the savings rate on Budget). `moved` is how much
+    came in from the household's own accounts, shown so it's clear it wasn't counted."""
+    f = budget.flows(ledger, m, payers)
     return {
         "month": m.isoformat(),
-        "pay_cents": pay,
-        "other_in_cents": other,
-        "taxes_cents": taxes,
-        "spending_cents": spent,
+        "pay_cents": f["pay"],
+        "other_in_cents": sum(f["other"].values()),
+        "taxes_cents": f["taxes"],
+        "spending_cents": sum(f["spent"].values()),
         "moved_cents": moved,
     }
 
 
-def payer(t: Transaction) -> str:
-    return normalize_merchant(t.merchant or t.description)
-
-
-def is_pay(ledger: budget.Ledger, t: Transaction, payers: set[str]) -> bool:
-    c = ledger.categories.get(t.category_id) if t.category_id else None
-    return (c is not None and c.name == "Paycheck") or payer(t) in payers
-
-
 def pay_merchants(ledger: budget.Ledger, paychecks: list[dict]) -> set[str]:
-    """Who pays the household: payers of paycheck deposits and of deposits matching a pay stub's take-home."""
-    deposits = [t for t in ledger.txns if t.amount_cents > 0 and ledger.kind(t) in ("income", "other")]
-    payers = {payer(t) for t in deposits if is_pay(ledger, t, set())}
-    for p in paychecks:
-        on = date.fromisoformat(p["date"])
-        payers.update(
-            payer(t)
-            for t in deposits
-            if abs(t.amount_cents - p["net_cents"]) <= budget.MATCH_CENTS
-            and abs((t.date - on).days) <= budget.MATCH_DAYS
-        )
-    payers.discard("")
-    return payers
+    return budget.pay_merchants(ledger, [(date.fromisoformat(p["date"]), p["net_cents"]) for p in paychecks])
 
 
 def moved_in(db: DbSession, accounts: list, months: list[date]) -> dict[date, int]:
@@ -515,42 +494,67 @@ def projection(i: dict) -> dict | None:
 # ---- ideas
 
 
-def subscriptions(ledger: budget.Ledger, on: date) -> list[dict]:
+def recurring_kind(merchant: str, category: Category | None) -> str:
+    """ "utility", "bill" or "subscription": only a subscription is something to think about cancelling."""
+    name = category.name if category else None
+    if name in UTILITY_CATEGORIES or UTILITY.search(merchant):
+        return "utility"
+    if name in BILL_CATEGORIES:
+        return "bill"
+    return "subscription"
+
+
+def recurring(ledger: budget.Ledger, on: date) -> tuple[list[dict], list[dict]]:
+    """Subscriptions, and utilities and other bills, from the last few months of charges.
+
+    A subscription is charged once a month, about the same each time. A utility or bill only has to come every
+    month or so (a power bill moves with the weather, and a city can bill water and trash separately).
+    """
     first = budget.add_months(budget.month_start(on), -(IDEA_MONTHS - 1))
     charges: dict[str, list] = defaultdict(list)
     for t in ledger.txns:
         if t.date >= first and t.amount_cents < 0 and not t.pending and ledger.is_spending(t):
             charges[normalize_merchant(t.merchant)].append(t)
-    found = []
+    subs, bills = [], []
     for key, txns in charges.items():
         by_month: dict[date, int] = defaultdict(int)
         for t in txns:
             by_month[budget.month_start(t.date)] -= t.amount_cents
-        # One charge a month, every month it shows up: a shop visited weekly isn't a subscription.
-        if len(by_month) < SUBSCRIPTION_MIN_MONTHS or len(txns) != len(by_month) or not key:
-            continue
-        amounts = [by_month[m] for m in sorted(by_month)]
-        usual = statistics.median(amounts[:-1])
-        # The same charge every month, except that the newest may be a price change.
-        if usual <= 0 or any(abs(a - usual) > usual * SUBSCRIPTION_SPREAD for a in amounts[:-1]):
-            continue
-        if abs(amounts[-1] - usual) > usual * SUBSCRIPTION_NEW_PRICE:
+        if len(by_month) < SUBSCRIPTION_MIN_MONTHS or not key:
             continue
         latest = max(txns, key=lambda t: t.date)
         category = ledger.categories.get(latest.category_id) if latest.category_id else None
-        found.append(
-            {
-                "merchant": latest.merchant,
-                "category": category.name if category else None,
-                "monthly_cents": amounts[-1],  # what it costs now
-                "yearly_cents": amounts[-1] * 12,
-                "last_date": latest.date.isoformat(),
-                "months": len(by_month),
-                # The newest charge is over the one before it: a price rise worth a look.
-                "went_up": amounts[-1] - amounts[-2] >= 100 and amounts[-1] > amounts[-2] * 1.02,
-            }
-        )
-    return sorted(found, key=lambda s: -s["monthly_cents"])
+        kind = recurring_kind(latest.merchant, category)
+        amounts = [by_month[m] for m in sorted(by_month)]
+        usual = statistics.median(amounts[:-1])
+        steady = usual > 0 and all(abs(a - usual) <= usual * SUBSCRIPTION_SPREAD for a in amounts[:-1])
+        # The newest charge is over the one before it: a price rise worth a look.
+        went_up = steady and amounts[-1] - amounts[-2] >= 100 and amounts[-1] > amounts[-2] * 1.02
+        found = {
+            "merchant": latest.merchant,
+            "category": category.name if category else None,
+            "monthly_cents": amounts[-1],  # what it costs now
+            "yearly_cents": amounts[-1] * 12,
+            "last_date": latest.date.isoformat(),
+            "months": len(by_month),
+            "went_up": went_up,
+        }
+        if kind != "subscription":
+            # A bill that moves around (power in summer) is "higher than usual", not a new price.
+            higher = (
+                not steady
+                and usual > 0
+                and amounts[-1] - usual >= HIGHER_CENTS
+                and amounts[-1] >= usual * (1 + HIGHER_SHARE)
+            )
+            bills.append({**found, "kind": kind, "usual_cents": round(usual), "higher": higher})
+            continue
+        # One charge a month, every month it shows up: a shop visited weekly isn't a subscription. The same charge
+        # every month, except that the newest may be a price change.
+        if len(txns) != len(by_month) or not steady or abs(amounts[-1] - usual) > usual * SUBSCRIPTION_NEW_PRICE:
+            continue
+        subs.append(found)
+    return sorted(subs, key=lambda s: -s["monthly_cents"]), sorted(bills, key=lambda s: -s["monthly_cents"])
 
 
 def rising(ledger: budget.Ledger, months: list[date]) -> list[dict]:
@@ -582,9 +586,10 @@ def ideas(db: DbSession, on: date) -> dict:
     months = budget.full_months(db, [a.id for a in accounts], on)
     first = budget.add_months(budget.month_start(on), -(IDEA_MONTHS - 1))
     ledger = budget.Ledger(db, accounts, min([first, *months]))
-    subs = subscriptions(ledger, on)
+    subs, bills = recurring(ledger, on)
     return {
         "subscriptions": subs,
         "subscriptions_yearly_cents": sum(s["yearly_cents"] for s in subs),
+        "utilities": bills,
         "rising": rising(ledger, months),
     }

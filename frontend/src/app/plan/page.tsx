@@ -17,7 +17,7 @@ import { Slider } from "@/components/ui/slider";
 import { toast } from "@/components/ui/toast";
 import { api } from "@/lib/api";
 import { resetHousehold, useApi } from "@/lib/household";
-import { LEVEL_NAMES, type Level, type PlanInputs, type PlanState, type SavingsMonth, type Scenario, project } from "@/lib/plan";
+import { LEVEL_NAMES, type Level, type PlanInputs, type PlanState, type SavingsMonth, type Scenario, type Utility, project } from "@/lib/plan";
 import { cn } from "@/lib/utils";
 
 const monthName = new Intl.DateTimeFormat("en-US", {
@@ -531,6 +531,7 @@ function Breakdown({
 
 function Ideas({ p, s }: { p: Linked; s: Scenario }) {
   const { subscriptions, rising, subscriptions_yearly_cents: yearly } = p.ideas;
+  const utilities = p.ideas.utilities ?? [];
   const i = p.inputs;
   const monthly = Math.round(yearly / 12);
   // What cancelling every subscription would do: more saved now, and less needed later.
@@ -544,7 +545,7 @@ function Ideas({ p, s }: { p: Linked; s: Scenario }) {
     }).fire.mid;
     return now !== null && then !== null && now > i.year ? now - then : null;
   }, [i, s, monthly, yearly]);
-  if (!subscriptions.length && !rising.length) {
+  if (!subscriptions.length && !rising.length && !utilities.length) {
     return (
       <Notice icon={<Scissors className="size-5" />} title="Ways to save more">
         Ideas show up here once there are a few months of transactions: subscriptions you may have forgotten, and categories creeping up.
@@ -590,6 +591,7 @@ function Ideas({ p, s }: { p: Linked; s: Scenario }) {
             </ul>
           </div>
         )}
+        {utilities.length > 0 && <Utilities utilities={utilities} />}
         {rising.length > 0 && (
           <div>
             <p className="text-sm font-medium">Creeping up</p>
@@ -615,6 +617,43 @@ function Ideas({ p, s }: { p: Linked; s: Scenario }) {
         )}
       </CardContent>
     </Card>
+  );
+}
+
+/** Utilities and other bills: not something to cancel, but a price rise is worth a call or a look at the plan. */
+function Utilities({ utilities }: { utilities: Utility[] }) {
+  const onlyUtilities = utilities.every((u) => u.kind === "utility");
+  const flagged = utilities.filter((u) => u.went_up || u.higher).length;
+  return (
+    <div>
+      <p className="text-sm">
+        <span className="font-medium">{onlyUtilities ? "Utilities" : "Utilities and bills"}</span>{" "}
+        <span className="text-muted-foreground">
+          {flagged
+            ? `aren't ones to cancel, but ${flagged === 1 ? "one costs" : `${flagged} cost`} more than usual. A new plan or a call can bring it down.`
+            : "aren't ones to cancel. Prices look steady."}
+        </span>
+      </p>
+      <ul className="mt-2 divide-y">
+        {utilities.slice(0, 8).map((x) => (
+          <li key={x.merchant} className="flex items-center justify-between gap-3 py-2.5 text-sm">
+            <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+              <span className="truncate">{x.merchant}</span>
+              {x.went_up ? <Badge variant="negative">Price went up</Badge> : x.higher ? <Badge variant="warning">Higher than usual</Badge> : null}
+            </span>
+            <span className="shrink-0 text-right text-muted-foreground">
+              <Money cents={x.monthly_cents} style="exact" className="font-medium text-foreground" />
+              /mo
+              {(x.went_up || x.higher) && (
+                <span className="block text-xs">
+                  usually <Money cents={x.usual_cents} />
+                </span>
+              )}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 
