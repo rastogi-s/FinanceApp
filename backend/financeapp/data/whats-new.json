@@ -12,6 +12,18 @@
     ]
   },
   {
+    "version": "0.18.0",
+    "title": "Back takes you back to where you were",
+    "features": [
+      {
+        "id": "back-keeps-place",
+        "title": "Back keeps your place",
+        "body": "Open a holding from far down Portfolio, go back, and you land on the same spot with your search, sort, filters and open rows as you left them. Home, Spending, Budget, Plan and Settings keep their place too, whether you use the back link at the top, the back button or a swipe. Tapping a tab still opens the page fresh.",
+        "tryIt": "/portfolio"
+      }
+    ]
+  },
+  {
     "version": "0.17.0",
     "title": "Monthly savings you can check",
     "features": [

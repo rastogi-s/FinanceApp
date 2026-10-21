@@ -144,6 +144,9 @@ jobs:
       - name: Open every page on a laptop and a phone
         working-directory: e2e
         run: node smoke.mjs
+      - name: Go back and land where you were
+        working-directory: e2e
+        run: node back.mjs
       - name: Attach the screenshots
         if: always()
         uses: actions/upload-artifact@v7

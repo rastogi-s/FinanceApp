@@ -166,6 +166,7 @@ def state(db: DbSession, request: Request) -> dict:
         "events": [alerts.event_json(e) for e in events],
         "quiet": alerts.quiet_hours(db),
         "channels": {"ntfy": bool(settings.ntfy_url), "email": bool(settings.smtp_host and settings.alert_email)},
+        "delivery": notify.last_attempt(),
         "symbols": held,
         "categories": [
             {"id": c.id, "name": c.name}
@@ -291,5 +292,6 @@ def send_test(request: Request, who: Signed = Depends(signed_in)) -> dict:
     channel = notify.deliver(settings, "Test alert", "Alerts from your Finance app reach this phone.", tags="bell")
     audit(db, request, "alert_test", who.user.id, channel=channel)
     if channel is None:
-        raise HTTPException(502, "Couldn't send it. Check NTFY_URL (or the email settings) in .env.")
+        reason = (notify.last_attempt() or {}).get("reason")
+        raise HTTPException(502, reason or "Couldn't send it. Check NTFY_URL (or the email settings) in .env.")
     return {"channel": channel}

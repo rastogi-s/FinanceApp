@@ -3,10 +3,10 @@
 import Link from "next/link";
 import { Suspense, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { AlertTriangle, ArrowDownRight, ArrowUpRight, Bell, ChevronLeft, ChevronRight, Layers, Plus } from "lucide-react";
+import { AlertTriangle, ArrowDownRight, ArrowUpRight, Bell, ChevronRight, Layers, Plus } from "lucide-react";
 import { RuleSheet, type RuleIn } from "@/components/alert-sheets";
 import { Money } from "@/components/money";
-import { Notice } from "@/components/page";
+import { BackLink, Notice } from "@/components/page";
 import { PriceChart, pointLabel } from "@/components/price-chart";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -29,11 +29,7 @@ export default function HoldingPage() {
 }
 
 function Back() {
-  return (
-    <Link href="/portfolio" className="-ml-1 mb-2 inline-flex items-center gap-0.5 text-sm font-medium text-primary">
-      <ChevronLeft className="size-4" aria-hidden /> Portfolio
-    </Link>
-  );
+  return <BackLink href="/portfolio">Portfolio</BackLink>;
 }
 
 function Loading() {

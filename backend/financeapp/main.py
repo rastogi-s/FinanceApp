@@ -116,7 +116,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if scheduler:
             scheduler.shutdown()
         if database is not None:
-            database.engine.dispose()  # close the pool's connections, not leave them to the garbage collector
+            database.engine.dispose()  # hand the connections back now, not whenever the pool is collected
 
     # No interactive docs or schema: nothing about the API is published.
     app = FastAPI(title="Finance App", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)

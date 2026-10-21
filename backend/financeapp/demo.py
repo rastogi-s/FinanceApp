@@ -856,6 +856,12 @@ def alerts() -> dict:
         ],
         "quiet": {"enabled": True, "start": "22:00", "end": "07:00", "timezone": "America/New_York"},
         "channels": {"ntfy": True, "email": False},
+        "delivery": {
+            "at": (datetime.now(UTC) - timedelta(hours=2)).isoformat(),
+            "ok": True,
+            "channel": "ntfy",
+            "reason": None,
+        },
         "symbols": sorted({h[0] for h in HOLDINGS if h[2] != "Cash"}),
         "categories": [
             {"id": i, "name": n} for i, (n, k) in enumerate(CATEGORY_NAMES, 1) if k in ("fixed", "flexible")
