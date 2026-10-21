@@ -119,7 +119,9 @@ jobs:
       - name: Collect the server files
         run: |
           mkdir -p release
-          cp docker-compose.yml update.sh .env.example release/
+          cp docker-compose.yml update.sh release/
+          # Without the leading dot: a shell glob skips dotfiles, so it would miss both SHA256SUMS.txt and the upload.
+          cp .env.example release/env.example
           cp deploy/systemd/* release/
           (cd release && sha256sum -- * > SHA256SUMS.txt)
       - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3

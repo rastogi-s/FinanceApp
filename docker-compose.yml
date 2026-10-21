@@ -1,5 +1,5 @@
 # Finance App on a server: the app and Postgres. First run:
-#   cp .env.example .env    (fill it in; see the comments there)
+#   cp env.example .env    (fill it in; see the comments there. In the repository it is .env.example)
 #   docker compose up -d
 # Updates: ./update.sh (backs up, pulls the new version, checks it's healthy, rolls back if not).
 #
