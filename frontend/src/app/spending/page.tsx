@@ -20,6 +20,8 @@ import {
   KINDS,
   RANGES,
   type Results,
+  SORTS,
+  byDate,
   cents,
   dates,
   fromParams,
@@ -163,7 +165,19 @@ function Spending({ h }: { h: LinkedHousehold }) {
         )}
 
         <div className={cn("grid grid-cols-1 gap-4 transition-opacity", stale && "opacity-60")} aria-busy={stale}>
+          {results && !byDate(f) && results.transactions.length > 0 && (
+            <section aria-label={SORTS.find((x) => x.id === f.sort)!.chip}>
+              <Card>
+                <ul className="divide-y">
+                  {results.transactions.map((t) => (
+                    <Row key={t.id} t={t} onPick={() => setPicking(t)} showDate />
+                  ))}
+                </ul>
+              </Card>
+            </section>
+          )}
           {results &&
+            byDate(f) &&
             byDay(results.transactions).map(([date, items]) => (
               <section key={date} aria-label={day.format(new Date(date))}>
                 <h2 className="mb-2 px-1 text-xs font-medium tracking-wide text-muted-foreground uppercase">
@@ -192,7 +206,7 @@ function Spending({ h }: { h: LinkedHousehold }) {
         onClose={() => setSheet(false)}
         f={f}
         set={set}
-        clear={() => setF((x) => ({ ...EMPTY, q: x.q }))}
+        clear={() => setF((x) => ({ ...EMPTY, q: x.q, sort: x.sort }))}
         categories={categories ?? []}
         results={results}
       />
@@ -313,6 +327,7 @@ function ActiveChips({
     const label = lo !== null && hi !== null ? `${$(lo)} – ${$(hi)}` : lo !== null ? `${$(lo)} or more` : `Up to ${$(hi!)}`;
     chips.push({ key: "amount", label, off: () => set({ min: "", max: "" }) });
   }
+  if (f.sort) chips.push({ key: "sort", label: SORTS.find((x) => x.id === f.sort)!.chip, off: () => set({ sort: "" }) });
   if (!chips.length && !review && f.kind !== "review") return null;
 
   return (
@@ -407,7 +422,7 @@ function Summary({ f, r }: { f: Filters; r: Results | null }) {
   );
 }
 
-function Row({ t, onPick }: { t: Transaction; onPick: () => void }) {
+function Row({ t, onPick, showDate }: { t: Transaction; onPick: () => void; showDate?: boolean }) {
   return (
     <li>
       <button
@@ -422,6 +437,7 @@ function Row({ t, onPick }: { t: Transaction; onPick: () => void }) {
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-medium">{t.merchant}</p>
           <p className="truncate text-xs text-muted-foreground">
+            {showDate && `${short.format(new Date(t.date))} · `}
             {t.account}
             {t.pending && " · pending"}
           </p>
@@ -487,6 +503,16 @@ function FilterSheet({
               >
                 {k.label}
               </button>
+            ))}
+          </div>
+        </Group>
+
+        <Group label="Sort">
+          <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Sort">
+            {SORTS.map((x) => (
+              <Chip key={x.id} on={f.sort === x.id} onClick={() => set({ sort: x.id })} radio>
+                {x.label}
+              </Chip>
             ))}
           </div>
         </Group>
@@ -592,11 +618,13 @@ function Group({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-function Chip({ on, onClick, children }: { on: boolean; onClick: () => void; children: React.ReactNode }) {
+function Chip({ on, onClick, radio, children }: { on: boolean; onClick: () => void; radio?: boolean; children: React.ReactNode }) {
   return (
     <button
       type="button"
-      aria-pressed={on}
+      role={radio ? "radio" : undefined}
+      aria-checked={radio ? on : undefined}
+      aria-pressed={radio ? undefined : on}
       onClick={onClick}
       className={cn(
         "inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full border px-3.5 text-sm font-medium transition-colors",

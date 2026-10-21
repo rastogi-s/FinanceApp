@@ -151,6 +151,15 @@ def test_searching_transactions(client, home):
     one_day = find(start="2026-10-17", end="2026-10-17")
     assert one_day["count"] == 4 and one_day["first"] == one_day["last"] == "2026-10-17"
 
+    amounts = [abs(t["amount_cents"]) for t in find(sort="largest")["transactions"]]
+    assert amounts == sorted(amounts, reverse=True) and amounts[0] == 320000
+    assert [abs(t["amount_cents"]) for t in find(sort="smallest")["transactions"]] == sorted(amounts)
+    dates = [t["date"] for t in find(sort="oldest")["transactions"]]
+    assert dates == sorted(dates) and dates != [t["date"] for t in everything["transactions"]]
+    names = [t["merchant"].lower() for t in find(sort="merchant")["transactions"]]
+    assert names == sorted(names)
+    assert client.get("/api/transactions", params={"sort": "random"}).status_code == 422
+
     assert client.get("/api/transactions", params={"q": "x" * 101}).status_code == 422
     assert client.get("/api/transactions", params={"category": "1" * 13}).status_code == 422
 
