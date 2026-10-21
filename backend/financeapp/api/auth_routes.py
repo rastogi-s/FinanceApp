@@ -703,6 +703,7 @@ ACTION_TEXT = {
     "agent_key_added": "Agent key made",
     "agent_key_revoked": "Agent key revoked",
     "brief_changed": "Morning brief settings changed",
+    "budget_ai_suggested": "Budget suggested by AI",
     "alert_rule_added": "Alert added",
     "alert_rule_changed": "Alert changed",
     "alert_rule_removed": "Alert removed",

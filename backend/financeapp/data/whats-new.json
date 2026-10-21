@@ -1,5 +1,17 @@
 [
   {
+    "version": "0.9.0",
+    "title": "A budget drafted with AI",
+    "features": [
+      {
+        "id": "ai-budget",
+        "title": "Draft with AI",
+        "body": "Budget has a Draft with AI button. It looks at your spending by month, the lines you changed by hand, your pay stubs and your savings goal, then suggests a limit for each line with the reason. Only totals are sent, and you see exactly what first. Tick the ones you want; the old budget stays in History.",
+        "tryIt": "/budget"
+      }
+    ]
+  },
+  {
     "version": "0.8.0",
     "title": "Mornings and agents",
     "features": [

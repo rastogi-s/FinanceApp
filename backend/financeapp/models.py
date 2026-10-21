@@ -286,7 +286,7 @@ class BudgetVersion(Base):
 
     __tablename__ = "budget_versions"
     id: Mapped[int] = mapped_column(primary_key=True)
-    source: Mapped[str] = mapped_column(String(16))  # draft | edit | restore
+    source: Mapped[str] = mapped_column(String(16))  # draft | edit | restore | ai
     created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     created_at: Mapped[datetime] = mapped_column(default=now)
 
