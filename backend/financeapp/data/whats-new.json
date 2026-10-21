@@ -1,5 +1,17 @@
 [
   {
+    "version": "0.17.0",
+    "title": "Monthly savings you can check",
+    "features": [
+      {
+        "id": "plan-savings-breakdown",
+        "title": "Saving a month, line by line",
+        "body": "Plan now starts from the pay that actually lands in your accounts, adds what your pay stubs say goes into your 401(k), HSA or ESPP, and takes off your spending. Under the slider you can see each line and how they add up. One unusual pay stub, like a bonus, no longer moves the number.",
+        "tryIt": "/plan"
+      }
+    ]
+  },
+  {
     "version": "0.15.0",
     "title": "Find anything you spent",
     "features": [

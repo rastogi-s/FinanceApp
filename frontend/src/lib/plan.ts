@@ -10,8 +10,14 @@ export type PlanInputs = {
   year: number;
   monthly_savings_cents: number | null;
   measured_savings_cents: number | null;
-  // Where the app's own number came from: true savings rate months, pay stubs, take-home deposits, the last 90 days.
-  savings_source: { kind: "savings_rate" | "pay_stubs" | "take_home" | "recent" | "none"; note: string };
+  // Where the app's own number came from (true savings rate months, what lands in the accounts plus the 401(k) from
+  // pay stubs, pay stubs alone, the last 90 days), a few words for a caption, and the lines that add up to it.
+  savings_source: {
+    kind: "savings_rate" | "pay_stubs" | "take_home" | "recent" | "none";
+    short: string;
+    note: string;
+    breakdown: { label: string; cents: number }[];
+  };
   savings_typed: boolean;
   returns: Returns;
   returns_source: { typed: boolean; derived_mid: number; note: string; mix: Record<"stocks" | "bonds" | "cash" | "other", number> | null };
@@ -70,15 +76,6 @@ export type PlanState =
 export const YEARS = 30;
 export const SPREAD = 2;
 export const MAX_YEARS = 60;
-/** A few words on where the app's monthly savings number came from, for a caption. */
-export const SAVINGS_SHORT: Record<PlanInputs["savings_source"]["kind"], string> = {
-  savings_rate: "from your pay stubs and spending",
-  pay_stubs: "from your pay stubs",
-  take_home: "take-home pay minus spending",
-  recent: "the last 90 days",
-  none: "",
-};
-
 export const LEVEL_NAMES: Record<Level, { title: string; body: string }> = {
   lean: { title: "Lean", body: "Bills and essentials only" },
   regular: { title: "Regular", body: "Life as you spend now" },

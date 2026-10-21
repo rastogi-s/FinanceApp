@@ -46,9 +46,9 @@ export function Slider({
         style={{ "--fill": `${fill}%` } as React.CSSProperties}
       />
       {hint && (
-        <p id={`${id}-hint`} className="text-xs text-muted-foreground">
+        <div id={`${id}-hint`} className="text-xs text-muted-foreground">
           {hint}
-        </p>
+        </div>
       )}
     </div>
   );

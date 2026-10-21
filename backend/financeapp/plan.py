@@ -3,8 +3,8 @@
 Projection. Today's net worth grows each month at a yearly return after inflation, plus the monthly savings,
 for 30 years, in three bands because no one knows future returns. Every starting number comes from the
 household's own data, says where it came from, and can be typed over:
-- monthly savings: from the true savings rate (budget.py) in months with pay stubs, else from the pay stubs
-  themselves against a typical month of spending, else take-home pay minus spending (derive_savings);
+- monthly savings: from the true savings rate (budget.py) in months with pay stubs, else what lands in the
+  accounts minus spending plus the 401(k)/HSA the stubs say is put away, else the stubs alone (derive_savings);
 - the middle return: from today's mix of stocks, bonds and cash (funds by their SEC filing), two points either
   side for the low and high bands (derive_returns);
 - spending later: lean = bills and essentials, regular = the median month, fat = regular x 1.5, all from real
@@ -177,54 +177,122 @@ def spending_levels(spending: Spending, overrides: dict) -> dict:
     return out
 
 
-def from_pay_stubs(state: dict, include_match: bool) -> tuple[int, int] | None:
-    """Each person's latest stub that says how often they're paid: (take-home, put away before pay) a month."""
-    seen: set = set()
-    net = put_away = 0
+PAY_NAMES = {
+    "weekly": "every week",
+    "biweekly": "every two weeks",
+    "semimonthly": "twice a month",
+    "monthly": "monthly",
+}
+STUBS_PER_PERSON = 6  # recent stubs per person to take the typical paycheck from
+
+
+def from_pay_stubs(state: dict, include_match: bool) -> dict | None:
+    """Take-home pay and what's put away before pay, in an average month, from each person's typical paycheck.
+
+    The typical paycheck is the median of a person's recent stubs on their latest schedule, so one bonus or RSU
+    stub doesn't move it. An average month on a two-weekly schedule is 26 / 12 paychecks, a little over two.
+    """
+    by_person: dict = {}
     for p in state["paychecks"]:  # newest first
-        if p["user_id"] in seen or not p["frequency"]:
+        if not p["frequency"]:
             continue
-        seen.add(p["user_id"])
-        per_month = budget.PER_YEAR[p["frequency"]] / 12
-        net += round(p["net_cents"] * per_month)
-        put_away += round((p["savings_cents"] + (p["employer_match_cents"] if include_match else 0)) * per_month)
-    return (net, put_away) if seen else None
+        mine = by_person.setdefault(p["user_id"], [])
+        if len(mine) < STUBS_PER_PERSON and (not mine or mine[0]["frequency"] == p["frequency"]):
+            mine.append(p)
+    if not by_person:
+        return None
+    net = put_away = 0
+    paychecks = []
+    for stubs in by_person.values():
+        per_month = budget.PER_YEAR[stubs[0]["frequency"]] / 12
+        typical_net = statistics.median(p["net_cents"] for p in stubs)
+        typical_put = statistics.median(
+            p["savings_cents"] + (p["employer_match_cents"] if include_match else 0) for p in stubs
+        )
+        net += round(typical_net * per_month)
+        put_away += round(typical_put * per_month)
+        paychecks.append(
+            f"{dollars(round(typical_net))} a paycheck, paid {PAY_NAMES[stubs[0]['frequency']]} "
+            f"({budget.PER_YEAR[stubs[0]['frequency']]} a year)"
+        )
+    return {"net": net, "put_away": put_away, "paychecks": paychecks}
+
+
+def line(label: str, cents: float) -> dict:
+    return {"label": label, "cents": round(cents)}
 
 
 def derive_savings(state: dict, ledger: budget.Ledger, spending: Spending, on: date) -> dict:
-    """The monthly savings to project, from the best evidence there is, and a sentence on where it came from.
+    """The monthly savings to project, from the best evidence there is, a sentence on where it came from, and the
+    sum it adds up from (breakdown lines that add up to the total).
 
     1. Months whose pay stubs are in (the true savings rate: gross pay - taxes - deductions - spending).
-    2. Pay stubs that say how often you're paid: take-home plus 401(k)/HSA a month, minus a typical month.
-    3. Full months of take-home pay landing in your accounts, minus spending.
+    2. Full months of what actually landed in your accounts minus spending, plus what your pay stubs say goes into
+       a 401(k), HSA or ESPP before pay (it never reaches the bank, so deposits alone miss it).
+    3. Pay stubs alone, when there's no full month of deposits yet: the typical paycheck as an average month,
+       minus a typical month of spending.
     4. The last 90 days: money in minus money spent.
     """
     history = state["savings_history"][-SAVINGS_MONTHS:]
     gross = [m for m in history if m["basis"] == "gross"]
+    match = "401(k) match" if state["include_match"] else ""
+
+    def avg(rows: list[dict], key: str) -> int:
+        return round(sum(m[key] for m in rows) / len(rows))
+
     if gross:
         months = [date.fromisoformat(m["month"]) for m in gross]
+        breakdown = [
+            line(
+                "Pay before taxes and other income" + (", with your employer's " + match if match else ""),
+                avg(gross, "income_cents"),
+            ),
+            line("Taxes", -avg(gross, "taxes_cents")),
+            line("Other paycheck deductions (health insurance and the like)", -avg(gross, "deductions_cents")),
+            line("Spending", -avg(gross, "spending_cents")),
+        ]
         return {
-            "cents": round(sum(m["saved_cents"] for m in gross) / len(gross)),
+            "cents": avg(gross, "saved_cents"),
             "kind": "savings_rate",
-            "note": f"Average of {span(months)}: pay before taxes, minus taxes, paycheck deductions and spending.",
+            "short": "from your pay stubs and spending",
+            "note": f"Average of {span(months)}, the months with pay stubs in.",
+            "breakdown": [b for b in breakdown if b["cents"] or b["label"] == "Spending"],
         }
     stubs = from_pay_stubs(state, state["include_match"])
-    if stubs and spending.monthly:
-        net, put_away = stubs
-        extra = f" and {dollars(put_away)} into your 401(k), HSA or ESPP" if put_away else ""
-        return {
-            "cents": net + put_away - spending.monthly,
-            "kind": "pay_stubs",
-            "note": f"Your pay stubs: {dollars(net)} take-home a month{extra}, minus {dollars(spending.monthly)} of "
-            f"spending ({spending.where}).",
-        }
     if history:
         months = [date.fromisoformat(m["month"]) for m in history]
+        came_in, taxes, spent = (
+            avg(history, "income_cents"),
+            avg(history, "taxes_cents"),
+            avg(history, "spending_cents"),
+        )
+        put_away = stubs["put_away"] if stubs else 0
+        breakdown = [line("Take-home pay and other money landing in your accounts", came_in)]
+        if put_away:
+            breakdown.append(line("Into your 401(k), HSA or ESPP before pay, from your pay stubs", put_away))
+        if taxes:
+            breakdown.append(line("Taxes paid from your accounts", -taxes))
+        breakdown.append(line("Spending", -spent))
         return {
-            "cents": round(sum(m["saved_cents"] for m in history) / len(history)),
+            "cents": avg(history, "saved_cents") + put_away,
             "kind": "take_home",
-            "note": f"Take-home pay landing in your accounts minus spending, {span(months)}. Add a pay stub to count "
-            "your 401(k) and HSA too.",
+            "short": "what lands, plus your 401(k) and HSA" if put_away else "what lands minus spending",
+            "note": f"Average month, {span(months)}."
+            + ("" if stubs else " Add a pay stub to count your 401(k) and HSA too, which never reach the bank."),
+            "breakdown": breakdown,
+        }
+    if stubs and spending.monthly:
+        breakdown = [line("Take-home pay, from your pay stubs", stubs["net"])]
+        if stubs["put_away"]:
+            breakdown.append(line("Into your 401(k), HSA or ESPP before pay", stubs["put_away"]))
+        breakdown.append(line("Spending", -spending.monthly))
+        return {
+            "cents": stubs["net"] + stubs["put_away"] - spending.monthly,
+            "kind": "pay_stubs",
+            "short": "from your pay stubs",
+            "note": f"An average month from your pay stubs: {'; '.join(stubs['paychecks'])}. "
+            f"Spending is {spending.where}. Once a full month of pay lands in your accounts, that's used instead.",
+            "breakdown": breakdown,
         }
     since = on - timedelta(days=RECENT_DAYS)
     money_in = sum(t.amount_cents for t in ledger.txns if t.date > since and ledger.is_income(t))
@@ -233,9 +301,14 @@ def derive_savings(state: dict, ledger: budget.Ledger, spending: Spending, on: d
         return {
             "cents": round((money_in - money_out) * 30 / RECENT_DAYS),
             "kind": "recent",
-            "note": "The last 90 days: income landing in your accounts minus spending, as a month.",
+            "short": "the last 90 days",
+            "note": "The last 90 days as a month: no full month of transactions yet.",
+            "breakdown": [
+                line("Money landing in your accounts", money_in * 30 / RECENT_DAYS),
+                line("Spending", -money_out * 30 / RECENT_DAYS),
+            ],
         }
-    return {"cents": None, "kind": "none", "note": "No pay or income seen yet."}
+    return {"cents": None, "kind": "none", "short": "", "note": "No pay or income seen yet.", "breakdown": []}
 
 
 def derive_returns(db: DbSession, holdings: list[dict], allocation: list[dict]) -> dict:
@@ -316,7 +389,7 @@ def inputs(db: DbSession, state: dict, net_worth: int, on: date, holdings: list[
         "year": on.year,
         "monthly_savings_cents": typed if typed is not None else measured["cents"],
         "measured_savings_cents": measured["cents"],
-        "savings_source": {"kind": measured["kind"], "note": measured["note"]},
+        "savings_source": {k: measured[k] for k in ("kind", "short", "note", "breakdown")},
         "savings_typed": typed is not None,
         "returns": {k: returns[k] for k in ("low", "mid", "high")},
         "returns_source": {
