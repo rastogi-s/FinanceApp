@@ -553,3 +553,64 @@ def test_savings_rate_sources_bonus_third_paycheck_and_etrade(client, home):
     # Plan's usual month leaves the bonus out.
     rows = {r["month"]: r for r in client.get("/api/plan").json()["inputs"]["savings_source"]["months"]}
     assert rows["2026-08-01"]["pay_cents"] == 2 * 3_000_00
+
+
+@needs_db
+def test_split_paycheck_counts_once_and_a_changed_paycheck_asks_for_its_stub(client, home, monkeypatch):
+    """A paycheck split between checking and savings is one paycheck, its stub matches the two deposits together,
+    and a paycheck that comes in different from the one before (with no stub yet) asks for its stub, once."""
+    from datetime import timedelta
+
+    from financeapp import notify
+
+    sent = []
+    monkeypatch.setattr(notify, "send", lambda settings, title, body, tags="": sent.append((title, body)))
+    home.setup()
+    history(client)
+    checking, savings = [], []
+    day = date(2026, 5, 8)
+    while day < date(2026, 10, 21):
+        raise_ = day >= date(2026, 10, 9)  # a raise on the last paycheck
+        checking.append((day.isoformat(), "NETAPP INC DIR DEP", 3_300 if raise_ else 3_000, None))
+        savings.append(((day + timedelta(days=1)).isoformat(), "NETAPP INC PAYROLL", 500, None))
+        day += timedelta(days=14)
+    add_transactions(client, checking)
+    add_to(client, "savings", savings, kind="depository")
+    with db_of(client).session() as db:
+        db.add(
+            Paycheck(
+                date=date(2026, 9, 25),
+                frequency="biweekly",
+                gross_cents=5_000_00,
+                taxes_cents=1_000_00,
+                savings_cents=500_00,
+                net_cents=3_500_00,  # 3,000 to checking and 500 to savings
+            )
+        )
+    state = client.get("/api/budget").json()
+    sep = {m["month"]: m for m in state["savings_history"]}["2026-09-01"]
+    pay = sep["breakdown"]["money_in"][0]
+    assert pay["items"] == [{"label": "NETAPP: 2 paychecks", "cents": 7_000_00}]
+    assert sep["usual"] is None  # two split paychecks are two paychecks, not four
+    assert state["paychecks"][0]["deposit"] is not None  # the stub matched checking and savings together
+
+    assert state["stub_requests"] == [
+        {"date": "2026-10-09", "employer": "NETAPP", "cents": 3_800_00, "before_cents": 3_500_00, "reason": "changed"}
+    ]
+    with db_of(client).session() as db:
+        assert budget.ask_for_stubs(db, client.app.state.settings) == 1
+        assert budget.ask_for_stubs(db, client.app.state.settings) == 0  # once
+    assert sent[0][0] == "Add this pay stub" and "Oct 9" in sent[0][1]
+
+    with db_of(client).session() as db:
+        db.add(
+            Paycheck(
+                date=date(2026, 10, 9),
+                frequency="biweekly",
+                gross_cents=5_400_00,
+                taxes_cents=1_100_00,
+                savings_cents=500_00,
+                net_cents=3_800_00,
+            )
+        )
+    assert client.get("/api/budget").json()["stub_requests"] == []

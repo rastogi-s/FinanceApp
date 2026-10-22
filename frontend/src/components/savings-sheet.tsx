@@ -156,7 +156,8 @@ function HowItUpdates() {
         </li>
         <li>
           Pay is only your payroll deposits. Adding a month&apos;s pay stubs swaps the estimate for the stub&apos;s real pay before taxes,
-          withholding and 401(k); a paycheck without its stub is filled in from your usual stub.
+          withholding and 401(k); a paycheck without its stub is filled in from your usual stub. When a paycheck comes in different from the
+          one before, or it&apos;s the first of the year or a bonus, Budget asks for that stub.
         </li>
         <li>
           A bonus counts in the month it landed, but is kept out of the usual month, and so is a third paycheck in a month that usually has

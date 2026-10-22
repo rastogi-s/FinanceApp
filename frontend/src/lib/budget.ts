@@ -102,6 +102,7 @@ export type BudgetState = {
   paychecks: Paycheck[];
   people: { id: number; name: string }[];
   schedules: Schedule[];
+  stub_requests?: StubRequest[];
   categories: { id: number; name: string; kind: "fixed" | "flexible"; essential: boolean }[];
 };
 
@@ -138,3 +139,12 @@ export function linesWith(lines: BudgetLine[], categoryId: number, limitCents: n
   const rest = lines.filter((l) => l.category_id !== categoryId).map((l) => ({ category_id: l.category_id, limit_cents: l.limit_cents }));
   return limitCents > 0 ? [...rest, { category_id: categoryId, limit_cents: limitCents }] : rest;
 }
+
+// A recent paycheck whose pay stub would change the numbers (pay changed, a new year, or a bonus).
+export type StubRequest = {
+  date: string;
+  employer: string;
+  cents: number;
+  before_cents: number | null;
+  reason: "changed" | "new_year" | "bonus";
+};

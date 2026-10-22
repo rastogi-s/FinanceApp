@@ -22,6 +22,12 @@
         "tryIt": "/budget"
       },
       {
+        "id": "stub-requests",
+        "title": "Asks for a pay stub only when it matters",
+        "body": "When a paycheck comes in different from the one before (a raise, a W-4 or 401(k) change, the Social Security cap), it's the first of the year, or it's a bonus, Budget shows an Add your pay stub card and you get a notification. Other paychecks are filled in from your usual stub, so there's no need to upload every one. A paycheck split across several accounts now counts once, and its stub matches the deposits together.",
+        "tryIt": "/budget"
+      },
+      {
         "id": "etrade-morgan-stanley",
         "title": "Money into E*TRADE counts as investing",
         "body": "Transfers worded Morgan Stanley, or naming the last digits of a linked E*TRADE account, now count as money moved into investing instead of spending."
