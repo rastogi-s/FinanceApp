@@ -18,6 +18,7 @@ Safe to spend. What's left in the everyday budget this month, after anything spe
 bill that came in over its limit.
 """
 
+import itertools
 import math
 import re
 import statistics
@@ -227,9 +228,38 @@ def match_deposits(stubs: list[Paycheck], deposits: list[Transaction]) -> dict[i
     return matched
 
 
+def match_paydays(
+    stubs: list[Paycheck], deposits: list[Transaction], payers: "Payroll | None"
+) -> dict[int, list[Transaction]]:
+    """paycheck id -> the deposits its take-home landed as: one deposit of the same amount, or else a payday's
+    deposits across accounts that add up to it (within $1, within 5 days)."""
+    matched = {pid: [t] for pid, t in match_deposits(stubs, deposits).items()}
+    if payers is None:
+        return matched
+    taken = {t.id for ts in matched.values() for t in ts}
+    groups: dict[tuple[str, date], list[Transaction]] = defaultdict(list)
+    for t in deposits:
+        if t.id in payers.paydays and t.id not in taken:
+            name, day, _total = payers.paydays[t.id]
+            groups[(name, day)].append(t)
+    for p in sorted(stubs, key=lambda p: p.date):
+        if p.id in matched:
+            continue
+        for key, ts in sorted(groups.items(), key=lambda kv: abs((kv[0][1] - p.date).days)):
+            close = abs((key[1] - p.date).days) <= MATCH_DAYS
+            if close and abs(sum(t.amount_cents for t in ts) - p.net_cents) <= MATCH_CENTS:
+                matched[p.id] = ts
+                del groups[key]
+                break
+    return matched
+
+
 # Words a bank puts around an employer's name on a pay deposit. Wording differs from bank to bank ("Deposit from
 # NETAPP INC PAYROLL", "NETAPP INC DIR DEP PPD"), so an employer is known by what's left once these are gone.
 PAYROLL_WORDS = re.compile(r"payroll|direct dep|dir dep|\bdirdep\b|salary|\bwages?\b", re.I)
+BONUS_FACTOR = 1.4  # a paycheck this much over the usual one is a bonus
+BONUS_MIN_DEPOSITS = 3  # paychecks to know what usual is
+PAYDAY_DAYS = 3  # deposits from one employer this close together are one paycheck, split across accounts
 NOT_PAY_WORDS = re.compile(r"reimb|expense|refund|bonus adj|reversal|return", re.I)
 GENERIC = frozenset({
     "deposit", "deposits", "from", "to", "payroll", "direct", "dep", "dir", "dirdep", "ach", "ppd", "ccd", "credit",
@@ -265,6 +295,35 @@ class Payroll:
         self.paycheck_ids = set(paycheck_ids)  # the Paycheck category: a deposit filed there by hand is pay
         self.not_pay = set(not_pay)
         self.stubs = list(stubs)  # (pay date, take-home cents)
+        self.typical: dict[str, int] = {}  # employer -> its usual paycheck (the median payday)
+        self.counts: dict[str, int] = {}  # employer -> paydays seen
+        # A paycheck can land in several accounts at once (a set amount to savings, the rest to checking), so pay
+        # is counted by payday: txn id -> (employer, payday, the whole paycheck).
+        self.paydays: dict[int, tuple[str, date, int]] = {}
+        self.every_days: dict[str, float] = {}  # employer -> days between paychecks, typically
+
+    def source(self, t: Transaction) -> str:
+        """Who a pay deposit is from: its employer, however the bank words it."""
+        return self.employer_of(t) or employer_key(text_of(t)) or payer(t)
+
+    def is_bonus(self, t: Transaction) -> bool:
+        """A paycheck well over the usual one from the same employer: a bonus, or RSU or commission pay."""
+        name, _day, cents = self.payday_of(t)
+        return self.counts.get(name, 0) >= BONUS_MIN_DEPOSITS and cents > self.typical[name] * BONUS_FACTOR
+
+    def payday_of(self, t: Transaction) -> tuple[str, date, int]:
+        return self.paydays.get(t.id) or (self.source(t), t.date, t.amount_cents)
+
+    def usual_per_month(self, name: str) -> int | None:
+        """Paychecks in a usual month: 2 when paid every two weeks (a month with a third one is the exception)."""
+        days = self.every_days.get(name)
+        if days is None:
+            return None
+        if 12 <= days <= 16:
+            return 2
+        if 6 <= days <= 8:
+            return 4
+        return None
 
     def employer_of(self, t: Transaction) -> str | None:
         words = set(text_of(t).split())
@@ -320,7 +379,34 @@ def pay_merchants(ledger: Ledger, stubs: list[tuple[date, int]], prefs: dict | N
         if by_stub or picked_as_pay(ledger, t) or (PAYROLL_WORDS.search(text) and not NOT_PAY_WORDS.search(text)):
             employers.add(employer_key(text))
     paycheck_ids = {c.id for c in ledger.categories.values() if c.name == "Paycheck"}
-    return Payroll(employers - not_pay, not_pay, stubs, paycheck_ids)
+    payroll = Payroll(employers - not_pay, not_pay, stubs, paycheck_ids)
+    by_source: dict[str, list[Transaction]] = defaultdict(list)
+    for t in ledger.txns:
+        if is_pay_deposit(ledger, t, payroll):
+            by_source[payroll.source(t)].append(t)
+    for name, deps in by_source.items():
+        paydays = group_paydays(deps)
+        for day, group in paydays:
+            total = sum(t.amount_cents for t in group)
+            for t in group:
+                payroll.paydays[t.id] = (name, day, total)
+        payroll.typical[name] = round(statistics.median(sum(t.amount_cents for t in g) for _d, g in paydays))
+        payroll.counts[name] = len(paydays)
+        days = [d for d, _g in paydays]
+        if len(days) >= 3:
+            payroll.every_days[name] = statistics.median((b - a).days for a, b in itertools.pairwise(days))
+    return payroll
+
+
+def group_paydays(deposits: list[Transaction]) -> list[tuple[date, list[Transaction]]]:
+    """One employer's deposits as paydays: those within a few days of each other are one paycheck."""
+    paydays: list[tuple[date, list[Transaction]]] = []
+    for t in sorted(deposits, key=lambda t: (t.date, t.id)):
+        if paydays and (t.date - paydays[-1][0]).days <= PAYDAY_DAYS:
+            paydays[-1][1].append(t)
+        else:
+            paydays.append((t.date, [t]))
+    return paydays
 
 
 def flows(ledger: Ledger, m: date, payers: Payroll | None, skip: set[int] | frozenset = frozenset()) -> dict:
@@ -330,8 +416,11 @@ def flows(ledger: Ledger, m: date, payers: Payroll | None, skip: set[int] | froz
     pairs, and the Transfer category is neither income nor spending). The Plan page's month rows and the savings
     rate both come from here, so they agree.
     """
-    pay = taxes = deposits = 0
+    pay = taxes = deposits = bonus = 0
+    pay_by: dict[str, dict] = {}  # employer -> {"cents", "count", "bonus_cents"}
+    seen: set[tuple[str, date]] = set()  # paydays counted, so a paycheck split across accounts counts once
     other: dict[str, int] = defaultdict(int)  # category name -> cents in
+    other_by: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))  # category -> payer -> cents
     spent: dict[int | None, int] = defaultdict(int)  # category id -> cents out (refunds come off)
     for t in ledger.month(m):
         if t.id in skip:
@@ -339,13 +428,34 @@ def flows(ledger: Ledger, m: date, payers: Payroll | None, skip: set[int] | froz
         if ledger.is_taxes(t):
             taxes -= t.amount_cents
         elif is_pay_deposit(ledger, t, payers):
-            pay += t.amount_cents
-            deposits += 1
+            name, day, _total = payers.payday_of(t)
+            src = pay_by.setdefault(name, {"cents": 0, "count": 0, "bonus_cents": 0})
+            if payers.is_bonus(t):
+                bonus += t.amount_cents
+                src["bonus_cents"] += t.amount_cents
+            else:
+                pay += t.amount_cents
+                src["cents"] += t.amount_cents
+                if (name, day) not in seen:
+                    seen.add((name, day))
+                    deposits += 1
+                    src["count"] += 1
         elif ledger.is_income(t):
-            other[ledger.categories[t.category_id].name] += t.amount_cents
+            name = ledger.categories[t.category_id].name
+            other[name] += t.amount_cents
+            other_by[name][t.merchant or t.description] += t.amount_cents
         elif ledger.is_spending(t):
             spent[t.category_id] -= t.amount_cents
-    return {"pay": pay, "pay_deposits": deposits, "other": dict(other), "taxes": taxes, "spent": dict(spent)}
+    return {
+        "pay": pay,  # usual paychecks; a bonus is kept apart so it doesn't set what a usual month looks like
+        "pay_deposits": deposits,
+        "bonus": bonus,
+        "pay_by": pay_by,
+        "other": dict(other),
+        "other_by": {k: dict(v) for k, v in other_by.items()},
+        "taxes": taxes,
+        "spent": dict(spent),
+    }
 
 
 class Moves:
@@ -377,7 +487,15 @@ class Moves:
 EVERYDAY_SUBTYPES = (None, "checking", "paypal", "prepaid", "cash management")
 CARD_PAYMENT = re.compile(transfers.CARD_PAYMENT, re.IGNORECASE)
 BROKERAGE = re.compile(transfers.BROKERAGES, re.IGNORECASE)
-BROKERAGE_NAMES = {"etrade": "E*TRADE", "e*trade": "E*TRADE", "e trade": "E*TRADE", "e-trade": "E*TRADE"}
+BROKERAGE_NAMES = {
+    "etrade": "E*TRADE",
+    "e*trade": "E*TRADE",
+    "e trade": "E*TRADE",
+    "e-trade": "E*TRADE",
+    "morgan stanley": "E*TRADE",
+    "mspbna": "E*TRADE",
+    "ms&co": "E*TRADE",
+}
 SPENDING_GROUPS = (("fixed", "Bills"), ("flexible", "Everyday"), ("other", "Other spending"))
 INCOME_NAMES = {"Other income": "Other money in"}
 WORTH_A_LOOK_CENTS = 100_00
@@ -400,6 +518,18 @@ def spending_groups(ledger: Ledger, spent: dict[int | None, int]) -> list[dict]:
             cats.sort(key=lambda x: -x["cents"])
             out.append(item(label, sum(x["cents"] for x in cats), items=cats))
     return out
+
+
+def brokerage_of(text: str, invest: list[Account]) -> str | None:
+    """The brokerage a transfer went to or came from: a linked investment account it names by its last four
+    digits, else the brokerage's name ("E*TRADE" for Morgan Stanley, which runs it)."""
+    for a in invest:
+        if a.mask and re.search(rf"(?<!\d){re.escape(a.mask)}(?!\d)", text):
+            return a.name
+    if hit := BROKERAGE.search(text):
+        name = hit.group(0).lower()
+        return BROKERAGE_NAMES.get(name, name.title())
+    return None
 
 
 def where_it_went(ledger: Ledger, moves: Moves, m: date, saved: int, put_away: int) -> tuple[list[dict], dict]:
@@ -435,24 +565,30 @@ def where_it_went(ledger: Ledger, moves: Moves, m: date, saved: int, put_away: i
         label = (f"Paid down {name}" if kind == "loan" else f"Into {name}") if cents > 0 else f"Taken out of {name}"
         lines.append(item(label, cents, kind=kind))
 
+    # Investment accounts whose own transactions don't come through (a brokerage linked for its holdings): a
+    # transfer naming one, by its last four digits or its brokerage, went into it (or came out of it).
+    invest = [a for a in moves.accounts.values() if a.type == "investment"]
     brokerages: dict[str, int] = defaultdict(int)
     elsewhere: dict[str, int] = defaultdict(int)
+    from_elsewhere: dict[str, int] = defaultdict(int)
     cards = moved_in = 0
     for t in ledger.month(m):
         if ledger.kind(t) != "transfer":
             continue
         text = f"{t.merchant} {t.description}"
-        if t.amount_cents > 0:
+        into = brokerage_of(text, invest)
+        if into:
+            brokerages[into] -= t.amount_cents
+        elif t.amount_cents > 0:
             moved_in += t.amount_cents
+            from_elsewhere[t.merchant or t.description] += t.amount_cents
         elif ledger.is_card_payment(t) or CARD_PAYMENT.search(text):
             cards -= t.amount_cents
-        elif hit := BROKERAGE.search(text):
-            name = hit.group(0).lower()
-            brokerages[BROKERAGE_NAMES.get(name, name.title())] -= t.amount_cents
         else:
             elsewhere[t.merchant or t.description] -= t.amount_cents
     for name, cents in sorted(brokerages.items(), key=lambda x: -x[1]):
-        lines.append(item(f"Into {name}", cents, kind="invest"))
+        if cents:
+            lines.append(item(f"Into {name}" if cents > 0 else f"Taken out of {name}", cents, kind="invest"))
     if cards:
         lines.append(item("Paid to cards that aren't linked", cards, kind="card"))
     other_out = sum(elsewhere.values())
@@ -462,7 +598,15 @@ def where_it_went(ledger: Ledger, moves: Moves, m: date, saved: int, put_away: i
             item("Sent to accounts that aren't linked", other_out, kind="other", items=[item(k, v) for k, v in top])
         )
     if moved_in:
-        lines.append(item("Moved in from accounts that aren't linked", -moved_in, kind="moved_in"))
+        top = sorted(from_elsewhere.items(), key=lambda x: -x[1])[:5]
+        lines.append(
+            item(
+                "Moved in from accounts that aren't linked",
+                -moved_in,
+                kind="moved_in",
+                items=[item(k, v) for k, v in top],
+            )
+        )
     left = saved - sum(x["cents"] for x in lines)
     lines.append(
         item(
@@ -472,6 +616,27 @@ def where_it_went(ledger: Ledger, moves: Moves, m: date, saved: int, put_away: i
     return lines, {"unlinked_cards": cards, "other_transfers": other_out}
 
 
+class UsualStub:
+    """The household's usual pay stub, as shares of its take-home: what a paycheck that landed without its stub
+    added most likely was before taxes, and what came off it. From recent stubs, leaving out bonus ones."""
+
+    def __init__(self, stubs: list[Paycheck]) -> None:
+        self.ok = False
+        if not stubs:
+            return
+        usual_gross = statistics.median(p.gross_cents for p in stubs)
+        usual = [p for p in stubs if p.gross_cents <= usual_gross * BONUS_FACTOR and p.net_cents > 0]
+        net = sum(p.net_cents for p in usual)
+        if not net:
+            return
+        self.ok = True
+        self.gross = sum(p.gross_cents for p in usual) / net
+        self.taxes = sum(p.taxes_cents for p in usual) / net
+        self.savings = sum(p.savings_cents for p in usual) / net
+        self.deductions = sum(p.gross_cents - p.taxes_cents - p.savings_cents - p.net_cents for p in usual) / net
+        self.match = sum(p.employer_match_cents for p in usual) / net
+
+
 def savings_for(
     ledger: Ledger,
     stubs: list[Paycheck],
@@ -479,7 +644,15 @@ def savings_for(
     include_match: bool,
     payers: Payroll | None = None,
     moves: Moves | None = None,
+    usual: UsualStub | None = None,
 ) -> dict | None:
+    """One month's savings rate, and the sums behind it.
+
+    Pay comes from that month's pay stubs where they're in (pay before taxes, taxes withheld, 401(k) and the rest).
+    A paycheck that landed without its stub is filled in from the usual stub, scaled to what landed, so a month
+    with one stub of two (or none) still counts its withholding. A bonus is counted in the month it came, but kept
+    out of the "usual month" rate, as is a rare third paycheck in a two-weekly month.
+    """
     nxt = add_months(m, 1)
     month_stubs = [p for p in stubs if m <= p.date < nxt]
     # Deposits a few days either side of the month can belong to a stub in it.
@@ -489,38 +662,97 @@ def savings_for(
         if (ledger.is_income(t) or is_pay_deposit(ledger, t, payers))
         and m - timedelta(days=MATCH_DAYS) <= t.date < nxt + timedelta(days=MATCH_DAYS)
     ]
-    matched_ids = {t.id for t in match_deposits(month_stubs, window).values()}
+    matched_ids = {t.id for ts in match_paydays(month_stubs, window, payers).values() for t in ts}
     f = flows(ledger, m, payers, matched_ids)
-    other_income = f["pay"] + sum(f["other"].values())
+    estimate = usual is not None and usual.ok and f["pay"] > 0
+    est = {"gross": 0, "taxes": 0, "savings": 0, "deductions": 0, "match": 0}
+    if estimate:
+        est = {k: round(f["pay"] * getattr(usual, k)) for k in est}
+    take_home = 0 if estimate else f["pay"]
     gross = sum(p.gross_cents for p in month_stubs)
-    match = sum(p.employer_match_cents for p in month_stubs) if include_match else 0
-    income = gross + other_income + match
+    match = (sum(p.employer_match_cents for p in month_stubs) + est["match"]) if include_match else 0
+    income = gross + est["gross"] + take_home + f["bonus"] + sum(f["other"].values()) + match
     if income <= 0:
         return None
-    taxes = sum(p.taxes_cents for p in month_stubs) + f["taxes"]
+    withheld = sum(p.taxes_cents for p in month_stubs)
+    taxes = withheld + est["taxes"] + f["taxes"]
     deductions = sum(p.gross_cents - p.taxes_cents - p.savings_cents - p.net_cents for p in month_stubs)
+    deductions += est["deductions"]
     spending = sum(f["spent"].values())
     saved = income - taxes - deductions - spending
-    basis = "gross" if month_stubs else "take_home"
+    basis = "gross" if month_stubs or estimate else "take_home"
 
+    # Where the pay came from: each employer, its paychecks, and any bonus.
+    everyone = flows(ledger, m, payers)["pay_by"]  # with the stub-matched deposits, to count every paycheck
     money_in = []
     if gross:
+        n = len(month_stubs)
+        money_in.append(item(f"Pay before taxes, from {n} pay stub{'s' if n > 1 else ''}", gross, kind="stubs"))
+    if est["gross"]:
+        n = f["pay_deposits"]
         money_in.append(
-            item(f"Pay before taxes, {len(month_stubs)} pay stub{'s' if len(month_stubs) > 1 else ''}", gross)
+            item(
+                f"Pay before taxes, {n} paycheck{'s' if n > 1 else ''} without a stub (from your usual stub)",
+                est["gross"],
+                kind="estimated",
+            )
         )
+    if take_home:
+        money_in.append(item("Pay (take-home)", take_home, kind="take_home"))
+    if money_in and everyone:
+        money_in[0]["items"] = [
+            item(f"{name.upper()}: {v['count']} paycheck{'s' if v['count'] != 1 else ''}", v["cents"])
+            for name, v in sorted(everyone.items(), key=lambda x: -x[1]["cents"])
+            if v["count"]
+        ]
     if match:
         money_in.append(item("Your employer's 401(k) match", match))
-    if f["pay"]:
-        money_in.append(item("Pay with no pay stub" if gross else "Pay (take-home)", f["pay"]))
+    if f["bonus"]:
+        money_in.append(
+            item(
+                "Bonus (take-home), left out of your usual month",
+                f["bonus"],
+                kind="bonus",
+                items=[item(name.upper(), v["bonus_cents"]) for name, v in everyone.items() if v["bonus_cents"]],
+            )
+        )
     for name, cents in sorted(f["other"].items(), key=lambda x: -x[1]):
-        money_in.append(item(INCOME_NAMES.get(name, name), cents))
+        who = sorted(f["other_by"].get(name, {}).items(), key=lambda x: -x[1])[:6]
+        money_in.append(item(INCOME_NAMES.get(name, name), cents, items=[item(k, v) for k, v in who]))
     money_out = []
     if taxes:
-        money_out.append(item("Taxes", taxes))
+        parts = [
+            item("Withheld, from your pay stubs", withheld),
+            item("Withheld, estimated from your usual stub", est["taxes"]),
+            item("Paid from your accounts (IRS, state)" if f["taxes"] >= 0 else "Refunds to your accounts", f["taxes"]),
+        ]
+        money_out.append(item("Taxes", taxes, items=[x for x in parts if x["cents"]]))
     if deductions:
         money_out.append(item("Other paycheck deductions (health insurance and the like)", deductions))
     money_out += spending_groups(ledger, f["spent"])
-    put_away = sum(p.savings_cents for p in month_stubs) + match
+
+    # A usual month: no bonus, and no third paycheck in a month that usually has two.
+    extra = 0
+    extras = 0
+    for name, v in everyone.items():
+        per = payers.usual_per_month(name) if payers else None
+        if per and v["count"] > per:
+            extras += v["count"] - per
+            extra += (v["count"] - per) * payers.typical[name]
+    extra_gross = round(extra * usual.gross) if estimate or (usual and usual.ok and month_stubs) else extra
+    extra_saved = round(extra * (1 + usual.savings)) if usual and usual.ok else extra
+    usual_month = None
+    if f["bonus"] or extras:
+        u_income = income - f["bonus"] - extra_gross
+        u_saved = saved - f["bonus"] - extra_saved
+        if u_income > 0:
+            usual_month = {
+                "percent": round(u_saved / u_income * 100, 1),
+                "saved_cents": u_saved,
+                "bonus_cents": f["bonus"],
+                "extra_paychecks": extras,
+            }
+    put_away = sum(p.savings_cents for p in month_stubs) + est["savings"] + match
     went, checks = where_it_went(ledger, moves, m, saved, put_away) if moves else ([], {})
     other_in = f["other"].get("Other income", 0)
     notes = []
@@ -543,6 +775,8 @@ def savings_for(
         "saved_cents": saved,
         "match_cents": match,
         "stubs": len(month_stubs),
+        "estimated_paychecks": f["pay_deposits"] if estimate else 0,
+        "usual": usual_month,
         "breakdown": {"money_in": money_in, "money_out": money_out, "went": went, "notes": notes},
     }
 
@@ -606,7 +840,8 @@ def build(db: DbSession) -> dict:
     recent = db.scalars(select(Paycheck).order_by(Paycheck.date.desc(), Paycheck.id.desc()).limit(12)).all()
     payers = pay_merchants(ledger, [(p.date, p.net_cents) for p in recent], prefs)
     moves = Moves(db, accounts, since)
-    history = [s for m in months if (s := savings_for(ledger, stubs, m, prefs["include_match"], payers, moves))]
+    usual = UsualStub(list(recent))
+    history = [s for m in months if (s := savings_for(ledger, stubs, m, prefs["include_match"], payers, moves, usual))]
 
     held = goals.cash_in_goals(db, accounts)
     essentials = sum(line["limit_cents"] for line in lines if line["essential"])
@@ -620,8 +855,8 @@ def build(db: DbSession) -> dict:
             .group_by(BudgetLine.version_id)
         ).all()
     )
-    deposits = [t for t in ledger.txns if ledger.is_income(t)]
-    matched = match_deposits(recent, deposits)
+    deposits = [t for t in ledger.txns if ledger.is_income(t) or is_pay_deposit(ledger, t, payers)]
+    matched = {pid: ts[0] for pid, ts in match_paydays(recent, deposits, payers).items()}
 
     return {
         "saved": version is not None,
@@ -669,12 +904,94 @@ def build(db: DbSession) -> dict:
         ],
         "people": [{"id": i, "name": n} for i, n in people.items()],
         "schedules": schedules(recent, people),
+        "stub_requests": stub_requests(ledger, payers, stubs, end),
         "categories": [
             {"id": c.id, "name": c.name, "kind": c.kind, "essential": c.essential}
             for c in sorted(ledger.categories.values(), key=lambda c: (c.sort, c.name))
             if c.kind in BUDGETED
         ],
     }
+
+
+# ---- asking for a pay stub when the usual one stops fitting
+
+STUB_CHANGE = 0.03  # take-home this much off the last paycheck: taxes or 401(k) likely changed
+STUB_ASK_DAYS = 45  # paydays this recent are worth a stub
+
+
+def stub_requests(ledger: Ledger, payers: Payroll | None, stubs: list[Paycheck], end: date) -> list[dict]:
+    """Recent paychecks whose pay stub would change the numbers: a paycheck that came in different from the one
+    before (a raise, a W-4 or 401(k) change, the Social Security cap), the first one of a new year, or a bonus.
+    Paychecks without a stub are filled in from the usual stub, which is only right while pay stays the same.
+    A paycheck with a stub, or with a newer stub after it, needs nothing."""
+    if payers is None:
+        return []
+    paydays: dict[tuple[str, date], int] = {}
+    for name, day, total in payers.paydays.values():
+        paydays[(name, day)] = total
+    latest = max((p.date for p in stubs), default=None)
+    asks = []
+    by_source: dict[str, list[tuple[date, int]]] = defaultdict(list)
+    for (name, day), total in sorted(paydays.items(), key=lambda kv: kv[0][1]):
+        by_source[name].append((day, total))
+    for name, days in by_source.items():
+        typical = payers.typical.get(name, 0)
+        before: tuple[date, int] | None = None  # the last usual paycheck
+        for day, total in days:
+            bonus = payers.counts.get(name, 0) >= BONUS_MIN_DEPOSITS and total > typical * BONUS_FACTOR
+            reason = None
+            if bonus:
+                reason = "bonus"
+            elif before and before[0].year < day.year:
+                reason = "new_year"
+            elif before and abs(total - before[1]) > before[1] * STUB_CHANGE:
+                reason = "changed"
+            covered = (latest is not None and latest >= day - timedelta(days=MATCH_DAYS)) or any(
+                abs((p.date - day).days) <= MATCH_DAYS for p in stubs
+            )
+            if reason and not covered and (end - day).days <= STUB_ASK_DAYS:
+                asks.append({
+                    "date": day.isoformat(),
+                    "employer": name.upper(),
+                    "cents": total,
+                    "before_cents": before[1] if before else None,
+                    "reason": reason,
+                })  # fmt: skip
+            if not bonus:
+                before = (day, total)
+    return sorted(asks, key=lambda a: a["date"], reverse=True)
+
+
+def ask_for_stubs(db: DbSession, settings) -> int:
+    """After a sync: a notification for each new paycheck that wants its stub, once each."""
+    from financeapp import notify
+
+    state = build(db)
+    prefs = preferences(db)
+    asked = set(prefs.get("stubs_asked", []))
+    sent = 0
+    for a in state["stub_requests"]:
+        key = f"{a['employer']}:{a['date']}"
+        if key in asked:
+            continue
+        asked.add(key)
+        day = date.fromisoformat(a["date"]).strftime("%b %-d")
+        why = {
+            "bonus": "looks like a bonus, which is taxed differently",
+            "new_year": "is the first of the year, when withholding and 401(k) limits reset",
+            "changed": "came in different from the one before, so taxes or 401(k) may have changed",
+        }[a["reason"]]
+        notify.send(
+            settings,
+            "Add this pay stub",
+            f"Your {day} paycheck from {a['employer']} {why}. Add its pay stub on Budget so your savings rate "
+            "stays right.",
+            tags="page_facing_up",
+        )
+        sent += 1
+    if sent:
+        set_preferences(db, stubs_asked=sorted(asked)[-50:])
+    return sent
 
 
 # ---- pay schedules

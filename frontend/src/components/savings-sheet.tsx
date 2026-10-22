@@ -36,7 +36,11 @@ export function SavingsSheet({
       open={open}
       onOpenChange={onOpenChange}
       title="Savings rate"
-      description={`How ${name} adds up, from your own transactions${m.basis === "gross" ? " and pay stubs" : ""}.`}
+      description={`How ${name} adds up, from your own transactions${m.basis === "gross" ? " and pay stubs" : ""}.${
+        m.estimated_paychecks
+          ? ` ${m.estimated_paychecks} paycheck${m.estimated_paychecks > 1 ? "s" : ""} without a stub filled in from your usual stub.`
+          : ""
+      }`}
     >
       <div className="grid grid-cols-1 gap-5">
         {months.length > 1 && (
@@ -67,6 +71,7 @@ export function SavingsSheet({
             {m.saved_cents >= 0 ? " of " : " more than "}
             <Money cents={m.income_cents} /> {m.basis === "gross" ? "pay before taxes and other money in" : "that came in"}.
           </p>
+          {m.usual && <UsualMonth m={m} />}
           <Split m={m} />
         </div>
 
@@ -101,6 +106,8 @@ export function SavingsSheet({
           <p className="text-sm text-muted-foreground">Pull to refresh to see this month line by line.</p>
         )}
 
+        <HowItUpdates />
+
         <p className="text-xs text-muted-foreground">
           Savings rate is what&apos;s left after taxes
           {m.basis === "gross" ? ", paycheck deductions" : ""} and spending, as a share of the money that came in. Money moved between your
@@ -109,6 +116,56 @@ export function SavingsSheet({
         </p>
       </div>
     </Sheet>
+  );
+}
+
+/** What the month looks like without its bonus, or the third paycheck a two-weekly schedule brings twice a year. */
+function UsualMonth({ m }: { m: SavingsMonth }) {
+  const u = m.usual!;
+  const why = [
+    u.bonus_cents > 0 && "a bonus",
+    u.extra_paychecks > 0 && (u.extra_paychecks === 1 ? "a third paycheck" : `${u.extra_paychecks} extra paychecks`),
+  ]
+    .filter(Boolean)
+    .join(" and ");
+  return (
+    <p className="mt-2 rounded-xl bg-muted px-3 py-2 text-sm">
+      <span className="font-medium">{u.percent.toFixed(0)}% in a usual month.</span>{" "}
+      <span className="text-muted-foreground">
+        {name(why)} made this month look better than usual: without it you&apos;d have saved <Money cents={u.saved_cents} />.
+        {u.bonus_cents > 0 && " Plan leaves bonuses out of what you usually save."}
+      </span>
+    </p>
+  );
+}
+
+function name(why: string) {
+  return why.charAt(0).toUpperCase() + why.slice(1);
+}
+
+/** How the savings rate keeps itself up to date, in plain words. */
+function HowItUpdates() {
+  return (
+    <details className="rounded-xl border px-4 py-3 text-sm">
+      <summary className="cursor-pointer font-medium select-none">How this updates</summary>
+      <ul className="mt-2 grid list-disc gap-1.5 pl-5 text-muted-foreground">
+        <li>It&apos;s worked out again every time you open it, from the transactions and pay stubs the app has.</li>
+        <li>
+          New transactions come in when your accounts sync (every few hours, and when you tap Sync). Each month shows the transactions dated
+          in it; a month is complete once it&apos;s over and its last transactions have posted.
+        </li>
+        <li>
+          Pay is only your payroll deposits. Adding a month&apos;s pay stubs swaps the estimate for the stub&apos;s real pay before taxes,
+          withholding and 401(k); a paycheck without its stub is filled in from your usual stub. When a paycheck comes in different from the
+          one before, or it&apos;s the first of the year or a bonus, Budget asks for that stub.
+        </li>
+        <li>
+          A bonus counts in the month it landed, but is kept out of the usual month, and so is a third paycheck in a month that usually has
+          two.
+        </li>
+        <li>Recategorizing a transaction (a Zelle that paid for something, say) changes the months it&apos;s in straight away.</li>
+      </ul>
+    </details>
   );
 }
 

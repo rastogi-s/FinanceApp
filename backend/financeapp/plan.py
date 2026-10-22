@@ -331,7 +331,7 @@ def derive_savings(
     4. The last 90 days: money in minus money spent.
     """
     history = state["savings_history"][-SAVINGS_MONTHS:]
-    gross = [m for m in history if m["basis"] == "gross"]
+    gross = [m for m in history if m["basis"] == "gross" and m["stubs"]]  # stubs in, not estimated
     match = "401(k) match" if state["include_match"] else ""
 
     def avg(rows: list[dict], key: str) -> int:
