@@ -31,6 +31,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { toast } from "@/components/ui/toast";
 import { useAuth } from "@/lib/auth";
+import { useApi } from "@/lib/household";
+import type { ReviewState } from "@/lib/review";
 import { type BudgetLine, type BudgetState, type Forecast, type SavingsMonth, monthName, useBudget } from "@/lib/budget";
 import { cn } from "@/lib/utils";
 
@@ -205,6 +207,8 @@ function Budget() {
         )}
       </div>
 
+      <CategoryCheck />
+
       {data.forecast && <MonthEnd data={data} onPick={setEditing} />}
 
       {data.lines.length > 3 && (
@@ -269,7 +273,7 @@ function Budget() {
                       <span className="text-xs font-medium text-primary">Set a limit</span>
                     </button>
                   ) : u.category === "Uncategorized" ? (
-                    <Link href="/spending?review=1" className="flex w-full items-center gap-3 py-3 text-sm">
+                    <Link href="/review" className="flex w-full items-center gap-3 py-3 text-sm">
                       <span className="flex-1 font-medium">{u.category}</span>
                       <Money cents={u.spent_cents} />
                       <span className="text-xs font-medium text-primary">Sort them</span>
@@ -351,6 +355,42 @@ function sortLines(lines: BudgetLine[], sort: LineSort): BudgetLine[] {
   };
   const f = by[sort];
   return f ? [...lines].sort((a, b) => f(a, b) || a.category.localeCompare(b.category)) : lines;
+}
+
+/** How far to trust the numbers above: the share of money sorted with confidence, and a way to fix the rest. */
+function CategoryCheck() {
+  const { data } = useApi<ReviewState>("/api/review");
+  if (!data || data.score === null) return null;
+  const clean = data.items === 0;
+  return (
+    <Link href="/review" className="block rounded-xl focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none">
+      <Card className={cn("transition-colors hover:bg-muted/40", !clean && data.score < 95 && "border-warning/40")}>
+        <CardContent className="flex items-center gap-4 pt-5">
+          <div
+            className={cn(
+              "grid size-11 shrink-0 place-items-center rounded-full text-sm font-semibold tabular-nums",
+              clean || data.score >= 98 ? "bg-positive/10 text-positive" : data.score >= 90 ? "bg-accent text-accent-foreground" : "bg-warning/10 text-warning",
+            )}
+          >
+            {data.score}%
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="font-medium">{clean ? "Every category checks out" : `${data.items} transaction${data.items === 1 ? "" : "s"} to check`}</p>
+            <p className="mt-0.5 text-sm text-muted-foreground">
+              {clean ? (
+                "Card payments, investments and moves between your accounts are kept out of spending."
+              ) : (
+                <>
+                  <Money cents={data.doubtful_cents} /> the app isn&apos;t sure about. Sorting it makes your savings rate exact.
+                </>
+              )}
+            </p>
+          </div>
+          <ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+        </CardContent>
+      </Card>
+    </Link>
+  );
 }
 
 function Group({ title, lines, month, onPick }: { title: string; lines: BudgetLine[]; month: string; onPick: (l: BudgetLine) => void }) {

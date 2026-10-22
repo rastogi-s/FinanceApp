@@ -1191,3 +1191,65 @@ def goals_page(today: date | None = None) -> dict:
     monthly = round(sum(saved) / len(saved) * 0.4)
     out = goals.assemble(rows, funding, balances, accounts, b["emergency"], monthly, today)
     return {**out, "demo": True}
+
+
+def review(today: date | None = None) -> dict:
+    """The Check categories screen in demo mode."""
+    today = today or datetime.now(UTC).date()
+    since = (today.replace(day=1) - timedelta(days=80)).replace(day=1)
+
+    def group(n, reason, merchant, cat_id, examples, person=None) -> dict:
+        rows = [
+            {
+                "date": (today - timedelta(days=d)).isoformat(),
+                "amount_cents": _cents(a),
+                "description": desc,
+                "account": acct,
+            }
+            for d, a, desc, acct in examples
+        ]
+        return {
+            "key": f"{reason}:{merchant.lower()}",
+            "reason": reason,
+            "person": person,
+            "merchant": merchant,
+            "count": n,
+            "total_cents": sum(r["amount_cents"] for r in rows) * n // len(rows),
+            "category_id": cat_id,
+            "category": CATEGORY_NAMES[cat_id - 1][0],
+            "last_date": rows[0]["date"],
+            "ids": [str(9000 + n * 10 + i) for i in range(n)],
+            "examples": rows,
+        }
+
+    groups = [
+        group(
+            4,
+            "sent",
+            "Zelle",
+            12,
+            [(3, -180, "Zelle payment to MARIA LOPEZ conf# 4410", "Everyday Checking")] * 2,
+            person="Maria Lopez",
+        ),
+        group(
+            3,
+            "no_category",
+            "Bright Horizons",
+            13,
+            [(6, -310, "BRIGHT HORIZONS 0091 DURHAM NC", "Everyday Checking"), (36, -310, "BRIGHT HORIZONS", "Visa")],
+        ),
+        group(2, "guess", "Ninth Street Bar & Grill", 7, [(9, -64.2, "TST* NINTH ST BAR & GRILL", "Visa")]),
+        group(1, "refund", "REI", 13, [(12, 89.95, "REI #42 RETURN", "Visa")]),
+        group(1, "money_in", "Venmo", 13, [(15, 120, "VENMO CASHOUT", "Everyday Checking")]),
+    ]
+    doubtful = sum(abs(g["total_cents"]) for g in groups)
+    checked = _cents(24_850)
+    return {
+        "since": since.isoformat(),
+        "score": round((checked - doubtful) / checked * 100),
+        "checked_cents": checked,
+        "doubtful_cents": doubtful,
+        "items": sum(g["count"] for g in groups),
+        "kept_out": {"card_cents": _cents(7_420), "invest_cents": _cents(3_000), "own_cents": _cents(1_500)},
+        "groups": groups,
+    }

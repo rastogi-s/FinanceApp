@@ -186,15 +186,15 @@ function SecondTile({ h }: { h: LinkedHousehold }) {
   }
   const review = h.spending?.needs_review ?? 0;
   return (
-    <Link href={review ? "/spending?review=1" : "/spending"} className="block">
+    <Link href={review ? "/review" : "/spending"} className="block">
       <Card className="h-full transition-colors hover:bg-muted/40">
         <CardHeader>
-          <CardTitle>{review ? "Needs a category" : "All sorted"}</CardTitle>
+          <CardTitle>{review ? "Categories to check" : "All sorted"}</CardTitle>
           <Sparkles className="size-4 text-primary" aria-hidden />
         </CardHeader>
         <CardContent>
           <p className="text-2xl font-semibold tracking-tight">{review}</p>
-          <p className="mt-1 text-xs text-muted-foreground">{review ? "Two taps each" : "Every transaction has a home"}</p>
+          <p className="mt-1 text-xs text-muted-foreground">{review ? "One answer per merchant" : "Every transaction has a home"}</p>
         </CardContent>
       </Card>
     </Link>

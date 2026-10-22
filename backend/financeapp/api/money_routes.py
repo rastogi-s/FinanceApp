@@ -10,12 +10,12 @@ from pydantic import BaseModel, Field
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session as DbSession
 
-from financeapp import auth, crypto, demo, household, notify, paystub, search, sync
+from financeapp import auth, crypto, demo, household, notify, paystub, review, search, sync
 from financeapp.ai import documents, extract, reading
 from financeapp.ai.providers import ProviderError
 from financeapp.ai.service import AIUnavailable
 from financeapp.api.deps import Signed, audit, owner, recent, settings_of, signed_in
-from financeapp.categorize import categorize, normalize_merchant
+from financeapp.categorize import categorize
 from financeapp.connectors.base import ConnectorError, HoldingData, TransactionData
 from financeapp.connectors.files import MAX_BYTES, FileError, ParsedFile, parse
 from financeapp.models import (
@@ -25,7 +25,6 @@ from financeapp.models import (
     Challenge,
     Connection,
     Import,
-    MerchantRule,
     SyncRun,
     Transaction,
     User,
@@ -422,17 +421,9 @@ def recategorize(
     t.category_id = category.id
     t.category_source = "user"
     changed = 0
-    pattern = normalize_merchant(t.merchant)
-    if body.remember and pattern and category.kind != "transfer":
-        rule = db.scalar(select(MerchantRule).where(MerchantRule.pattern == pattern))
-        if rule is None:
-            db.add(
-                MerchantRule(pattern=pattern, category_id=category.id, created_from_txn_id=t.id, created_by=who.user.id)
-            )
-        else:
-            rule.category_id = category.id
+    if body.remember and category.kind != "transfer":
         db.flush()
-        changed = categorize(db)
+        changed = review.learn(db, t, category, who.user.id)
     audit(db, request, "recategorized", who.user.id, category=category.name, remember=body.remember)
     return {"id": str(t.id), "category": category.name, "category_id": category.id, "also_changed": changed}
 

@@ -27,6 +27,7 @@ const PLACES = [
   ["portfolio", "/portfolio", "tab"],
   ["plan", "/plan", "tab"],
   ["goals", "/goals", "direct"],
+  ["review", "/review", "direct"],
   ["taxes", "/taxes", "direct"],
   ["settings", "/settings", "header"],
   ["accounts", "/settings/accounts", "direct"],
