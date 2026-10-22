@@ -1,4 +1,5 @@
 import json
+import uuid
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -7,9 +8,11 @@ import pytest
 from sqlalchemy import select, update
 
 from financeapp import crypto, notify, sync
+from financeapp.categorize import categorize
 from financeapp.connectors.plaid import Plaid
 from financeapp.connectors.snaptrade import SnapTrade, signature
-from financeapp.models import Category, Connection, MerchantRule, Session, Transaction, now
+from financeapp.models import Account, Category, Connection, MerchantRule, Session, Transaction, now
+from financeapp.transfers import match_transfers
 from tests.conftest import csrf, db_of, needs_db
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -78,8 +81,10 @@ def test_transfer_matching(client, home):
         txns = db.scalars(select(Transaction)).all()
         groups = {t.transfer_group_id for t in txns if t.transfer_group_id}
         assert len(groups) == 1  # checking -> card payment (500.00, same day)
-        paired = sorted(t.amount_cents for t in txns if t.transfer_group_id)
-        assert paired == [-50000, 50000]
+        paired = [t for t in txns if t.transfer_group_id]
+        assert sorted(t.amount_cents for t in paired) == [-50000, 50000]
+        card = db.scalar(select(Category).where(Category.name == "Credit card payment"))
+        assert card.kind == "transfer" and {t.category_id for t in paired} == {card.id}
         # "Internet transfer from Chase" into Ally has no matching outflow in the files: one-sided transfer.
         ally_in = next(t for t in txns if t.amount_cents == 150000)
         transfer = db.scalar(select(Category).where(Category.name == "Transfer"))
@@ -89,6 +94,81 @@ def test_transfer_matching(client, home):
     spent = h["spending"]["month_cents"]
     # Groceries, utilities, two coffees, and the card's purchases; never the 500 payment or the 1,500 transfer.
     assert spent == 5420 + 8810 + 650 + 650 + 1575 + 1549 + 4210 + 6399 or date.today().month != 10
+
+
+@needs_db
+def test_card_payments_get_their_own_category(client, home):
+    home.setup()
+    with db_of(client).session() as db:
+        conn = Connection(provider="manual", institution="Bank", state={})
+        db.add(conn)
+        db.flush()
+        accounts = {}
+        for name, kind in [("Checking", "depository"), ("Visa", "credit"), ("Mortgage", "loan")]:
+            accounts[name] = Account(connection_id=conn.id, external_id=name, name=name, institution="Bank", type=kind)
+            db.add(accounts[name])
+        db.flush()
+        cats = {c.name: c.id for c in db.scalars(select(Category))}
+        on = date.today() - timedelta(days=3)
+
+        def add(account: str, text: str, cents: int, code: str | None = None, **kw) -> Transaction:
+            t = Transaction(
+                account_id=accounts[account].id,
+                external_id=uuid.uuid4().hex,
+                date=on,
+                amount_cents=cents,
+                merchant=text,
+                description=text,
+                provider_category=code,
+                source="manual",
+                **kw,
+            )
+            db.add(t)
+            return t
+
+        named = add("Checking", "CAPITAL ONE MOBILE PMT", -32000)  # the card isn't linked: known by its wording
+        coded = add("Checking", "ONLINE PAYMENT 8812", -21000, "LOAN_PAYMENTS_CREDIT_CARD_PAYMENT")  # Plaid says so
+        on_card = add("Visa", "THANK YOU", 9000)  # money arriving on a card pays it
+        mortgage = add("Mortgage", "PAYMENT RECEIVED", 150000)  # a loan being paid stays a plain transfer
+        savings = add("Checking", "Online transfer to savings", -50000)
+        # Sorted before this category existed: moves into it.
+        old = add("Checking", "AMEX EPAYMENT", -12000, category_id=cats["Transfer"], category_source="transfer")
+        kept = add("Checking", "CITI AUTOPAY", -5000, category_id=cats["Transfer"], category_source="user")
+        db.flush()
+        match_transfers(db, on - timedelta(days=30))
+        for t in (named, coded, on_card, old):
+            assert t.category_id == cats["Credit card payment"] and t.category_source == "transfer", t.merchant
+        assert mortgage.category_id == savings.category_id == cats["Transfer"]
+        assert kept.category_id == cats["Transfer"]  # picked by hand: left alone
+        ids = [str(named.id), str(coded.id)]
+        assert categorize(db) == 0  # and categorizing again doesn't undo it
+
+    rows = {t["id"]: t for t in client.get("/api/household").json()["transactions"]}
+    assert all(rows[i]["transfer"] and rows[i]["category"] == "Credit card payment" for i in ids)
+    found = client.get("/api/transactions", params={"kind": "transfer"}).json()
+    assert found["count"] == 7 and found["out_cents"] == 0
+
+
+@needs_db
+def test_marking_a_card_payment_by_hand(client, home):
+    home.setup()
+    commit(client, upload(client, "chase_checking_4417.csv"), institution="Chase")
+    h = client.get("/api/household").json()
+    spent = h["spending"]["month_cents"]
+    t = next(t for t in h["transactions"] if not t["transfer"] and t["amount_cents"] < 0)
+    cats = {c["name"]: c for c in client.get("/api/categories").json()}
+    assert cats["Credit card payment"]["kind"] == "transfer"
+    r = client.patch(
+        f"/api/transactions/{t['id']}", json={"category_id": cats["Credit card payment"]["id"]}, headers=csrf(client)
+    )
+    assert r.status_code == 200 and r.json()["category"] == "Credit card payment"
+    h = client.get("/api/household").json()
+    row = next(x for x in h["transactions"] if x["id"] == t["id"])
+    assert row["transfer"] and row["category"] == "Credit card payment"
+    if date.fromisoformat(t["date"]).month == date.today().month:
+        assert h["spending"]["month_cents"] == spent + t["amount_cents"]
+    with db_of(client).session() as db:
+        assert db.scalar(select(MerchantRule)) is None  # a transfer never becomes a merchant rule
 
 
 @needs_db
@@ -642,7 +722,7 @@ def test_demo_mode_serves_sample_settings_and_refuses_changes(tmp_path):
     assert len(c.get("/api/connections").json()["connections"]) == 6
     assert c.get("/api/categories").status_code == 200
     sample = c.get("/api/transactions", params={"kind": "transfer"}).json()
-    assert sample["count"] == 1 and sample["out_cents"] == 0
+    assert sample["count"] == 2 and sample["out_cents"] == 0  # the savings move and the card payment
     assert c.get("/api/transactions", params={"q": "zzz"}).json()["count"] == 0
     assert c.post("/api/sync").status_code == 403
     assert c.post("/api/auth/login", json={"email": "a@b.c", "password": "x"}).status_code in (403, 503)

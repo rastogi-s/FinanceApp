@@ -1,5 +1,17 @@
 [
   {
+    "version": "0.29.0",
+    "title": "Credit card payments",
+    "features": [
+      {
+        "id": "card-payment-category",
+        "title": "Card payments have their own category",
+        "body": "Paying a card from checking now shows as Credit card payment instead of a plain Transfer, on both sides when the card is linked. It's found from the card account, the bank's wording (AUTOPAY, EPAYMENT, PAYMENT THANK YOU) or Plaid's own label, and your past payments move into it after this update. Like transfers, it isn't counted as spending, because the purchases on the card already were. Tap any transaction to set or change it by hand.",
+        "tryIt": "/spending?kind=transfer"
+      }
+    ]
+  },
+  {
     "version": "0.28.0",
     "title": "Taxes count your dividends right",
     "features": [

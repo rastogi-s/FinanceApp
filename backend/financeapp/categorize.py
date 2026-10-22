@@ -1,7 +1,7 @@
 """Puts transactions in categories, in this order (the first that applies wins):
 
 1. A category someone picked by hand ("user") is never changed.
-2. Transfers between your own accounts (see transfers.py) are "Transfer".
+2. Transfers between your own accounts (see transfers.py) are "Transfer", or "Credit card payment" when they pay a card.
 3. Your merchant rules: fixing one transaction's category makes a rule for that merchant.
 4. Built-in rules for well-known merchants.
 5. The category the bank or Plaid suggested.
@@ -80,7 +80,7 @@ PLAID: dict[str, str] = {
     "INCOME": "Other income",
     "TRANSFER_IN": "Transfer",
     "TRANSFER_OUT": "Transfer",
-    "LOAN_PAYMENTS_CREDIT_CARD_PAYMENT": "Transfer",
+    "LOAN_PAYMENTS_CREDIT_CARD_PAYMENT": "Credit card payment",
     "LOAN_PAYMENTS": "Loan payments",
     "BANK_FEES": "Fees & interest",
     "ENTERTAINMENT": "Entertainment",
