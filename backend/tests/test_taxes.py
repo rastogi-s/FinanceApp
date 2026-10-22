@@ -9,6 +9,13 @@ from tests.conftest import csrf, make_client, needs_db
 
 TODAY = date(2026, 10, 21)
 T = taxes.table(2026)
+NO_INVESTMENTS = {
+    "interest_cents": 0,
+    "dividends_cents": 0,
+    "qualified_cents": 0,
+    "capital_gain_cents": 0,
+    "basis": "none",
+}
 
 
 def stub(
@@ -35,7 +42,7 @@ def facts(stubs: dict | None = None, **kw) -> dict:
         "viewer_id": 1,
         "people": {1: "Shubham", 2: "Alex"},
         "stubs": stubs or {},
-        "investments": kw.pop("investments", {"interest_cents": 0, "dividends_cents": 0, "basis": "none"}),
+        "investments": kw.pop("investments", NO_INVESTMENTS),
         "unrealized_gain_cents": None,
         "birth_year": None,
         **kw,
@@ -230,3 +237,42 @@ def test_sample_data(tmp_path):
     with make_client(tmp_path, "", demo_mode=True) as c:
         r = c.get("/api/taxes").json()
     assert r["demo"] and r["answered"] and r["total"]["tax_cents"] > 0
+
+
+def payment(day: str, dollars: float, kind: str = "dividend", tax: str = "qualified", taxable: bool = True):
+    from financeapp.income import Payment
+
+    source = "bank" if kind == "interest" else "brokerage"
+    return Payment(
+        date.fromisoformat(day), 1, "Brokerage", "VTI", "VTI", round(dollars * 100), kind, source, tax, taxable
+    )
+
+
+def test_dividends_and_interest_from_the_payments():
+    pays = [
+        payment("2026-03-25", 300),
+        payment("2026-06-25", 100, tax="ordinary"),
+        payment("2026-09-30", 50, kind="interest", tax="ordinary"),
+        payment("2026-09-30", 999, taxable=False),  # in an IRA: not taxed
+        payment("2025-12-20", 400),  # last December: the guess for this December
+        payment("2025-12-20", 250, kind="capital_gain", tax="unlabeled"),
+        payment("2025-06-25", 777),  # already past this year's date: not counted
+    ]
+    inv = taxes.from_payments(pays, {}, date(2024, 10, 21), TODAY)
+    assert inv["basis"] == "last_year"
+    assert (inv["dividends_cents"], inv["qualified_cents"]) == (800_00, 700_00)
+    assert (inv["interest_cents"], inv["capital_gain_cents"]) == (50_00, 250_00)
+    assert inv["so_far"]["dividends_cents"] == 400_00
+
+    s = stub("2026-10-16", 4_000, {"federal": 400}, ytd={"gross": 80_000})
+    r = taxes.estimate(T, profile(), facts({1: [s]}, investments=inv), TODAY)
+    items = {i["key"]: i for i in r["items"]}
+    assert items["qualified_dividends"]["cents"] == 700_00
+    assert items["lt_gains"]["cents"] == 250_00 and "capital gain distributions" in items["lt_gains"]["note"]
+    # A typed dividend total keeps the payments' qualified share (7/8).
+    r = taxes.estimate(T, profile(amounts={"dividends": 1_600}), facts({1: [s]}, investments=inv), TODAY)
+    assert next(i for i in r["items"] if i["key"] == "qualified_dividends")["cents"] == 1_400_00
+
+    # Without last year's history, this year so far is scaled to a whole year.
+    inv = taxes.from_payments(pays, {}, date(2026, 1, 1), TODAY)
+    assert inv["basis"] == "scaled" and inv["dividends_cents"] == round(400_00 * 365 / 294)

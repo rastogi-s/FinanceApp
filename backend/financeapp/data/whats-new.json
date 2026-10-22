@@ -1,5 +1,17 @@
 [
   {
+    "version": "0.28.0",
+    "title": "Taxes count your dividends right",
+    "features": [
+      {
+        "id": "taxes-dividends",
+        "title": "Dividends and interest on Taxes come from Dividends & interest",
+        "body": "The Taxes page now takes interest, dividends and fund capital gain distributions from the Dividends & interest page: this year so far, plus what came between now and the end of last year as the guess for the rest of this year, so December's fund distributions aren't missed. Qualified dividends follow how your brokerage labels them, and capital gain distributions count as long-term gains. Retirement and HSA accounts stay out. Tap any number to type your own.",
+        "tryIt": "/taxes"
+      }
+    ]
+  },
+  {
     "version": "0.27.0",
     "title": "Savings goals",
     "features": [

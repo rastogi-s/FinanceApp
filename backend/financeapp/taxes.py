@@ -12,10 +12,10 @@ left on their schedule. Social Security and Medicare on the paychecks still to c
 base and the extra 0.9% Medicare over $200,000 land on the right paycheck. A stub that only gave its total taxes is
 split by the rates: Social Security 6.2%, Medicare 1.45%, state at the state's rate, and federal the rest.
 
-Investments. Interest and dividends are money in, categorized "Interest & dividends", in accounts that aren't
-retirement or HSA accounts, over the last 12 months (or this year so far, scaled to a whole year, when there's less
-history). Brokerages don't send sales, so realized gains are typed in; the page shows the unrealized gain in taxable
-accounts to think about.
+Investments. Taxable interest, dividends (qualified or not) and fund capital gain distributions come from the
+Dividends & interest page (income.tax_summary): this year so far, plus what came between today's date and the end of
+last year as the guess for the rest of this year. Brokerages don't send sales, so realized gains are typed in; the
+page shows the unrealized gain in taxable accounts to think about.
 
 Not covered: AMT, self-employment tax, the refundable part of the child tax credit, other credits beyond the one
 typed in, deduction phase-outs, loss carryovers, local taxes and a Social Security refund from two employers.
@@ -33,7 +33,7 @@ from sqlalchemy.orm import Session as DbSession
 
 from financeapp.budget import PER_YEAR, add_months, month_start, next_payday
 from financeapp.config import PACKAGE_DIR
-from financeapp.models import Account, Category, HoldingSnapshot, Paycheck, Preference, Transaction, User
+from financeapp.models import Account, HoldingSnapshot, Paycheck, Preference, User
 
 TABLES = PACKAGE_DIR / "data" / "tax"
 STATUSES = {
@@ -58,7 +58,6 @@ NO_WAGE_TAX = {"AK", "FL", "NV", "NH", "SD", "TN", "TX", "WA", "WY"}  # no tax o
 TAX_ADVANTAGED = re.compile(
     r"401|403|457|\bira\b|roth|\bhsa\b|health\s+savings|529|pension|retire|keogh|non-taxable|education|annuity", re.I
 )
-INTEREST_WORDS = re.compile(r"interest", re.I)
 MAX_SCALE = 4.0  # this year so far is scaled to a whole year by at most this much (early January is too noisy)
 
 DEFAULTS: dict[str, Any] = {
@@ -314,43 +313,44 @@ def taxable_accounts(db: DbSession) -> list[Account]:
 
 
 def investment_income(db: DbSession, today: date) -> dict:
-    """Interest and dividends for a whole year, from what landed in taxable accounts."""
-    accounts = {a.id: a for a in taxable_accounts(db)}
-    category = db.scalar(select(Category.id).where(Category.name == "Interest & dividends"))
-    out = {"interest_cents": 0, "dividends_cents": 0, "basis": "none", "count": 0}
-    if not accounts or category is None:
-        return out
-    first = db.scalar(select(func.min(Transaction.date)).where(Transaction.account_id.in_(accounts)))
-    if first is None:
-        return out
-    year_start = date(today.year, 1, 1)
-    trailing = first <= today - timedelta(days=330)
-    since = today - timedelta(days=365) if trailing else max(year_start, first)
-    rows = db.scalars(
-        select(Transaction).where(
-            Transaction.account_id.in_(accounts),
-            Transaction.category_id == category,
-            Transaction.amount_cents > 0,
-            Transaction.pending.is_(False),
-            Transaction.date > since if trailing else Transaction.date >= since,
-            Transaction.date <= today,
-        )
-    ).all()
-    scale = 1.0
-    if not trailing:
-        elapsed = (today - since).days + 1
-        scale = min(365 / max(elapsed, 1), MAX_SCALE)
-    for t in rows:
-        is_interest = accounts[t.account_id].type == "depository" or INTEREST_WORDS.search(
-            f"{t.merchant} {t.description}"
-        )
-        out["interest_cents" if is_interest else "dividends_cents"] += t.amount_cents
-    out["interest_cents"] = round(out["interest_cents"] * scale)
-    out["dividends_cents"] = round(out["dividends_cents"] * scale)
-    out["count"] = len(rows)
-    out["basis"] = "trailing" if trailing else "scaled"
-    out["since"] = since.isoformat()
-    return out
+    """Taxable interest and dividends for the whole year, from the Dividends & interest page's payments."""
+    from financeapp import household, income
+
+    accounts = household.counted(db)
+    pays = income.payments(db, accounts, min(income.since_for(today), date(today.year - 1, 1, 1)))
+    classes = {h.symbol: h.asset_class for h in income.holdings(db, accounts)}
+    return from_payments(pays, classes, income.history_start(db, accounts, today), today)
+
+
+def from_payments(pays: list, classes: dict[str, str], history_from: date, today: date) -> dict:
+    """This year so far (income.tax_summary), plus what came between today's date and the end of last year, which is
+    the best guess for the rest of this year (December's fund distributions included). Without last year's history,
+    this year so far is scaled to a whole year."""
+    from financeapp import income
+
+    year = today.year
+    so_far = income.tax_summary(pays, year, today, classes, history_from)
+    year_ago = date(year - 1, today.month, min(today.day, 28))
+    rest = income.tax_summary([p for p in pays if p.date > year_ago], year - 1, today, classes, history_from)
+
+    def amounts(t: dict) -> dict[str, int]:
+        d = t["dividends"]
+        return {
+            "interest_cents": t["interest"]["total_cents"],
+            "dividends_cents": d["total_cents"],
+            "qualified_cents": d["estimated_qualified_cents"],
+            "capital_gain_cents": d["capital_gain_distributions_cents"],
+        }
+
+    now, later = amounts(so_far), amounts(rest)
+    out = {**now, "so_far": now, "through": so_far["through"], "estimated": so_far["estimated"] or rest["estimated"]}
+    if not any(now.values()) and not any(later.values()):
+        return out | {"basis": "none"}
+    if history_from <= year_ago:
+        return out | {k: now[k] + later[k] for k in now} | {"basis": "last_year", "rest": later}
+    elapsed = (today - max(date(year, 1, 1), history_from)).days + 1
+    scale = min(365 / max(elapsed, 1), MAX_SCALE)
+    return out | {k: round(v * scale) for k, v in now.items()} | {"basis": "scaled"}
 
 
 def unrealized_gain(db: DbSession) -> int | None:
@@ -468,13 +468,18 @@ def estimate(t: dict, prof: dict, f: dict, today: date) -> dict:
 
     inv = f["investments"]
     dividends = typed.get("dividends", inv["dividends_cents"])
+    # Qualified: the share the payments show (labeled, or sorted by what the holding is), else the answer's share.
+    qualified_ratio = (
+        inv["qualified_cents"] / inv["dividends_cents"] if inv["dividends_cents"] else prof["qualified_share"] / 100
+    )
     derived = {
         "wages": full["gross"],
         "retirement": retirement,
         "hsa_benefits": full["hsa_benefits"],
         "interest": inv["interest_cents"],
         "dividends": inv["dividends_cents"],
-        "qualified_dividends": round(dividends * prof["qualified_share"] / 100),
+        "qualified_dividends": round(dividends * qualified_ratio),
+        "lt_gains": inv["capital_gain_cents"],
         "federal_withheld": full["federal"],
         "state_withheld": full["state"],
         "social_security_withheld": full["social_security"],
@@ -689,26 +694,44 @@ def estimate(t: dict, prof: dict, f: dict, today: date) -> dict:
     if inv["basis"] == "none":
         notes["interest"] = "No interest seen in taxable accounts yet. Type it from your bank's year-end summary."
         notes["dividends"] = (
-            "No dividends seen in taxable accounts yet. Brokerages often reinvest them out of sight; type them in."
+            "No dividends seen in taxable brokerage accounts yet. Type them from your broker if you have any."
+        )
+        notes["qualified_dividends"] = (
+            f"{prof['qualified_share']}% of dividends, typical for US stock funds. Taxed at the lower long-term rates."
         )
     else:
-        when = "the last 12 months" if inv["basis"] == "trailing" else "this year so far, scaled to a whole year"
+        sf = inv["so_far"]
+        how = (
+            "plus what came between now and December last year"
+            if inv["basis"] == "last_year"
+            else "scaled to a whole year (there's no history from last year to go on)"
+        )
+        through = short(inv["through"])
         notes["interest"] = (
-            f"Interest landing in bank and brokerage accounts over {when}. Retirement and HSA accounts left out."
+            f"{money(sf['interest_cents'])} so far in taxable bank and brokerage accounts (through {through}), {how}. "
+            "From Dividends & interest; retirement and HSA accounts left out."
         )
         notes["dividends"] = (
-            f"Dividends landing in taxable brokerage accounts over {when}. Reinvested dividends may be missing; "
-            "check your broker's year-to-date tax summary."
+            f"{money(sf['dividends_cents'])} so far in taxable brokerage accounts (through {through}), {how}. "
+            "Ordinary dividends, box 1a of the 1099-DIV."
         )
-    notes["qualified_dividends"] = (
-        f"{prof['qualified_share']}% of dividends, typical for US stock funds. Taxed at the lower long-term rates."
-    )
+        notes["qualified_dividends"] = (
+            "As the brokerage labels them"
+            + (", or by what each holding is where it doesn't (bond and money market funds are ordinary)"
+               if inv["estimated"] else "")
+            + ". Taxed at the lower long-term rates."
+        )  # fmt: skip
     gain = f.get("unrealized_gain_cents")
     gains_note = "Brokerages don't send sales to the app. Type this from your broker's realized gain/loss page."
     if gain is not None:
         gains_note += f" Your taxable accounts hold {money(gain)} of gains not yet sold."
     notes["st_gains"] = gains_note + " Taxed like pay."
     notes["lt_gains"] = gains_note + " Taxed at 0%, 15% or 20%."
+    if inv["basis"] != "none" and inv["capital_gain_cents"]:
+        notes["lt_gains"] = (
+            f"Fund capital gain distributions: {money(inv['capital_gain_cents'])} for the year, from Dividends & "
+            "interest. Add gains from your own sales (your broker's realized gain/loss page). Taxed at 0%, 15% or 20%."
+        )
     notes["other_income"] = "Side work, rental, gambling, a taxable state refund. A loss can go here as a negative."
     notes["adjustments"] = "Deductible IRA contributions, student loan interest, self-employed health insurance."
     notes["itemized"] = "Mortgage interest, state and local taxes (capped), charity, medical over 7.5% of income."
