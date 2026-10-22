@@ -491,6 +491,7 @@ def test_only_payroll_counts_as_pay(client, home):
     assert client.put("/api/plan/money-in", json={"key": "!!", "counts_as": "pay"}, headers=h).status_code == 422
 
 
+@needs_db
 def test_savings_rate_sources_bonus_third_paycheck_and_etrade(client, home):
     """Pay broken down by employer and paychecks; a bonus and a third two-weekly paycheck kept out of the usual
     month; withholding filled in from the usual stub for paychecks without one; transfers to E*TRADE invested."""
