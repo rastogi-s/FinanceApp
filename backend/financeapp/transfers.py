@@ -170,28 +170,6 @@ def match_transfers(db: DbSession, since: date | None = None) -> int:
     return pairs
 
 
-def people_with_rules(db: DbSession) -> set[str]:
-    """Zelle and Venmo names the household gave a category to (a MerchantRule "person jane doe")."""
-    return {
-        r.removeprefix(PERSON)
-        for r in db.scalars(select(MerchantRule.pattern).where(MerchantRule.pattern.startswith(PERSON)))
-    }
-
-
-def release_person(db: DbSession, name: str) -> list[Transaction]:
-    """After someone gives a Zelle or Venmo name a category: that person's payments that were taken for one-sided
-    transfers go back to normal categorizing (where the new rule picks them up). Returns them."""
-    back = []
-    for t in db.query(Transaction).filter(
-        Transaction.category_source == "transfer", Transaction.transfer_group_id.is_(None)
-    ):
-        if sender_of(t) == name:
-            t.category_source = "none"
-            back.append(t)
-    db.flush()
-    return back
-
-
 def match_brokerage_moves(db: DbSession, since: date, transfer: Category) -> int:
     """Pairs bank transactions with deposits into (and withdrawals from) linked brokerage accounts."""
     brokerages = db.scalars(
@@ -248,6 +226,28 @@ def match_brokerage_moves(db: DbSession, since: date, transfer: Category) -> int
         pairs += 1
     db.flush()
     return pairs
+
+
+def people_with_rules(db: DbSession) -> set[str]:
+    """Zelle and Venmo names the household gave a category to (a MerchantRule "person jane doe")."""
+    return {
+        r.removeprefix(PERSON)
+        for r in db.scalars(select(MerchantRule.pattern).where(MerchantRule.pattern.startswith(PERSON)))
+    }
+
+
+def release_person(db: DbSession, name: str) -> list[Transaction]:
+    """After someone gives a Zelle or Venmo name a category: that person's payments that were taken for one-sided
+    transfers go back to normal categorizing (where the new rule picks them up). Returns them."""
+    back = []
+    for t in db.query(Transaction).filter(
+        Transaction.category_source == "transfer", Transaction.transfer_group_id.is_(None)
+    ):
+        if sender_of(t) == name:
+            t.category_source = "none"
+            back.append(t)
+    db.flush()
+    return back
 
 
 def _is_card_payment(t: Transaction, account_type: str) -> bool:
