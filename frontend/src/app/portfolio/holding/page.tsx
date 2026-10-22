@@ -90,7 +90,7 @@ function Holding() {
       <Back />
       <div className="mb-4 flex items-start justify-between gap-4">
         <div className="min-w-0">
-          <h1 className="text-3xl font-semibold tracking-tight md:text-4xl">{data.symbol}</h1>
+          <h1 className="text-3xl font-semibold tracking-tight wrap-anywhere md:text-4xl">{data.symbol}</h1>
           <p className="mt-0.5 truncate text-sm text-muted-foreground">
             {data.name}
             {data.exchange && ` · ${data.exchange}`}
@@ -427,8 +427,8 @@ function AlertsCard({ s, onAdd }: { s: Security; onAdd: () => void }) {
           <ul className="mb-3 divide-y">
             {s.rules.map((r) => (
               <li key={r.id} className="flex items-center gap-3 py-2.5 text-sm">
-                <Bell className={cn("size-4", r.enabled ? "text-primary" : "text-muted-foreground")} aria-hidden />
-                <span className={cn("flex-1", !r.enabled && "text-muted-foreground line-through")}>{r.summary}</span>
+                <Bell className={cn("size-4 shrink-0", r.enabled ? "text-primary" : "text-muted-foreground")} aria-hidden />
+                <span className={cn("min-w-0 flex-1 wrap-anywhere", !r.enabled && "text-muted-foreground line-through")}>{r.summary}</span>
                 {r.triggered && <Badge variant="warning">Triggered</Badge>}
               </li>
             ))}

@@ -396,7 +396,7 @@ function ExposureRow({ c, rank, open, toggle }: { c: Company; rank: number; open
       <button className="flex w-full items-center gap-3 py-2 text-left" onClick={toggle} aria-expanded={open}>
         <span className="w-5 text-xs text-muted-foreground tabular-nums">{rank}</span>
         <span className="min-w-0 flex-1">
-          <span className="block text-sm font-semibold">{c.symbol ?? c.name}</span>
+          <span className="block truncate text-sm font-semibold">{c.symbol ?? c.name}</span>
           <span className="block truncate text-xs text-muted-foreground">
             {c.symbol ? `${c.name} · ` : ""}
             {c.sources.length === 1
@@ -406,7 +406,7 @@ function ExposureRow({ c, rank, open, toggle }: { c: Company; rank: number; open
               : `through ${c.sources.length} ${c.sources.some((s) => s.symbol === "direct") ? "holdings" : "funds"}`}
           </span>
         </span>
-        <span className="text-right">
+        <span className="shrink-0 text-right">
           <span className="block text-sm font-medium tabular-nums">{percent(c.percent, 2)}</span>
           <Money cents={c.cents} className="block text-xs text-muted-foreground" />
         </span>
@@ -417,8 +417,8 @@ function ExposureRow({ c, rank, open, toggle }: { c: Company; rank: number; open
           <ul className="grid grid-cols-1 gap-1.5 text-sm">
             {c.sources.map((s) => (
               <li key={s.symbol} className="flex justify-between gap-3">
-                <span>{s.symbol === "direct" ? "Held directly" : `Inside ${s.symbol}`}</span>
-                <span className="tabular-nums">
+                <span className="min-w-0 wrap-anywhere">{s.symbol === "direct" ? "Held directly" : `Inside ${s.symbol}`}</span>
+                <span className="shrink-0 tabular-nums">
                   {percent(s.percent, 2)} · <Money cents={s.cents} />
                 </span>
               </li>
@@ -799,9 +799,11 @@ function Holdings({ holdings, trends }: { holdings: Holding[]; trends?: Record<s
 
 function Title({ x }: { x: { symbol: string; live?: boolean } }) {
   return (
-    <span className="flex items-center gap-1.5 text-sm font-semibold">
-      {x.symbol}
-      {x.live && <span className="size-1.5 rounded-full bg-positive" title="Live price" aria-label="live price" />}
+    <span className="flex min-w-0 items-center gap-1.5 text-sm font-semibold">
+      <span className="truncate" title={x.symbol}>
+        {x.symbol}
+      </span>
+      {x.live && <span className="size-1.5 shrink-0 rounded-full bg-positive" title="Live price" aria-label="live price" />}
     </span>
   );
 }
@@ -813,7 +815,7 @@ function Row({ x, sub, change }: { x: Group | Holding; sub: string; change: Reac
         <Title x={x} />
         <p className="truncate text-xs text-muted-foreground">{sub}</p>
       </div>
-      <div className="text-right">
+      <div className="shrink-0 text-right">
         <Money cents={x.value_cents} className="text-sm font-medium" />
         {change}
       </div>
