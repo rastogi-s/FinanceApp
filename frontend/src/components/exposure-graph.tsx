@@ -192,7 +192,7 @@ export function ExposureGraph({ exposure, onSelect }: { exposure: Exposure; onSe
                 <>
                   <circle r={n.r} fill="var(--card)" stroke={n.color} strokeWidth={isSel ? 4 : 2.5} />
                   <text textAnchor="middle" dy="0.35em" className="fill-foreground text-[12px] font-semibold">
-                    {n.label}
+                    {n.label.length > 8 ? `${n.label.slice(0, 7)}…` : n.label}
                   </text>
                 </>
               ) : (
@@ -215,7 +215,7 @@ export function ExposureGraph({ exposure, onSelect }: { exposure: Exposure; onSe
         })}
       </svg>
 
-      <div className="mt-2 min-h-16 rounded-xl bg-muted/50 px-4 py-3 text-sm" aria-live="polite">
+      <div className="mt-2 min-h-16 rounded-xl bg-muted/50 px-4 py-3 text-sm wrap-anywhere" aria-live="polite">
         {!sel && <p className="text-muted-foreground">Tap a bubble to see which funds it reaches you through, or a fund to see what&apos;s in it.</p>}
         {sel?.kind === "company" && sel.company && (
           <p>

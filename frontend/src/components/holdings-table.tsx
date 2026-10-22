@@ -305,9 +305,12 @@ function Line({ x, trend, total, hasGain, scrolled }: { x: Row; trend?: Trend; t
 function Name({ x }: { x: Row }) {
   return (
     <>
-      <span className="flex items-center gap-1.5 font-semibold">
-        {x.symbol}
-        {x.live && <span className="size-1.5 rounded-full bg-positive" title="Live price" aria-label="live price" />}
+      <span className="flex min-w-0 items-center gap-1.5 font-semibold">
+        {/* Long fund codes like VANG.TARG.2055.PLUS end in an ellipsis instead of running into the numbers. */}
+        <span className="truncate" title={x.symbol}>
+          {x.symbol}
+        </span>
+        {x.live && <span className="size-1.5 shrink-0 rounded-full bg-positive" title="Live price" aria-label="live price" />}
       </span>
       <span className="block truncate text-xs text-muted-foreground">{x.name}</span>
     </>
