@@ -17,7 +17,18 @@ import { toast } from "@/components/ui/toast";
 import { api } from "@/lib/api";
 import { COLORS, type GoalsState, ICONS } from "@/lib/goals";
 import { resetHousehold, useApi } from "@/lib/household";
-import { LEVEL_NAMES, type Level, type PlanInputs, type PlanState, type SavingsMonth, type Scenario, type Utility, project } from "@/lib/plan";
+import {
+  LEVEL_NAMES,
+  type Level,
+  type CountsAs,
+  type MoneyIn,
+  type PlanInputs,
+  type PlanState,
+  type SavingsMonth,
+  type Scenario,
+  type Utility,
+  project,
+} from "@/lib/plan";
 import { cn } from "@/lib/utils";
 
 const monthName = new Intl.DateTimeFormat("en-US", {
@@ -116,6 +127,18 @@ function PlanView({ p, onSaved }: { p: Linked; onSaved: (p: PlanState) => void }
       return false;
     } finally {
       setSaving(false);
+    }
+  };
+  const countAs = async (key: string, as: CountsAs) => {
+    if (p.demo) {
+      toast("This can't be changed while the app shows sample data.");
+      return;
+    }
+    try {
+      onSaved(await api<PlanState>("/api/plan/money-in", { method: "PUT", body: { key, counts_as: as } }));
+      toast(as === "pay" ? "Counted as pay" : as === "me" ? "Counted as your own money, not money in" : "Counted as other money in");
+    } catch (e) {
+      toast((e as Error).message, "error");
     }
   };
   const saveScenario = () =>
@@ -292,6 +315,8 @@ function PlanView({ p, onSaved }: { p: Linked; onSaved: (p: PlanState) => void }
                 breakdown={i.savings_source.breakdown}
                 excluded={i.savings_source.excluded}
                 months={i.savings_source.months}
+                moneyIn={i.savings_source.money_in ?? []}
+                onCountAs={countAs}
                 differs={i.measured_savings_cents !== null && s.monthly !== i.measured_savings_cents}
                 typed={i.savings_typed && s.monthly === i.monthly_savings_cents}
                 derived={i.measured_savings_cents !== null ? <Money cents={i.measured_savings_cents} /> : null}
@@ -398,6 +423,8 @@ function Source({
   breakdown,
   excluded,
   months,
+  moneyIn,
+  onCountAs,
   differs,
   typed,
   derived,
@@ -407,6 +434,8 @@ function Source({
   breakdown?: { label: string; cents: number }[];
   excluded?: { label: string; cents: number } | null;
   months?: SavingsMonth[];
+  moneyIn?: MoneyIn[];
+  onCountAs?: (key: string, as: CountsAs) => void;
   differs: boolean;
   typed: boolean;
   derived: React.ReactNode;
@@ -414,7 +443,9 @@ function Source({
 }) {
   return (
     <>
-      {breakdown && breakdown.length > 0 && <Breakdown lines={breakdown} excluded={excluded ?? null} months={months ?? []} />}
+      {breakdown && breakdown.length > 0 && (
+        <Breakdown lines={breakdown} excluded={excluded ?? null} months={months ?? []} moneyIn={moneyIn ?? []} onCountAs={onCountAs} />
+      )}
       {typed && <span className="font-medium text-foreground">You typed this in. </span>}
       {differs && derived !== null ? <>The app works out {derived}. </> : null}
       {note}
@@ -440,10 +471,14 @@ function Breakdown({
   lines,
   excluded,
   months,
+  moneyIn,
+  onCountAs,
 }: {
-  lines: { label: string; cents: number }[];
+  lines: { label: string; cents: number; detail?: string }[];
   excluded: { label: string; cents: number } | null;
   months: SavingsMonth[];
+  moneyIn: MoneyIn[];
+  onCountAs?: (key: string, as: CountsAs) => void;
 }) {
   const total = lines.reduce((sum, l) => sum + l.cents, 0);
   return (
@@ -451,7 +486,10 @@ function Breakdown({
       <dl className="money grid grid-cols-[1fr_auto] gap-x-4 gap-y-1 text-xs tabular-nums">
         {lines.map((l) => (
           <div key={l.label} className="contents">
-            <dt className="text-muted-foreground">{l.label}</dt>
+            <dt className="text-muted-foreground">
+              {l.label}
+              {l.detail && <span className="block text-[11px] opacity-80">{l.detail}</span>}
+            </dt>
             <dd className={l.cents < 0 ? "text-right text-foreground" : "text-right text-positive"}>
               {l.cents < 0 ? "−" : "+"}
               <Money cents={Math.abs(l.cents)} />
@@ -485,7 +523,7 @@ function Breakdown({
                     Month
                   </th>
                   <th scope="col" className="py-1 font-normal">
-                    Pay
+                    Pay (deposits)
                   </th>
                   <th scope="col" className="py-1 font-normal">
                     Other in
@@ -506,6 +544,7 @@ function Breakdown({
                     </th>
                     <td className="py-1">
                       <Money cents={m.pay_cents} />
+                      {m.pay_deposits !== undefined && <span className="ml-1 text-muted-foreground">({m.pay_deposits})</span>}
                     </td>
                     <td className="py-1">
                       <Money cents={m.other_in_cents} />
@@ -525,8 +564,49 @@ function Breakdown({
               a month&apos;s pay looks wrong, open Spending and check how its deposits are categorized.
             </p>
           </div>
+          {moneyIn.length > 0 && <MoneyInList rows={moneyIn} months={months.length} onCountAs={onCountAs} />}
         </details>
       )}
+    </div>
+  );
+}
+
+const COUNTS_AS: Record<CountsAs, string> = { pay: "Pay", other: "Other money in", me: "My own money" };
+
+/** Who sent the money that came in, and how each is counted, with a way to change it (remembered for next time). */
+function MoneyInList({ rows, months, onCountAs }: { rows: MoneyIn[]; months: number; onCountAs?: (key: string, as: CountsAs) => void }) {
+  return (
+    <div className="mt-3 border-t pt-2">
+      <p className="font-medium text-foreground">Money in, by who sent it</p>
+      <p className="mt-0.5 text-muted-foreground">
+        Only payroll deposits count as pay. If something is counted wrong, change it here and it stays that way.
+      </p>
+      <ul className="mt-2 grid gap-2">
+        {rows.map((r) => (
+          <li key={`${r.as}:${r.key}`} className="flex items-center gap-3">
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-foreground capitalize">{r.key}</p>
+              <p className="money text-muted-foreground tabular-nums">
+                <Money cents={r.monthly_cents} /> a month, {r.count} deposit{r.count === 1 ? "" : "s"} in {months} month
+                {months === 1 ? "" : "s"}
+              </p>
+            </div>
+            <select
+              aria-label={`Count money from ${r.key} as`}
+              className="h-8 rounded-md border bg-background px-2 text-xs text-foreground"
+              value={r.as}
+              disabled={!onCountAs}
+              onChange={(e) => onCountAs?.(r.key, e.target.value as CountsAs)}
+            >
+              {(["pay", "other", "me"] as const).map((k) => (
+                <option key={k} value={k}>
+                  {COUNTS_AS[k]}
+                </option>
+              ))}
+            </select>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
@@ -641,7 +721,11 @@ function Utilities({ utilities }: { utilities: Utility[] }) {
           <li key={x.merchant} className="flex items-center justify-between gap-3 py-2.5 text-sm">
             <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
               <span className="truncate">{x.merchant}</span>
-              {x.went_up ? <Badge variant="negative">Price went up</Badge> : x.higher ? <Badge variant="warning">Higher than usual</Badge> : null}
+              {x.went_up ? (
+                <Badge variant="negative">Price went up</Badge>
+              ) : x.higher ? (
+                <Badge variant="warning">Higher than usual</Badge>
+              ) : null}
             </span>
             <span className="shrink-0 text-right text-muted-foreground">
               <Money cents={x.monthly_cents} style="exact" className="font-medium text-foreground" />

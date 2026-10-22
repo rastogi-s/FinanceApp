@@ -6,7 +6,7 @@ from sqlalchemy import select
 
 from financeapp import budget, household, plan
 from financeapp.api import plan_routes
-from financeapp.models import Account, Balance, HoldingSnapshot, Paycheck
+from financeapp.models import Account, Balance, HoldingSnapshot, Paycheck, Transaction
 from tests.conftest import csrf, db_of, make_client, needs_db
 from tests.test_budget import TODAY, add_transactions, history
 
@@ -433,3 +433,59 @@ def test_utilities_are_not_subscriptions(client, home):
     assert bills["Verizon"]["kind"] == "utility" and bills["State Farm"]["kind"] == "bill"
     duke = bills["Duke Energy"]
     assert duke["went_up"] is False and duke["higher"] is False and duke["usual_cents"] == 200_00
+
+
+def test_only_payroll_counts_as_pay(client, home):
+    """Pay is the employer's payroll deposits, however each bank words them; Zelle, reimbursements and money from
+    the household's own name are not pay, and anyone can be marked pay, other money in, or the household's own."""
+    from financeapp import transfers
+
+    home.setup(name="Shubham Rastogi")
+    history(client)
+    rows = []
+    for m in (7, 8, 9):
+        rows += [
+            (f"2026-{m:02}-01", "Deposit from NETAPP INC PAYROLL", 3_000, None),
+            (f"2026-{m:02}-15", "NETAPP INC DIR DEP PPD 99812", 3_000, "Other income"),  # another bank's words
+        ]
+    rows += [
+        ("2026-09-20", "NETAPP INC", 500, None),  # no payroll words, but the employer's name
+        ("2026-09-21", "NETAPP INC EXPENSE REIMB", 120, "Other income"),
+        ("2026-09-12", "Zelle payment from JANE DOE conf 1234", 900, "Other income"),
+        ("2026-09-13", "Zelle payment from SHUBHAM RASTOGI conf 77", 2_000, "Other income"),
+        ("2026-09-14", "VENMO CASHOUT", 300, "Other income"),
+    ]
+    add_transactions(client, rows)
+    with db_of(client).session() as db:
+        # These came in by hand-picked category; a sync's guesses are what get re-sorted.
+        for t in db.scalars(
+            select(Transaction).where(Transaction.merchant.ilike("%zelle%") | Transaction.merchant.ilike("%venmo%"))
+        ):
+            t.category_source = "provider"
+        transfers.match_transfers(db, date(2026, 6, 1))
+    link_balance(client, 1_000)
+
+    def september(p):
+        return next(r for r in p["inputs"]["savings_source"]["months"] if r["month"] == "2026-09-01")
+
+    p = client.get("/api/plan").json()
+    src = p["inputs"]["savings_source"]
+    sep = september(p)
+    assert sep["pay_cents"] == 6_500_00 and sep["pay_deposits"] == 3
+    assert sep["other_in_cents"] == 120_00 + 900_00  # the reimbursement and Jane; not Shubham, not the cash-out
+    assert "NETAPP" in src["breakdown"][0]["detail"]
+    who = {(m["key"], m["as"]) for m in src["money_in"]}
+    assert ("netapp", "pay") in who and ("jane doe", "other") in who and ("shubham rastogi", "me") in who
+
+    # Jane turns out to be the household's own other account; then back.
+    h = csrf(client)
+    p = client.put("/api/plan/money-in", json={"key": "jane doe", "counts_as": "me"}, headers=h).json()
+    assert september(p)["other_in_cents"] == 120_00
+    p = client.put("/api/plan/money-in", json={"key": "JANE DOE", "counts_as": "other"}, headers=h).json()
+    assert september(p)["other_in_cents"] == 120_00 + 900_00
+    # NetApp isn't pay after all (say it's a pension): it all moves to nothing counted as pay.
+    p = client.put("/api/plan/money-in", json={"key": "netapp", "counts_as": "other"}, headers=h).json()
+    assert september(p)["pay_cents"] == 0
+    p = client.put("/api/plan/money-in", json={"key": "netapp", "counts_as": "pay"}, headers=h).json()
+    assert september(p)["pay_cents"] == 6_500_00
+    assert client.put("/api/plan/money-in", json={"key": "!!", "counts_as": "pay"}, headers=h).status_code == 422

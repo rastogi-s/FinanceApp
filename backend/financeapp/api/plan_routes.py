@@ -1,13 +1,15 @@
 """The Plan page (projection, financial independence, ideas) and the setup guide."""
 
+from datetime import timedelta
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session as DbSession
 
-from financeapp import demo, guide, household, plan
+from financeapp import budget, demo, guide, household, plan, sync, transfers
 from financeapp.api.deps import Signed, audit, settings_of, signed_in
+from financeapp.categorize import normalize_merchant
 from financeapp.models import Preference
 from financeapp.sync import today
 
@@ -87,6 +89,42 @@ def plan_settings(body: PlanIn, request: Request, who: Signed = Depends(signed_i
         changes["spending"] = {k: getattr(body.spending, k) for k in body.spending.model_fields_set}
     plan.set_preferences(db, changes)
     audit(db, request, "plan_changed", who.user.id, fields=sorted(changes))
+    return build(db)
+
+
+class MoneyInIn(BaseModel):
+    """How to count a payer or sender: pay, other money in, or the household's own money (a transfer)."""
+
+    key: str = Field(min_length=1, max_length=200)
+    counts_as: Literal["pay", "other", "me"]
+
+
+@router.put("/plan/money-in")
+def money_in(body: MoneyInIn, request: Request, who: Signed = Depends(signed_in)) -> dict:
+    no_demo(who)
+    db = db_of(request)
+    key = normalize_merchant(body.key)
+    if not key:
+        raise HTTPException(422, "Say who the money is from.")
+    prefs = budget.preferences(db)
+    payroll, not_pay = set(prefs["payroll"]), set(prefs["not_pay"])
+    own = set(prefs.get("own_senders", []))
+    was_own = key in own
+    payroll.discard(key)
+    not_pay.discard(key)
+    own.discard(key)
+    if body.counts_as == "pay":
+        payroll.add(key)
+    elif body.counts_as == "other":
+        not_pay.add(key)
+    else:
+        own.add(key)
+        not_pay.add(key)
+    budget.set_preferences(db, payroll=sorted(payroll), not_pay=sorted(not_pay), own_senders=sorted(own))
+    db.flush()
+    if was_own or body.counts_as == "me":
+        transfers.recheck_own(db, today() - timedelta(days=sync.TRANSFER_DAYS))
+    audit(db, request, "money_in_changed", who.user.id, counts_as=body.counts_as)
     return build(db)
 
 

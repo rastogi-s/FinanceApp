@@ -3,6 +3,7 @@
 import json
 import logging
 from contextlib import asynccontextmanager
+from datetime import timedelta
 from functools import lru_cache
 
 from fastapi import FastAPI, Request, Response
@@ -29,6 +30,8 @@ from financeapp.api import (
 from financeapp.config import PACKAGE_DIR, Settings, get_settings
 from financeapp.db import Database
 from financeapp.scheduler import Scheduler
+from financeapp.sync import TRANSFER_DAYS, today
+from financeapp.transfers import match_transfers
 from financeapp.web import SecurityHeaders, StaticSite
 
 log = logging.getLogger("financeapp")
@@ -94,6 +97,16 @@ class BodyLimit:
         await self.app(scope, limited, send)
 
 
+def refresh_transfers(database: Database) -> None:
+    """After an update, sort the whole history again with the current rules for transfers (card payments,
+    Zelle from your own name), so the numbers are right without waiting for the next sync."""
+    try:
+        with database.session() as db:
+            match_transfers(db, today() - timedelta(days=TRANSFER_DAYS))
+    except Exception:
+        log.exception("Re-sorting transfers at startup failed")
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
     crypto.configure(settings.encryption_key)
@@ -106,6 +119,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             database.migrate()
             with database.session() as db:
                 code = auth.issue_setup_code(db)
+            refresh_transfers(database)
             if code:
                 log.warning(
                     "\n\n    First-run setup code:  %s   (valid 24 hours)\n"
