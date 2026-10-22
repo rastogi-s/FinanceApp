@@ -10,7 +10,7 @@ from financeapp.config import Settings
 from financeapp.main import create_app
 from financeapp.models import Account, AlertEvent, Balance, Connection, Goal, GoalFunding
 from tests.conftest import csrf, db_of, needs_db
-from tests.test_alerts import sent  # noqa: F401 - a fixture
+from tests.test_alerts import NOON, sent  # noqa: F401 - a fixture
 from tests.test_budget import TODAY, history
 
 pytestmark = needs_db
@@ -148,7 +148,8 @@ def test_monthly_from_savings_and_typed():
     assert out["summary"]["short_cents"] == 0
 
 
-def test_milestone_alerts_once_and_never_for_an_edit(client, home, sent):  # noqa: F811
+def test_milestone_alerts_once_and_never_for_an_edit(client, home, sent, monkeypatch):  # noqa: F811
+    monkeypatch.setattr(alerts, "now", lambda: NOON)  # outside quiet hours, whenever the tests run
     home.setup()
     hysa = account(client, "hysa", "depository", 30_000)
     body = {"name": "House", "target_cents": 100_000_00, "funding": [{"account_id": hysa}]}
