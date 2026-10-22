@@ -1,5 +1,29 @@
 [
   {
+    "version": "0.25.0",
+    "title": "Dividends and interest",
+    "features": [
+      {
+        "id": "dividends-page",
+        "title": "What your investments pay you",
+        "body": "Portfolio has a new Dividends & interest page: dividends for the last 12 months and by year, by month with the next 11 months expected, every payer with its yield, yield on cost and five-year dividend growth, and what's coming up with ex-dividend dates. The app now reads your brokerages' activity from Plaid, two years back.",
+        "tryIt": "/portfolio/income"
+      },
+      {
+        "id": "drip-projection",
+        "title": "Reinvesting, 1 to 20 years out",
+        "body": "Turn reinvesting (DRIP) on or off and move price and dividend growth to see your yearly dividends in 1, 5, 10 and 20 years, and how much the shares bought with dividends add. Holdings your brokerage already reinvests are marked.",
+        "tryIt": "/portfolio/income"
+      },
+      {
+        "id": "interest-page",
+        "title": "Interest from savings and CDs",
+        "body": "The Interest tab shows interest from savings, money market accounts, CDs and brokerage cash by month, each account's APY (estimated from recent interest until you type it in), the next 12 months and 10 years ahead if rates move, and for a CD what it earns until it matures and what rolling it over would. A For taxes card splits qualified and ordinary dividends and interest in taxable accounts.",
+        "tryIt": "/portfolio/income"
+      }
+    ]
+  },
+  {
     "version": "0.24.0",
     "title": "Taxes this year",
     "features": [

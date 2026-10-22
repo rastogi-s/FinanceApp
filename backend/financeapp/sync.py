@@ -17,9 +17,27 @@ from sqlalchemy.orm import Session as DbSession
 from financeapp import crypto, notify
 from financeapp.categorize import categorize
 from financeapp.config import Settings
-from financeapp.connectors.base import AccountData, Connector, ConnectorError, FetchResult, HoldingData, TransactionData
+from financeapp.connectors.base import (
+    AccountData,
+    Connector,
+    ConnectorError,
+    FetchResult,
+    HoldingData,
+    InvestmentTransactionData,
+    TransactionData,
+)
 from financeapp.db import Database
-from financeapp.models import Account, AuditEvent, Balance, Connection, HoldingSnapshot, SyncRun, Transaction, now
+from financeapp.models import (
+    Account,
+    AuditEvent,
+    Balance,
+    Connection,
+    HoldingSnapshot,
+    InvestmentTransaction,
+    SyncRun,
+    Transaction,
+    now,
+)
 from financeapp.transfers import match_transfers
 
 log = logging.getLogger("financeapp")
@@ -156,6 +174,38 @@ def save_transactions(
     return added
 
 
+def save_investment_transactions(
+    db: DbSession, accounts: dict[str, Account], txns: list[InvestmentTransactionData], source: str
+) -> int:
+    """Adds new brokerage activity and updates what changed. Returns how many were new."""
+    ids = [a.id for a in accounts.values()]
+    existing = {
+        (t.account_id, t.external_id): t
+        for t in db.scalars(select(InvestmentTransaction).where(InvestmentTransaction.account_id.in_(ids)))
+    }
+    added = 0
+    for data in txns:
+        account = accounts.get(data.account_external_id)
+        if account is None:
+            continue
+        t = existing.get((account.id, data.external_id))
+        if t is None:
+            t = InvestmentTransaction(account_id=account.id, external_id=data.external_id, source=source)
+            db.add(t)
+            existing[(account.id, data.external_id)] = t
+            added += 1
+        t.date = data.date
+        t.type = data.type
+        t.subtype = data.subtype
+        t.symbol = data.symbol
+        t.name = data.name
+        t.quantity = data.quantity
+        t.price = data.price
+        t.amount_cents = data.amount_cents
+    db.flush()
+    return added
+
+
 def save_fetch(db: DbSession, connection: Connection, result: FetchResult, on: date) -> dict:
     accounts = save_accounts(db, connection, result.accounts, on)
     holdings = save_holdings(db, accounts, result.holdings, on) if result.holdings is not None else 0
@@ -166,6 +216,7 @@ def save_fetch(db: DbSession, connection: Connection, result: FetchResult, on: d
                 total = sum(h.value_cents for h in result.holdings if accounts.get(h.account_external_id) is a)
                 save_balance(db, a.id, on, total)
     added = save_transactions(db, accounts, result.transactions, connection.provider)
+    activity = save_investment_transactions(db, accounts, result.investment_transactions, connection.provider)
     removed = 0
     if result.removed_transaction_ids:
         ids = [a.id for a in accounts.values()]
@@ -175,7 +226,13 @@ def save_fetch(db: DbSession, connection: Connection, result: FetchResult, on: d
             )
         ).rowcount
     connection.state = result.state
-    return {"accounts": len(accounts), "holdings": holdings, "new_transactions": len(added), "removed": removed}
+    return {
+        "accounts": len(accounts),
+        "holdings": holdings,
+        "new_transactions": len(added),
+        "removed": removed,
+        "new_investment_activity": activity,
+    }
 
 
 # ---- the sync itself

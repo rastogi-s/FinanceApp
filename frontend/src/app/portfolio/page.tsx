@@ -9,6 +9,7 @@ import {
   ArrowUpRight,
   ChevronDown,
   ChevronRight,
+  Coins,
   Info,
   Layers,
   List,
@@ -31,7 +32,8 @@ import { toast } from "@/components/ui/toast";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { type Group, combine, dayCents, gain, gainCents, priceOf } from "@/lib/holdings";
-import { type Holding, type LinkedHousehold, resetHousehold } from "@/lib/household";
+import { type Holding, type LinkedHousehold, resetHousehold, useApi } from "@/lib/household";
+import { type Income, dayLabel } from "@/lib/income";
 import { useRemembered } from "@/lib/nav";
 import {
   type Company,
@@ -112,6 +114,7 @@ function Body({ h }: { h: LinkedHousehold }) {
         </CardContent>
       </Card>
 
+      <IncomeLink />
       <Allocation h={h} />
       {p ? <Largest p={p} /> : <ListSkeleton title="Largest positions" rows={6} />}
       {p ? <RealExposure p={p} /> : <ListSkeleton title="Your real exposure" rows={5} wide />}
@@ -168,6 +171,41 @@ function WhenNear({ children, placeholder }: { children: ReactNode; placeholder:
     return () => io.disconnect();
   }, []);
   return near ? <>{children}</> : <div ref={ref}>{placeholder}</div>;
+}
+
+
+/** The way to Dividends & interest, with what they paid in the last year. */
+function IncomeLink() {
+  const { data } = useApi<Income>("/api/income");
+  const total = data ? data.dividends.received_12m_cents + data.interest.received_12m_cents : null;
+  return (
+    <Link
+      href="/portfolio/income"
+      className="group flex items-center gap-4 rounded-xl border bg-card px-5 py-4 shadow-[0_1px_2px_rgb(0_0_0/0.04)] hover:bg-muted/40 md:col-span-2"
+    >
+      <span className="grid size-10 shrink-0 place-items-center rounded-full bg-accent text-accent-foreground">
+        <Coins className="size-5" aria-hidden />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block font-medium">Dividends & interest</span>
+        <span className="block text-sm text-muted-foreground">
+          {total === null ? (
+            "What your money paid you, and where reinvesting takes it"
+          ) : (
+            <>
+              <Money cents={total} /> in the last 12 months
+              {data!.dividends.upcoming[0] && (
+                <>
+                  {" "}· next {data!.dividends.upcoming[0].symbol} {dayLabel(data!.dividends.upcoming[0].pay_date)}
+                </>
+              )}
+            </>
+          )}
+        </span>
+      </span>
+      <ChevronRight className="size-5 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5" aria-hidden />
+    </Link>
+  );
 }
 
 function Allocation({ h }: { h: LinkedHousehold }) {
