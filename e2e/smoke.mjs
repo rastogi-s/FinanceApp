@@ -26,6 +26,7 @@ const PLACES = [
   ["budget", "/budget", "tab"],
   ["portfolio", "/portfolio", "tab"],
   ["plan", "/plan", "tab"],
+  ["goals", "/goals", "direct"],
   ["taxes", "/taxes", "direct"],
   ["settings", "/settings", "header"],
   ["accounts", "/settings/accounts", "direct"],

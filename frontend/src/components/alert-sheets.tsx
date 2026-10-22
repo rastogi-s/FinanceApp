@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Bell, ChartPie, PiggyBank, Trash2, TrendingDown, TrendingUp } from "lucide-react";
+import { Bell, ChartPie, PiggyBank, Target, Trash2, TrendingDown, TrendingUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select } from "@/components/ui/input";
 import { Sheet } from "@/components/ui/sheet";
@@ -11,7 +11,7 @@ import { cn } from "@/lib/utils";
 
 export type Rule = {
   id: number;
-  kind: "price" | "dip" | "budget" | "concentration";
+  kind: "price" | "dip" | "budget" | "concentration" | "goal";
   params: Record<string, number | string | null>;
   enabled: boolean;
   summary: string;
@@ -27,6 +27,7 @@ export type RuleIn = (
   | { kind: "dip"; symbol: string | null; from_high_percent?: number; below_average?: 50 | 200 }
   | { kind: "budget"; category_id: number | null; percent?: number; forecast?: boolean }
   | { kind: "concentration"; percent: number }
+  | { kind: "goal"; goal_id: number | null }
 ) & { priority?: Priority };
 
 export const PRIORITY_OPTIONS = [
@@ -35,8 +36,8 @@ export const PRIORITY_OPTIONS = [
   ["low", "Quiet", "No banner or sound. It waits in the ntfy app and here."],
 ] as const;
 
-export const KIND_ICON = { price: TrendingUp, dip: TrendingDown, budget: PiggyBank, concentration: ChartPie } as const;
-const KIND_LABEL = { price: "A price", dip: "A dip", budget: "A budget", concentration: "One company" } as const;
+export const KIND_ICON = { price: TrendingUp, dip: TrendingDown, budget: PiggyBank, concentration: ChartPie, goal: Target } as const;
+const KIND_LABEL = { price: "A price", dip: "A dip", budget: "A budget", concentration: "One company", goal: "A goal" } as const;
 
 type PriceMode = "above" | "below" | "move_percent";
 type DipMode = "high" | "200" | "50";
@@ -53,6 +54,7 @@ export function RuleSheet({
   currentPrice,
   symbols = [],
   categories = [],
+  goals = [],
   save,
   onRemove,
 }: {
@@ -64,6 +66,7 @@ export function RuleSheet({
   currentPrice?: number | null;
   symbols?: string[];
   categories?: { id: number; name: string }[];
+  goals?: { id: number; name: string }[];
   save: (rule: RuleIn, id?: number) => Promise<void>;
 }) {
   return (
@@ -81,6 +84,7 @@ export function RuleSheet({
           currentPrice={currentPrice ?? null}
           symbols={symbols}
           categories={categories}
+          goals={goals}
           save={save}
           done={() => onOpenChange(false)}
         />
@@ -100,6 +104,7 @@ function RuleForm({
   currentPrice,
   symbols,
   categories,
+  goals,
   save,
   done,
 }: {
@@ -108,6 +113,7 @@ function RuleForm({
   currentPrice: number | null;
   symbols: string[];
   categories: { id: number; name: string }[];
+  goals: { id: number; name: string }[];
   save: (rule: RuleIn, id?: number) => Promise<void>;
   done: () => void;
 }) {
@@ -125,6 +131,7 @@ function RuleForm({
     return "";
   });
   const [category, setCategory] = useState<string>(p.category_id != null ? String(p.category_id) : "");
+  const [goal, setGoal] = useState<string>(p.goal_id != null ? String(p.goal_id) : "");
   const [budgetPct, setBudgetPct] = useState<string>(
     rule?.kind === "budget" ? (p.forecast ? "forecast" : String(p.percent)) : "90",
   );
@@ -158,6 +165,8 @@ function RuleForm({
         budgetPct === "forecast"
           ? { kind, category_id: category ? Number(category) : null, forecast: true }
           : { kind, category_id: category ? Number(category) : null, percent: Number(budgetPct) };
+    } else if (kind === "goal") {
+      body = { kind, goal_id: goal ? Number(goal) : null };
     } else {
       const n = Number(concPct.replace(/[%\s]/g, ""));
       if (!Number.isFinite(n) || n < 1 || n > 100) return setError("Pick a share between 1% and 100%.");
@@ -179,8 +188,8 @@ function RuleForm({
   return (
     <form onSubmit={submit} className="grid grid-cols-1 gap-4">
       {!rule && (
-        <div role="radiogroup" aria-label="What to watch" className={cn("grid gap-2", fixed ? "grid-cols-2" : "grid-cols-2 sm:grid-cols-4")}>
-          {(fixed ? (["price", "dip"] as const) : (["price", "dip", "budget", "concentration"] as const)).map((k) => {
+        <div role="radiogroup" aria-label="What to watch" className={cn("grid gap-2", fixed ? "grid-cols-2" : "grid-cols-3 sm:grid-cols-5")}>
+          {(fixed ? (["price", "dip"] as const) : (["price", "dip", "budget", "concentration", "goal"] as const)).map((k) => {
             const Icon = KIND_ICON[k];
             return (
               <button
@@ -373,6 +382,24 @@ function RuleForm({
           error={error}
         >
           <Input value={concPct} onChange={(e) => setConcPct(e.target.value)} inputMode="decimal" placeholder="10" />
+        </Field>
+      )}
+
+      {kind === "goal" && (
+        <Field
+          id="rule-goal"
+          label="When this reaches 25%, 50%, 75% and 100%"
+          hint="Checked after every sync. Only the furthest step reached sends anything, and never for a change you make yourself."
+          error={error}
+        >
+          <Select value={goal} onChange={(e) => setGoal(e.target.value)}>
+            <option value="">Any goal</option>
+            {goals.map((g) => (
+              <option key={g.id} value={g.id}>
+                {g.name}
+              </option>
+            ))}
+          </Select>
         </Field>
       )}
 

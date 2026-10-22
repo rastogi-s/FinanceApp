@@ -317,7 +317,7 @@ def _run(database: Database, settings: Settings, trigger: str, only: list[int] |
     try:
         from financeapp import alerts
 
-        alerts.check(database, settings, {"budget", "concentration"})
+        alerts.check(database, settings, {"budget", "concentration", "goal"})
     except Exception:  # an alert problem never fails the sync
         log.exception("checking alerts after the sync failed")
     return r

@@ -1,5 +1,5 @@
-"""Alert rules: price, dip, budget and concentration. Checked after every price update and every sync, sent by ntfy push
-with email as the fallback (notify.py).
+"""Alert rules: price, dip, budget, concentration and goal milestones. Checked after every price update and every sync,
+sent by ntfy push with email as the fallback (notify.py).
 
 Rules and their params
   price          {"symbol": "VOO", "above": 600} or {"symbol": "VOO", "below": 500}: the price crosses a line;
@@ -14,10 +14,13 @@ Rules and their params
                  by the end of the month (forecast.py); category_id null means each category on its own
   concentration  {"percent": 10}: any one company reaches 10% of everything invested, counting what's inside funds
                  (look-through, when the fund's holdings are known)
+  goal           {"goal_id": 3}: a savings goal reaches 25%, 50%, 75% and 100% of its target (goals.py); goal_id
+                 null means every goal. Only the furthest milestone reached sends anything, and a goal changed in
+                 the app (a new target, an account added) never sends one for the change itself.
 
 No repeats. A rule fires when its condition becomes true and re-arms only after it has clearly stopped being true:
 a price back across its line by 1%, a company back under its limit by a point, a dip back within 3 points of
-the 52-week high's line. A budget alert can fire once a
+the 52-week high's line, a goal back 10 points under a milestone. A budget alert can fire once a
 month (a heads-up once a month per category) and a daily move once a day. Every alert carries a dedup key that
 the database keeps unique, so even two copies of the app checking at once can't save or send the same alert twice.
 
@@ -52,11 +55,13 @@ from financeapp.models import AlertEvent, AlertRule, AuditEvent, Preference, now
 log = logging.getLogger("financeapp")
 REARM_PRICE = 0.01  # back across the line by 1%
 REARM_POINTS = 1.0  # back under a concentration limit by 1 point
+REARM_GOAL = 10.0  # back 10 points under a goal milestone
 REARM_DIP = 3.0  # back within 7% of the 52-week high, after a "10% under" alert
 DIP_MAX = 90  # the deepest "under its 52-week high" step
 TREND_DAYS = 7  # a dip is only judged on a price and trend from the last week
 NOT_ADVICE = "Information only, not advice."
 MAX_ATTEMPTS = 3
+MILESTONES = (25, 50, 75, 100)
 KEEP_DAYS = 180
 PRIORITIES = ("low", "default", "high")  # quietest first
 DEFAULT_PRIORITY = "high"
@@ -233,6 +238,40 @@ def concentration_hits(rule: AlertRule, companies: list[dict]) -> list[Hit]:
     return hits
 
 
+MILESTONE_WORDS = {25: "A quarter of the way.", 50: "Halfway there.", 75: "Three quarters of the way."}
+
+
+def goal_hits(rule: AlertRule, goals: list[dict], silent: bool = False) -> list[Hit]:
+    """One hit per goal and milestone. `silent` (after a change made in the app) marks what's reached without
+    sending anything, so typing a smaller target doesn't announce a milestone."""
+    gid = rule.params.get("goal_id")
+    keys = (rule.state or {}).get("keys", {})
+    hits = []
+    for g in goals:
+        if (gid is not None and g["id"] != gid) or g["percent"] is None:
+            continue
+        pct = g["percent"]
+        furthest = max((m for m in MILESTONES if pct >= m), default=None)
+        for m in MILESTONES:
+            key = f"{g['id']}:{m}"
+            quiet = silent or (furthest is not None and m < furthest and not keys.get(key, {}).get("on"))
+            if m == 100:
+                title, body = f"{g['name']}: goal reached", "Everything you set out to save is there."
+            else:
+                title = f"{g['name']} is {m}% of the way there"
+                body = MILESTONE_WORDS[m]
+                if g.get("projected_month"):
+                    body += f" On pace for {date.fromisoformat(g['projected_month']).strftime('%B %Y')}."
+            hits.append(Hit(key, pct >= m, pct < m - REARM_GOAL, title, body, quiet))
+    return hits
+
+
+def settle_goals(db: DbSession, goals: list[dict]) -> None:
+    """After a goal is added or changed in the app: what it has reached now counts as reached, without an alert."""
+    for r in db.scalars(select(AlertRule).where(AlertRule.kind == "goal")):
+        fire(db, r, goal_hits(r, goals, silent=True))
+
+
 # ---- firing
 
 
@@ -261,6 +300,8 @@ def fire(db: DbSession, rule: AlertRule, hits: list[Hit]) -> int:
             if db.execute(stmt.on_conflict_do_nothing(index_elements=["dedup_key"])).rowcount:
                 fired += 1
         keys[h.key] = k
+    if rule.kind == "goal":  # a goal that's gone
+        keys = {k: v for k, v in keys.items() if k in {h.key for h in hits}}
     # Only the most recent keys matter for budgets and daily moves; keep the state small.
     if rule.kind in ("price", "budget") and len(keys) > 40:
         keys = dict(sorted(keys.items())[-40:])
@@ -269,8 +310,8 @@ def fire(db: DbSession, rule: AlertRule, hits: list[Hit]) -> int:
 
 
 def evaluate(db: DbSession, kinds: set[str], companies: list[dict] | None = None, budget_state: dict | None = None,
-             t: datetime | None = None) -> int:  # fmt: skip
-    """Checks every enabled rule of these kinds. Budget and concentration rules need what they look at passed in
+             t: datetime | None = None, goals: list[dict] | None = None) -> int:  # fmt: skip
+    """Checks every enabled rule of these kinds. Budget, concentration and goal rules need what they look at passed in
     (built once by the caller), so a check with nothing to look at is skipped rather than seen as 'all clear'."""
     t = t or now()
     rules = list(db.scalars(select(AlertRule).where(AlertRule.enabled.is_(True), AlertRule.kind.in_(kinds))))
@@ -288,6 +329,8 @@ def evaluate(db: DbSession, kinds: set[str], companies: list[dict] | None = None
             hits = (forecast_hits if r.params.get("forecast") else budget_hits)(r, budget_state, day)
         elif r.kind == "concentration" and companies is not None:
             hits = concentration_hits(r, companies)
+        elif r.kind == "goal" and goals is not None:
+            hits = goal_hits(r, goals)
         else:
             continue
         fired += fire(db, r, hits)
@@ -352,16 +395,19 @@ def send_pending(db: DbSession, settings: Settings, t: datetime | None = None) -
 def check(database: Database, settings: Settings, kinds: set[str]) -> int:
     """Checks the rules of these kinds against current numbers, then sends. Used by the scheduler and after a sync.
     Returns how many new alerts there were."""
-    from financeapp import budget, household, lookthrough
+    from financeapp import budget, goals, household, lookthrough
 
     with database.session() as db:
         companies = None
         state = None
+        progress = None
         if "concentration" in kinds:
             companies = lookthrough.exposure(db, household.counted(db))["companies"]
         if "budget" in kinds:
             state = budget.build(db)
-        fired = evaluate(db, kinds, companies=companies, budget_state=state)
+        if "goal" in kinds:
+            progress = goals.build(db)["goals"]
+        fired = evaluate(db, kinds, companies=companies, budget_state=state, goals=progress)
     with database.session() as db:
         send_pending(db, settings)
         db.execute(delete(AlertEvent).where(AlertEvent.fired_at < now() - timedelta(days=KEEP_DAYS)))

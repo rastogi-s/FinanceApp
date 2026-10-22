@@ -27,11 +27,10 @@ from datetime import date, timedelta
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session as DbSession
 
-from financeapp import forecast, transfers
+from financeapp import forecast, goals, transfers
 from financeapp.categorize import normalize_merchant
 from financeapp.models import (
     Account,
-    Balance,
     BudgetLine,
     BudgetVersion,
     Category,
@@ -529,11 +528,7 @@ def build(db: DbSession) -> dict:
     moves = Moves(db, accounts, since)
     history = [s for m in months if (s := savings_for(ledger, stubs, m, prefs["include_match"], payers, moves))]
 
-    cash = 0
-    for a in accounts:
-        if a.type == "depository":
-            b = db.scalar(select(Balance).where(Balance.account_id == a.id).order_by(Balance.date.desc()).limit(1))
-            cash += b.current_cents if b else 0
+    held = goals.cash_in_goals(db, accounts)
     essentials = sum(line["limit_cents"] for line in lines if line["essential"])
 
     people = {u.id: u.name for u in db.scalars(select(User))}
@@ -563,8 +558,14 @@ def build(db: DbSession) -> dict:
         "emergency": {
             "months": prefs["emergency_months"],
             "monthly_cents": essentials,
-            "target_cents": essentials * prefs["emergency_months"],
-            "have_cents": cash,
+            "target_cents": held["target_cents"]
+            if held["target_cents"] is not None
+            else essentials * prefs["emergency_months"],
+            "target_typed": held["target_cents"] is not None,
+            # Only cash meant for emergencies: the accounts picked for it, or the cash no other goal has (goals.py).
+            "have_cents": held["have_cents"],
+            "set_aside_cents": held["set_aside_cents"],
+            "picked": held["picked"],
         },
         "include_match": prefs["include_match"],
         "versions": [version_json(v, people, totals) for v in versions],

@@ -82,7 +82,17 @@ export type BudgetState = {
   forecast: { projected_cents: number; limit_cents: number; heading_over: number[]; days_left: number } | null;
   savings_rate: SavingsMonth | null;
   savings_history: SavingsMonth[];
-  emergency: { months: number; monthly_cents: number; target_cents: number; have_cents: number };
+  emergency: {
+    months: number;
+    monthly_cents: number;
+    target_cents: number;
+    target_typed: boolean;
+    have_cents: number;
+    /** Cash set aside for other goals, which doesn't count. */
+    set_aside_cents: number;
+    /** Accounts were picked for the emergency fund on the Goals page (otherwise it's the cash no goal has). */
+    picked: boolean;
+  };
   include_match: boolean;
   versions: Version[];
   paychecks: Paycheck[];

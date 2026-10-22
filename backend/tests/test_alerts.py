@@ -268,7 +268,7 @@ def test_starter_rules_and_check_after_budget(client, home, sent, monkeypatch):
     r = client.get("/api/alerts")
     assert r.status_code == 200
     kinds = sorted(x["kind"] for x in r.json()["rules"])
-    assert kinds == ["budget", "budget", "concentration", "dip", "dip"]  # from the migrations
+    assert kinds == ["budget", "budget", "concentration", "dip", "dip", "goal"]  # from the migrations
     assert "Any category is on pace to go over its budget" in [x["summary"] for x in r.json()["rules"]]
     monkeypatch.setattr(budget, "today", lambda: date(2026, 10, 21))
     assert alerts.check(db_of(client), client.app.state.settings, {"budget", "concentration"}) == 0

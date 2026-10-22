@@ -9,7 +9,8 @@ import statistics
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
-from financeapp import forecast, plan
+from financeapp import forecast, goals, plan
+from financeapp.models import Goal, GoalFunding
 
 SEED = 20261019
 
@@ -52,6 +53,13 @@ HOLDINGS = [
 ]
 
 CASH = [("Chase checking", 14_350), ("Ally savings", 38_900), ("Marcus 12-month CD", 25_000)]
+# goal, name, icon, color, priority, target (dollars), months from now (None: no date), funding [(account id, dollars)]
+GOALS = [
+    (2, "House down payment", "house", "blue", 1, 90_000, 48, [(3, 25_000), (9, 25_000)]),
+    (3, "Japan trip", "plane", "pink", 2, 8_000, 10, [(1, 2_500)]),
+    (4, "New car", "car", "amber", 3, 35_000, None, []),
+]
+GOAL_SET_ASIDE = sum(d for *_, funding in GOALS for _, d in funding)
 DEBTS = [("Amex Gold", 2_140), ("Chase Sapphire", 860)]
 
 
@@ -443,7 +451,10 @@ def budget(today: date | None = None) -> dict:
             "months": 6,
             "monthly_cents": essentials,
             "target_cents": essentials * 6,
-            "have_cents": _cents(sum(v for _, v in CASH)),
+            "target_typed": False,
+            "have_cents": _cents(sum(v for _, v in CASH)) - _cents(GOAL_SET_ASIDE),
+            "set_aside_cents": _cents(GOAL_SET_ASIDE),
+            "picked": False,
         },
         "include_match": False,
         "versions": [
@@ -914,6 +925,15 @@ def alerts() -> dict:
                 "summary": "VTI moves 3% or more in a day",
                 "triggered": False,
             },
+            {
+                "id": 8,
+                "kind": "goal",
+                "params": {"goal_id": None},
+                "enabled": True,
+                "priority": "default",
+                "summary": "Any goal reaches 25%, 50%, 75% and 100%",
+                "triggered": False,
+            },
         ],
         "events": [
             {
@@ -966,6 +986,7 @@ def alerts() -> dict:
             "reason": None,
         },
         "symbols": sorted({h[0] for h in HOLDINGS if h[2] != "Cash"}),
+        "goals": [{"id": 1, "name": "Emergency fund"}, *({"id": g[0], "name": g[1]} for g in GOALS)],
         "categories": [
             {"id": i, "name": n} for i, (n, k) in enumerate(CATEGORY_NAMES, 1) if k in ("fixed", "flexible")
         ],
@@ -1130,3 +1151,27 @@ def income_tax(year: int, today: date | None = None) -> dict:
     today = today or datetime.now(UTC).date()
     pays, hs, _, _ = _sample_income(today)
     return income_.tax_summary(pays, year, today, {h.symbol: h.asset_class for h in hs}, today - timedelta(days=730))
+
+
+def goals_page(today: date | None = None) -> dict:
+    """The Goals page in demo mode: the cash accounts of connections(), some set aside for a house and a trip."""
+    today = today or datetime.now(UTC).date()
+    b = budget(today)
+    rows = [Goal(id=1, kind="emergency", name="Emergency fund", icon="shield", color="teal", priority=1)]
+    funding = []
+    for gid, name, icon, color, priority, target, months, funds in GOALS:
+        when = goals.add_months(today, months) if months is not None else None
+        rows.append(Goal(id=gid, kind="saving", name=name, icon=icon, color=color, priority=priority,
+                         target_cents=_cents(target), target_date=when))  # fmt: skip
+        funding += [GoalFunding(goal_id=gid, account_id=aid, cents=_cents(d)) for aid, d in funds]
+    accounts = [
+        (1, "Chase checking ••4417", "depository"),
+        (3, "Ally savings ••2290", "depository"),
+        (9, "Marcus 12-month CD ••7781", "depository"),
+    ]
+    balances = {1: _cents(14_350), 3: _cents(38_900), 9: _cents(25_000)}
+    saved = [m["saved_cents"] for m in b["savings_history"]]
+    # The 401(k) part of what's saved goes into the 401(k), not into goals: the demo shows the cash part.
+    monthly = round(sum(saved) / len(saved) * 0.4)
+    out = goals.assemble(rows, funding, balances, accounts, b["emergency"], monthly, today)
+    return {**out, "demo": True}

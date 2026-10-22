@@ -28,6 +28,7 @@ type AlertsState = {
   delivery?: Delivery | null;
   symbols: string[];
   categories: { id: number; name: string }[];
+  goals?: { id: number; name: string }[];
 };
 
 const when = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
@@ -169,7 +170,7 @@ export default function AlertsPage() {
             </CardHeader>
             {s.rules.length === 0 && (
               <CardContent>
-                <p className="text-sm text-muted-foreground">No alerts yet. Add one for a price, a dip, a budget, or any one company getting too big.</p>
+                <p className="text-sm text-muted-foreground">No alerts yet. Add one for a price, a dip, a budget, a savings goal, or any one company getting too big.</p>
               </CardContent>
             )}
             <ul className="divide-y pb-2">
@@ -187,7 +188,7 @@ export default function AlertsPage() {
                           ? "Checked every 15 minutes while markets are open"
                           : r.kind === "dip"
                             ? "Checked with every price update, against yesterday's trends"
-                            : r.kind === "budget"
+                            : r.kind === "budget" || r.kind === "goal"
                               ? "Checked after every sync"
                               : "Checked with every price update"}
                         {r.priority === "low" ? " · Quiet" : r.priority === "default" ? " · Normal" : ""}
@@ -243,6 +244,7 @@ export default function AlertsPage() {
             rule={editing}
             symbols={s.symbols}
             categories={s.categories}
+            goals={s.goals ?? []}
             save={save}
             onRemove={remove}
           />

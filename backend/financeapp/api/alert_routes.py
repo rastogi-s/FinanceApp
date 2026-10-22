@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session as DbSession
 
 from financeapp import alerts, budget, demo, lookthrough, notify, quotes
 from financeapp.api.deps import Signed, audit, settings_of, signed_in
-from financeapp.models import AlertEvent, AlertRule, Category, Preference, now
+from financeapp.models import AlertEvent, AlertRule, Category, Goal, Preference, now
 
 router = APIRouter(prefix="/api")
 MAX_RULES = 100
@@ -103,7 +103,15 @@ class ConcentrationRule(Rule):
         return {"percent": round(self.percent, 1)}
 
 
-RuleIn = Annotated[PriceRule | DipRule | BudgetRule | ConcentrationRule, Field(discriminator="kind")]
+class GoalRule(Rule):
+    kind: Literal["goal"]
+    goal_id: int | None = None  # None: every goal
+
+    def params(self) -> dict:
+        return {"goal_id": self.goal_id}
+
+
+RuleIn = Annotated[PriceRule | DipRule | BudgetRule | ConcentrationRule | GoalRule, Field(discriminator="kind")]
 
 
 class RuleBody(BaseModel):
@@ -128,8 +136,11 @@ class QuietIn(BaseModel):
         return self
 
 
-def describe(r: AlertRule, categories: dict[int, str]) -> str:
+def describe(r: AlertRule, categories: dict[int, str], goals: dict[int, str] | None = None) -> str:
     p = r.params
+    if r.kind == "goal":
+        name = "Any goal" if p.get("goal_id") is None else (goals or {}).get(p["goal_id"], "A goal you removed")
+        return f"{name} reaches 25%, 50%, 75% and 100%"
     if r.kind == "price":
         if "above" in p:
             return f"{p['symbol']} goes above {alerts.money(p['above'])}"
@@ -152,14 +163,14 @@ def describe(r: AlertRule, categories: dict[int, str]) -> str:
     return f"Any one company reaches {alerts.percent(p['percent'])} of your portfolio"
 
 
-def rule_json(r: AlertRule, categories: dict[int, str]) -> dict:
+def rule_json(r: AlertRule, categories: dict[int, str], goals: dict[int, str] | None = None) -> dict:
     return {
         "id": r.id,
         "kind": r.kind,
         "params": {k: v for k, v in r.params.items() if k != "priority"},
         "enabled": r.enabled,
         "priority": alerts.priority_of(r),
-        "summary": describe(r, categories),
+        "summary": describe(r, categories, goals),
         # Fired and not re-armed yet: what the app shows as "Triggered".
         "triggered": any(k.get("on") for k in (r.state or {}).get("keys", {}).values()) and r.kind == "price",
     }
@@ -168,16 +179,18 @@ def rule_json(r: AlertRule, categories: dict[int, str]) -> dict:
 def state(db: DbSession, request: Request) -> dict:
     settings = settings_of(request)
     categories = dict(db.execute(select(Category.id, Category.name)).all())
+    goals = dict(db.execute(select(Goal.id, Goal.name).order_by(Goal.priority, Goal.id)).all())
     rules = db.scalars(select(AlertRule).order_by(AlertRule.kind, AlertRule.id)).all()
     events = db.scalars(select(AlertEvent).order_by(AlertEvent.fired_at.desc()).limit(50)).all()
     held = sorted({s for s, c in lookthrough.held(db) if quotes.quotable(s, c)})
     return {
-        "rules": [rule_json(r, categories) for r in rules],
+        "rules": [rule_json(r, categories, goals) for r in rules],
         "events": [alerts.event_json(e) for e in events],
         "quiet": alerts.quiet_hours(db),
         "channels": {"ntfy": bool(settings.ntfy_url), "email": bool(settings.smtp_host and settings.alert_email)},
         "delivery": notify.last_attempt(),
         "symbols": held,
+        "goals": [{"id": i, "name": n} for i, n in goals.items()],
         "categories": [
             {"id": c.id, "name": c.name}
             for c in db.scalars(
@@ -199,6 +212,8 @@ def check_category(db: DbSession, rule: RuleIn) -> None:
         c = db.get(Category, rule.category_id)
         if c is None or c.kind not in budget.BUDGETED:
             raise HTTPException(422, "Pick a bill or everyday category.")
+    if isinstance(rule, GoalRule) and rule.goal_id is not None and db.get(Goal, rule.goal_id) is None:
+        raise HTTPException(422, "That goal is gone.")
 
 
 def recheck(request: Request, db: DbSession, rule: AlertRule) -> None:
