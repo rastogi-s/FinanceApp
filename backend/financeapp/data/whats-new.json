@@ -24,6 +24,24 @@
     ]
   },
   {
+    "version": "0.26.0",
+    "title": "Pay means payroll",
+    "features": [
+      {
+        "id": "payroll-only-pay",
+        "title": "Only payroll counts as pay",
+        "body": "Plan and Budget now count only your employer's payroll deposits as pay, however each bank words them (for example Deposit from NETAPP INC PAYROLL in one account and NETAPP INC DIR DEP in another). Zelle, refunds, reimbursements and interest show as other money in. The pay line says how many payroll deposits it found a month.",
+        "tryIt": "/plan"
+      },
+      {
+        "id": "own-zelle",
+        "title": "Zelle from yourself is a transfer",
+        "body": "A Zelle or Venmo payment from your own name, or a Venmo cash-out, is money moving between your own accounts, so it no longer counts as money in. Under See each month on Plan, Money in, by who sent it lets you mark any payer or sender as pay, other money in or your own money, and the app remembers.",
+        "tryIt": "/plan"
+      }
+    ]
+  },
+  {
     "version": "0.25.0",
     "title": "Dividends and interest",
     "features": [

@@ -8,6 +8,10 @@ Some transfers only show one side, because the other account isn't linked (payin
 or a payment arriving on a card whose bank account isn't connected). Those are recognised by their description
 ("AUTOPAY", "PAYMENT THANK YOU", ...) and also go in Transfer, without a pair.
 
+A Zelle, Venmo or Cash App payment to or from the household's own name is a transfer too, even with the other
+side not linked: the sender is read from the description and compared with the household's names and the senders
+someone marked as theirs (budget preference "own_senders").
+
 A category someone picked by hand always wins: those transactions are never matched.
 """
 
@@ -18,7 +22,8 @@ from datetime import date, timedelta
 from sqlalchemy import text
 from sqlalchemy.orm import Session as DbSession
 
-from financeapp.models import Account, Category, Transaction
+from financeapp.categorize import categorize, normalize_merchant
+from financeapp.models import Account, Category, Preference, Transaction, User
 
 WINDOW_DAYS = 5
 
@@ -37,6 +42,43 @@ ONE_SIDED = re.compile(
     rf"({BROKERAGES}).{{0,24}}(transfer|contribution|moneyline|ach|deposit|invest)",
     re.IGNORECASE,
 )
+
+P2P = re.compile(r"zelle|venmo|cash ?app|paypal|apple cash", re.IGNORECASE)
+SENDER = re.compile(
+    r"\b(?:from|to)\s+([a-z][a-z .'-]*?)(?=\s+(?:conf|confirmation|on|ref|id|for|memo|via|trn|txn)\b|\s*\d|$)"
+)
+
+
+def sender_of(t: Transaction) -> str | None:
+    """Who sent (or got) a Zelle or Venmo payment, from its description: "Zelle payment from JANE DOE conf# 12"."""
+    text = normalize_merchant(f"{t.merchant} {t.description}")
+    if not P2P.search(text):
+        return None
+    m = SENDER.search(text)
+    name = m.group(1).strip() if m else ""
+    name = re.sub(r"^(zelle|venmo|cash app|cashapp|paypal)\s+", "", name)
+    return name or None
+
+
+def own_names(db: DbSession) -> set[str]:
+    """The household's names (full names only: a first name alone is too common) and senders marked as theirs."""
+    names = {normalize_merchant(u.name) for u in db.query(User) if len(u.name.split()) >= 2}
+    p = db.get(Preference, "household")
+    names |= set((p.value if p else {}).get("own_senders", []))
+    return {n for n in names if n}
+
+
+CASH_OUT = re.compile(r"cash ?out|instant transfer|standard transfer|transfer to bank|add to balance", re.IGNORECASE)
+
+
+def is_own(t: Transaction, names: set[str]) -> bool:
+    """A payment app moving the household's own money: a cash-out to the bank, or to or from their own name."""
+    text = f"{t.merchant} {t.description}"
+    if P2P.search(text) and CASH_OUT.search(text):
+        return True
+    sender = sender_of(t)
+    return sender is not None and any(sender == n or sender.startswith(n + " ") for n in names)
+
 
 PAIRS_SQL = text(
     """
@@ -87,9 +129,10 @@ def match_transfers(db: DbSession, since: date | None = None) -> int:
         )
         .all()
     )
+    names = own_names(db)
     for t, account_type in singles:
         card_payment = account_type in ("credit", "loan") and t.amount_cents > 0 and not _looks_like_refund(t)
-        if card_payment or ONE_SIDED.search(f"{t.merchant} {t.description}"):
+        if card_payment or ONE_SIDED.search(f"{t.merchant} {t.description}") or is_own(t, names):
             t.category_id = transfer.id
             t.category_source = "transfer"
     db.flush()
@@ -108,3 +151,20 @@ def unmatch(db: DbSession, t: Transaction) -> None:
         other.transfer_group_id = None
         if other.category_source == "transfer":
             other.category_source = "none"
+
+
+def recheck_own(db: DbSession, since: date) -> None:
+    """After someone marks a sender as theirs or not: payments no longer from their own name go back to normal
+    categorizing, and new ones become transfers."""
+    names = own_names(db)
+    back = []
+    for t in db.query(Transaction).filter(
+        Transaction.date >= since, Transaction.category_source == "transfer", Transaction.transfer_group_id.is_(None)
+    ):
+        if sender_of(t) is not None and not is_own(t, names) and not ONE_SIDED.search(f"{t.merchant} {t.description}"):
+            t.category_id = None
+            t.category_source = "none"
+            back.append(t)
+    db.flush()
+    match_transfers(db, since)
+    categorize(db, [t for t in back if t.category_source == "none"])

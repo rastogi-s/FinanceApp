@@ -46,7 +46,9 @@ FULL_DRAFT_MONTHS = 3  # fewer full months than this and the draft says it's rou
 FLEXIBLE_BUFFER = 1.10
 MATCH_CENTS = 100
 MATCH_DAYS = 5
-DEFAULTS = {"emergency_months": 6, "include_match": False}
+# payroll: employers confirmed as pay ("netapp"); not_pay: payers someone said aren't pay; own_senders: Zelle and
+# Venmo names that are the household's own (transfers.own_names).
+DEFAULTS = {"emergency_months": 6, "include_match": False, "payroll": [], "not_pay": [], "own_senders": []}
 BUDGETED = ("fixed", "flexible")
 
 
@@ -221,45 +223,110 @@ def match_deposits(stubs: list[Paycheck], deposits: list[Transaction]) -> dict[i
     return matched
 
 
+# Words a bank puts around an employer's name on a pay deposit. Wording differs from bank to bank ("Deposit from
+# NETAPP INC PAYROLL", "NETAPP INC DIR DEP PPD"), so an employer is known by what's left once these are gone.
+PAYROLL_WORDS = re.compile(r"payroll|direct dep|dir dep|\bdirdep\b|salary|\bwages?\b", re.I)
+NOT_PAY_WORDS = re.compile(r"reimb|expense|refund|bonus adj|reversal|return", re.I)
+GENERIC = frozenset({
+    "deposit", "deposits", "from", "to", "payroll", "direct", "dep", "dir", "dirdep", "ach", "ppd", "ccd", "credit",
+    "crd", "inc", "corp", "corporation", "llc", "ltd", "co", "company", "the", "id", "des", "indn", "web", "pay",
+    "salary", "wage", "wages", "transfer", "online", "mobile", "electronic", "edi", "payment", "pmt", "dd", "of",
+    "and", "for", "us", "usa", "net", "n", "a",
+})  # fmt: skip
+
+
 def payer(t: Transaction) -> str:
     return normalize_merchant(t.merchant or t.description)
 
 
-def is_pay(ledger: Ledger, t: Transaction, payers: set[str]) -> bool:
-    c = ledger.categories.get(t.category_id) if t.category_id else None
-    return (c is not None and c.name == "Paycheck") or payer(t) in payers
+def text_of(t: Transaction) -> str:
+    return normalize_merchant(f"{t.merchant} {t.description}")
 
 
-def is_pay_deposit(ledger: Ledger, t: Transaction, payers: set[str]) -> bool:
-    """A deposit of pay, even one left uncategorized (which would otherwise count as a refund against spending)."""
-    return t.amount_cents > 0 and ledger.kind(t) in ("income", "other") and is_pay(ledger, t, payers)
+def employer_key(text: str) -> str:
+    """The employer in a deposit's words: "Deposit from NETAPP INC PAYROLL" -> "netapp"."""
+    words = [w for w in normalize_merchant(text).split() if w not in GENERIC and not any(c.isdigit() for c in w)]
+    return " ".join(list(dict.fromkeys(words))[:3])  # merchant and description often repeat the name
 
 
-def pay_merchants(ledger: Ledger, stubs: list[tuple[date, int]]) -> set[str]:
-    """Who pays the household: payers of paycheck deposits and of deposits matching a pay stub's take-home.
+class Payroll:
+    """Which deposits are pay: a deposit from a known employer (learned from the deposits a pay stub's take-home
+    matches, from deposits that say payroll or direct deposit, and from names someone typed), worded however the
+    bank words it, unless someone said that payer isn't pay. Nothing else counts as pay, whatever its category."""
 
-    `stubs` is (pay date, take-home cents) for each recent pay stub.
-    """
-    deposits = [t for t in ledger.txns if t.amount_cents > 0 and ledger.kind(t) in ("income", "other")]
-    payers = {payer(t) for t in deposits if is_pay(ledger, t, set())}
-    for on, net in stubs:
-        payers.update(
-            payer(t)
-            for t in deposits
-            if abs(t.amount_cents - net) <= MATCH_CENTS and abs((t.date - on).days) <= MATCH_DAYS
+    def __init__(
+        self, employers: set[str] = frozenset(), not_pay: set[str] = frozenset(), stubs=(), paycheck_ids=frozenset()
+    ) -> None:
+        self.employers = {e for e in employers if e}
+        self.paycheck_ids = set(paycheck_ids)  # the Paycheck category: a deposit filed there by hand is pay
+        self.not_pay = set(not_pay)
+        self.stubs = list(stubs)  # (pay date, take-home cents)
+
+    def employer_of(self, t: Transaction) -> str | None:
+        words = set(text_of(t).split())
+        for e in sorted(self.employers, key=len, reverse=True):
+            if set(e.split()) <= words:
+                return e
+        return None
+
+    def matches(self, t: Transaction) -> bool:
+        if t.amount_cents <= 0:
+            return False
+        text = text_of(t)
+        if employer_key(text) in self.not_pay or payer(t) in self.not_pay:
+            return False
+        if self.matches_stub(t) or (t.category_source == "user" and t.category_id in self.paycheck_ids):
+            return True
+        if NOT_PAY_WORDS.search(text):
+            return False
+        return bool(PAYROLL_WORDS.search(text)) or self.employer_of(t) is not None
+
+    def matches_stub(self, t: Transaction) -> bool:
+        return any(
+            abs(t.amount_cents - net) <= MATCH_CENTS and abs((t.date - on).days) <= MATCH_DAYS for on, net in self.stubs
         )
-    payers.discard("")
-    return payers
 
 
-def flows(ledger: Ledger, m: date, payers: set[str], skip: set[int] | frozenset = frozenset()) -> dict:
+def picked_as_pay(ledger: Ledger, t: Transaction) -> bool:
+    """Someone filed it under Paycheck by hand (a bank's or Plaid's own guess isn't enough)."""
+    c = ledger.categories.get(t.category_id) if t.category_id else None
+    return c is not None and c.name == "Paycheck" and t.category_source == "user"
+
+
+def is_pay_deposit(ledger: Ledger, t: Transaction, payers: Payroll | None) -> bool:
+    """A deposit of pay, even one left uncategorized (which would otherwise count as a refund against spending)."""
+    if payers is None or ledger.kind(t) not in ("income", "other", "transfer") or not payers.matches(t):
+        return False
+    # Something filed as a transfer is pay only if its words say so, not just because the amount fits a stub.
+    return ledger.kind(t) != "transfer" or bool(PAYROLL_WORDS.search(text_of(t))) or payers.employer_of(t) is not None
+
+
+def pay_merchants(ledger: Ledger, stubs: list[tuple[date, int]], prefs: dict | None = None) -> Payroll:
+    """Who pays the household, from recent pay stubs (`stubs` is (pay date, take-home cents) each), the deposits
+    themselves, and what the household typed in or ruled out (budget preferences "payroll" and "not_pay")."""
+    prefs = prefs or {}
+    not_pay = set(prefs.get("not_pay", []))
+    probe = Payroll(not_pay=not_pay, stubs=stubs)
+    employers = set(prefs.get("payroll", []))
+    for t in ledger.txns:
+        if t.amount_cents <= 0 or ledger.kind(t) not in ("income", "other", "transfer"):
+            continue
+        text = text_of(t)
+        by_stub = probe.matches_stub(t) and ledger.kind(t) != "transfer"
+        if by_stub or picked_as_pay(ledger, t) or (PAYROLL_WORDS.search(text) and not NOT_PAY_WORDS.search(text)):
+            employers.add(employer_key(text))
+    paycheck_ids = {c.id for c in ledger.categories.values() if c.name == "Paycheck"}
+    return Payroll(employers - not_pay, not_pay, stubs, paycheck_ids)
+
+
+def flows(ledger: Ledger, m: date, payers: Payroll | None, skip: set[int] | frozenset = frozenset()) -> dict:
     """One month of money in and out, with pay told apart from other money coming in.
 
     Transfers between the household's own accounts and card payments are left out (the ledger has no transfer
     pairs, and the Transfer category is neither income nor spending). The Plan page's month rows and the savings
     rate both come from here, so they agree.
     """
-    pay = taxes = 0
+    pay = taxes = deposits = 0
     other: dict[str, int] = defaultdict(int)  # category name -> cents in
     spent: dict[int | None, int] = defaultdict(int)  # category id -> cents out (refunds come off)
     for t in ledger.month(m):
@@ -269,11 +336,12 @@ def flows(ledger: Ledger, m: date, payers: set[str], skip: set[int] | frozenset 
             taxes -= t.amount_cents
         elif is_pay_deposit(ledger, t, payers):
             pay += t.amount_cents
+            deposits += 1
         elif ledger.is_income(t):
             other[ledger.categories[t.category_id].name] += t.amount_cents
         elif ledger.is_spending(t):
             spent[t.category_id] -= t.amount_cents
-    return {"pay": pay, "other": dict(other), "taxes": taxes, "spent": dict(spent)}
+    return {"pay": pay, "pay_deposits": deposits, "other": dict(other), "taxes": taxes, "spent": dict(spent)}
 
 
 class Moves:
@@ -397,7 +465,7 @@ def savings_for(
     stubs: list[Paycheck],
     m: date,
     include_match: bool,
-    payers: set[str] | frozenset = frozenset(),
+    payers: Payroll | None = None,
     moves: Moves | None = None,
 ) -> dict | None:
     nxt = add_months(m, 1)
@@ -524,7 +592,7 @@ def build(db: DbSession) -> dict:
 
     stubs = list(db.scalars(select(Paycheck).where(Paycheck.date >= since - timedelta(days=MATCH_DAYS))))
     recent = db.scalars(select(Paycheck).order_by(Paycheck.date.desc(), Paycheck.id.desc()).limit(12)).all()
-    payers = pay_merchants(ledger, [(p.date, p.net_cents) for p in recent])
+    payers = pay_merchants(ledger, [(p.date, p.net_cents) for p in recent], prefs)
     moves = Moves(db, accounts, since)
     history = [s for m in months if (s := savings_for(ledger, stubs, m, prefs["include_match"], payers, moves))]
 

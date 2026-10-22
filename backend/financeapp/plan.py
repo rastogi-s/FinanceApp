@@ -31,7 +31,7 @@ from datetime import date, timedelta
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
 
-from financeapp import budget
+from financeapp import budget, transfers
 from financeapp.categorize import normalize_merchant
 from financeapp.models import Category, Fund, Preference, Transaction
 
@@ -240,13 +240,14 @@ def line(label: str, cents: float) -> dict:
     return {"label": label, "cents": round(cents)}
 
 
-def month_row(ledger: budget.Ledger, m: date, payers: set[str], moved: int) -> dict:
+def month_row(ledger: budget.Ledger, m: date, payers: budget.Payroll, moved: int) -> dict:
     """One month of money in and out (budget.flows, the same sums as the savings rate on Budget). `moved` is how much
     came in from the household's own accounts, shown so it's clear it wasn't counted."""
     f = budget.flows(ledger, m, payers)
     return {
         "month": m.isoformat(),
         "pay_cents": f["pay"],
+        "pay_deposits": f["pay_deposits"],
         "other_in_cents": sum(f["other"].values()),
         "taxes_cents": f["taxes"],
         "spending_cents": sum(f["spent"].values()),
@@ -254,8 +255,41 @@ def month_row(ledger: budget.Ledger, m: date, payers: set[str], moved: int) -> d
     }
 
 
-def pay_merchants(ledger: budget.Ledger, paychecks: list[dict]) -> set[str]:
-    return budget.pay_merchants(ledger, [(date.fromisoformat(p["date"]), p["net_cents"]) for p in paychecks])
+def pay_merchants(ledger: budget.Ledger, paychecks: list[dict], prefs: dict) -> budget.Payroll:
+    return budget.pay_merchants(ledger, [(date.fromisoformat(p["date"]), p["net_cents"]) for p in paychecks], prefs)
+
+
+MONEY_IN_ROWS = 12
+
+
+def money_in(ledger: budget.Ledger, months: list[date], payers: budget.Payroll, names: set[str]) -> list[dict]:
+    """Who the money coming in was from, over the months averaged, and how each is counted: pay, other money in, or
+    the household's own money (a Zelle from their own name). Each can be switched, so the numbers can be fixed."""
+    if not months:
+        return []
+    start, end = months[0], budget.add_months(months[-1], 1)
+    groups: dict[tuple[str, str], dict] = {}
+    for t in ledger.txns:
+        if not (start <= t.date < end) or t.amount_cents <= 0 or ledger.is_taxes(t):
+            continue
+        sender = transfers.sender_of(t)
+        if budget.is_pay_deposit(ledger, t, payers):
+            kind, key = "pay", payers.employer_of(t) or budget.employer_key(budget.text_of(t)) or budget.payer(t)
+        elif sender is not None and transfers.is_own(t, names):
+            kind, key = "me", sender
+        elif ledger.is_income(t) or (ledger.kind(t) == "other" and sender is not None):
+            kind, key = "other", sender or budget.employer_key(budget.text_of(t)) or budget.payer(t)
+        else:
+            continue
+        g = groups.setdefault(
+            (kind, key), {"key": key, "as": kind, "sender": sender is not None, "cents": 0, "count": 0}
+        )
+        g["cents"] += t.amount_cents
+        g["count"] += 1
+    rows = sorted(groups.values(), key=lambda g: -g["cents"])[:MONEY_IN_ROWS]
+    for g in rows:
+        g["monthly_cents"] = round(g["cents"] / len(months))
+    return rows
 
 
 def moved_in(db: DbSession, accounts: list, months: list[date]) -> dict[date, int]:
@@ -278,7 +312,14 @@ def moved_in(db: DbSession, accounts: list, months: list[date]) -> dict[date, in
     return out
 
 
-def derive_savings(state: dict, ledger: budget.Ledger, spending: Spending, on: date, rows: list[dict]) -> dict:
+def derive_savings(
+    state: dict,
+    ledger: budget.Ledger,
+    spending: Spending,
+    on: date,
+    rows: list[dict],
+    employers: set[str] = frozenset(),
+) -> dict:
     """The monthly savings to project, from the best evidence there is, a sentence on where it came from, and the
     sum it adds up from (breakdown lines that add up to the total).
 
@@ -318,7 +359,16 @@ def derive_savings(state: dict, ledger: budget.Ledger, spending: Spending, on: d
     if any(r["pay_cents"] or r["other_in_cents"] for r in rows):  # spending alone says nothing about saving
         months = [date.fromisoformat(r["month"]) for r in rows]
         put_away = stubs["put_away"] if stubs else 0
-        breakdown = [line("Pay landing in your accounts", avg(rows, "pay_cents"))]
+        per_month = round(sum(r["pay_deposits"] for r in rows) / len(rows), 1)
+        who = sorted(employers)
+        pay = line("Pay landing in your accounts", avg(rows, "pay_cents"))
+        pay["detail"] = (
+            f"{per_month:g} payroll deposit{'' if per_month == 1 else 's'} a month"
+            + (f" from {', '.join(w.upper() for w in who[:3])}" if who else "")
+            if per_month
+            else "No payroll deposits found. Mark who pays you below."
+        )
+        breakdown = [pay]
         other = avg(rows, "other_in_cents")
         if other:
             breakdown.append(line("Other money in (interest, refunds, money from other people)", other))
@@ -429,11 +479,11 @@ def inputs(db: DbSession, state: dict, net_worth: int, on: date, holdings: list[
     months = budget.full_months(db, [a.id for a in accounts], on)
     first = min([*months, on - timedelta(days=RECENT_DAYS)])
     ledger = budget.Ledger(db, accounts, first)
-    payers = pay_merchants(ledger, state["paychecks"])
+    payers = pay_merchants(ledger, state["paychecks"], budget.preferences(db))
     moved = moved_in(db, accounts, months)
     rows = [month_row(ledger, m, payers, moved.get(m, 0)) for m in months]
     spending = Spending(ledger, months, on, rows)
-    measured = derive_savings(state, ledger, spending, on, rows)
+    measured = derive_savings(state, ledger, spending, on, rows, payers.employers)
     returns = derive_returns(db, holdings, allocation)
     typed_return = prefs.get("return_mid")
     if typed_return is not None:
@@ -454,6 +504,7 @@ def inputs(db: DbSession, state: dict, net_worth: int, on: date, holdings: list[
             **{k: measured[k] for k in ("kind", "short", "note", "breakdown")},
             "excluded": measured.get("excluded"),
             "months": measured.get("months", []),
+            "money_in": money_in(ledger, months, payers, transfers.own_names(db)),
         },
         "savings_typed": typed is not None,
         "returns": {k: returns[k] for k in ("low", "mid", "high")},
