@@ -6,6 +6,7 @@ import {
   CalendarClock,
   CalendarRange,
   ChevronRight,
+  FileText,
   History,
   Minus,
   PiggyBank,
@@ -30,6 +31,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { toast } from "@/components/ui/toast";
 import { useAuth } from "@/lib/auth";
+import { useApi } from "@/lib/household";
+import type { ReviewState } from "@/lib/review";
 import { type BudgetLine, type BudgetState, type Forecast, type SavingsMonth, monthName, useBudget } from "@/lib/budget";
 import { cn } from "@/lib/utils";
 
@@ -204,6 +207,8 @@ function Budget() {
         )}
       </div>
 
+      <CategoryCheck />
+
       {data.forecast && <MonthEnd data={data} onPick={setEditing} />}
 
       {data.lines.length > 3 && (
@@ -237,7 +242,9 @@ function Budget() {
           data.lines.filter((l) => l.kind === kind),
           sort,
         );
-        return lines.length ? <Group key={kind} title={kind === "fixed" ? "Bills" : "Everyday"} lines={lines} month={data.month} onPick={setEditing} /> : null;
+        return lines.length ? (
+          <Group key={kind} title={kind === "fixed" ? "Bills" : "Everyday"} lines={lines} month={data.month} onPick={setEditing} />
+        ) : null;
       })}
 
       {data.unbudgeted.length > 0 && (
@@ -266,7 +273,7 @@ function Budget() {
                       <span className="text-xs font-medium text-primary">Set a limit</span>
                     </button>
                   ) : u.category === "Uncategorized" ? (
-                    <Link href="/spending?review=1" className="flex w-full items-center gap-3 py-3 text-sm">
+                    <Link href="/review" className="flex w-full items-center gap-3 py-3 text-sm">
                       <span className="flex-1 font-medium">{u.category}</span>
                       <Money cents={u.spent_cents} />
                       <span className="text-xs font-medium text-primary">Sort them</span>
@@ -348,6 +355,42 @@ function sortLines(lines: BudgetLine[], sort: LineSort): BudgetLine[] {
   };
   const f = by[sort];
   return f ? [...lines].sort((a, b) => f(a, b) || a.category.localeCompare(b.category)) : lines;
+}
+
+/** How far to trust the numbers above: the share of money sorted with confidence, and a way to fix the rest. */
+function CategoryCheck() {
+  const { data } = useApi<ReviewState>("/api/review");
+  if (!data || data.score === null) return null;
+  const clean = data.items === 0;
+  return (
+    <Link href="/review" className="block rounded-xl focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none">
+      <Card className={cn("transition-colors hover:bg-muted/40", !clean && data.score < 95 && "border-warning/40")}>
+        <CardContent className="flex items-center gap-4 pt-5">
+          <div
+            className={cn(
+              "grid size-11 shrink-0 place-items-center rounded-full text-sm font-semibold tabular-nums",
+              clean || data.score >= 98 ? "bg-positive/10 text-positive" : data.score >= 90 ? "bg-accent text-accent-foreground" : "bg-warning/10 text-warning",
+            )}
+          >
+            {data.score}%
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="font-medium">{clean ? "Every category checks out" : `${data.items} transaction${data.items === 1 ? "" : "s"} to check`}</p>
+            <p className="mt-0.5 text-sm text-muted-foreground">
+              {clean ? (
+                "Card payments, investments and moves between your accounts are kept out of spending."
+              ) : (
+                <>
+                  <Money cents={data.doubtful_cents} /> the app isn&apos;t sure about. Sorting it makes your savings rate exact.
+                </>
+              )}
+            </p>
+          </div>
+          <ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+        </CardContent>
+      </Card>
+    </Link>
+  );
 }
 
 function Group({ title, lines, month, onPick }: { title: string; lines: BudgetLine[]; month: string; onPick: (l: BudgetLine) => void }) {
@@ -563,6 +606,35 @@ function Savings({ data, onAdd, run }: { data: BudgetState; onAdd: () => void; r
             </p>
           </div>
         ))}
+        {(data.stub_requests ?? []).map((r) => (
+          <div
+            key={`${r.employer}-${r.date}`}
+            className="flex items-start gap-3 rounded-xl border border-primary/30 bg-primary/5 px-4 py-3 text-sm"
+          >
+            <FileText className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden />
+            <div className="min-w-0 flex-1">
+              <p className="font-medium">Add your {short.format(new Date(r.date))} pay stub</p>
+              <p className="text-muted-foreground">
+                {r.reason === "changed" && r.before_cents !== null ? (
+                  <>
+                    {r.employer} paid <Money cents={r.cents} />, {r.cents > r.before_cents ? "up" : "down"} from{" "}
+                    <Money cents={r.before_cents} />, so taxes or 401(k) may have changed.
+                  </>
+                ) : r.reason === "new_year" ? (
+                  "It's the first paycheck of the year, when withholding and 401(k) limits reset."
+                ) : (
+                  <>
+                    <Money cents={r.cents} /> from {r.employer} looks like a bonus, which is taxed differently.
+                  </>
+                )}{" "}
+                Until then it&apos;s filled in from your usual stub.
+              </p>
+            </div>
+            <Button size="sm" variant="secondary" onClick={onAdd}>
+              Add
+            </Button>
+          </div>
+        ))}
         {data.paychecks.length > 0 && (
           <ul className="divide-y rounded-xl border">
             {data.paychecks.slice(0, 4).map((p) => (
@@ -663,8 +735,8 @@ function Emergency({ data, run }: { data: BudgetState; run: Run }) {
             </p>
             <Progress value={e.have_cents} max={e.target_cents} label="Emergency fund target reached" tone="goal" />
             <p className="text-sm text-muted-foreground">
-              {e.picked ? "The accounts you picked cover" : "Your cash covers"} {months >= 10 ? Math.floor(months) : months.toFixed(1)} months of
-              essentials (<Money cents={e.monthly_cents} /> a month: bills plus the everyday categories marked essential).
+              {e.picked ? "The accounts you picked cover" : "Your cash covers"} {months >= 10 ? Math.floor(months) : months.toFixed(1)}{" "}
+              months of essentials (<Money cents={e.monthly_cents} /> a month: bills plus the everyday categories marked essential).
               {e.set_aside_cents > 0 && !e.picked && (
                 <>
                   {" "}
@@ -678,10 +750,7 @@ function Emergency({ data, run }: { data: BudgetState; run: Run }) {
             Once the budget has bills or essentials in it, this shows how many months your cash covers.
           </p>
         )}
-        <Link
-          href="/goals"
-          className="flex items-center gap-3 rounded-2xl border px-4 py-3 text-sm transition-colors hover:bg-muted"
-        >
+        <Link href="/goals" className="flex items-center gap-3 rounded-2xl border px-4 py-3 text-sm transition-colors hover:bg-muted">
           <Target className="size-4 text-muted-foreground" aria-hidden />
           <span className="flex-1">
             <span className="block font-medium">Saving for something else?</span>

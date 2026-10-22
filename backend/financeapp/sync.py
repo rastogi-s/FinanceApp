@@ -323,4 +323,11 @@ def _run(database: Database, settings: Settings, trigger: str, only: list[int] |
         alerts.check(database, settings, {"budget", "concentration", "goal"})
     except Exception:  # an alert problem never fails the sync
         log.exception("checking alerts after the sync failed")
+    try:
+        from financeapp import budget
+
+        with database.session() as db:
+            budget.ask_for_stubs(db, settings)
+    except Exception:
+        log.exception("asking for pay stubs after the sync failed")
     return r

@@ -47,6 +47,12 @@ TASKS = {
         "Suggests a limit for each budget line from your spending by month, pay stubs and savings goal (totals only).",
         pictures=False,
     ),
+    "categorize": Task(
+        "Sorting transactions",
+        "Suggests a category for merchants the app isn't sure about. Merchant names and typical amounts are sent; "
+        "account numbers and people's names aren't.",
+        pictures=False,
+    ),
 }
 
 # Dollars per million tokens (input, output), from each provider's price list. A model that isn't here is priced

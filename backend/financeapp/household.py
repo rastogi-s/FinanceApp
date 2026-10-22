@@ -12,7 +12,7 @@ from datetime import UTC, date, datetime, timedelta
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
 
-from financeapp import alerts, budget, plan, portfolio
+from financeapp import alerts, budget, plan, portfolio, review
 from financeapp.models import Account, AlertEvent, Balance, Category, Connection, SyncRun, Transaction, now
 from financeapp.sync import today
 
@@ -169,7 +169,7 @@ def build_with_plan(db: DbSession) -> tuple[dict, dict | None]:
     spent_last = -sum(
         t.amount_cents for t in txns if last_month_start <= t.date <= last_month_same_day and is_spending(t)
     )
-    review = sum(1 for t in txns if t.category_source == "none" and is_spending(t))
+    to_check = review.items(db)  # Check categories (review.py): everything worth a look, not only uncategorized
 
     transactions = []
     for t in txns:
@@ -205,7 +205,7 @@ def build_with_plan(db: DbSession) -> tuple[dict, dict | None]:
         "linked": True,
         "as_of": as_of.isoformat(),
         "net_worth": {"cents": net, "change_today_cents": net - yesterday, "history": history},
-        "spending": {"month_cents": spent_month, "last_month_same_day_cents": spent_last, "needs_review": review},
+        "spending": {"month_cents": spent_month, "last_month_same_day_cents": spent_last, "needs_review": to_check},
         **budget.for_household(budget_state),
         "alerts": [
             alerts.event_json(e)

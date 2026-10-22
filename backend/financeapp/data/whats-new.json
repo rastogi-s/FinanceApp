@@ -1,5 +1,58 @@
 [
   {
+    "version": "0.33.0",
+    "title": "Categories you can trust",
+    "features": [
+      {
+        "id": "check-categories",
+        "title": "Check categories",
+        "body": "A new page shows how much of your money is sorted with confidence, what's never counted as spending (card payments, money into investments, moves between your accounts), and the few things worth a look: transactions with no category, best guesses, money in that isn't pay, refunds, and Zelle or Venmo payments to other people, which were quietly left out of spending. Answer a merchant once and every transaction from it follows, past and future. Open it from Budget.",
+        "tryIt": "/review"
+      },
+      {
+        "id": "smarter-categories",
+        "title": "Smarter sorting",
+        "body": "Plaid's specific category now beats loose words in a name (a yoga studio on Waterfront Drive isn't a water bill), a rule for one Trader Joe's covers every store, a refund comes off what it refunded instead of counting as income, and fixing a Zelle payment makes a rule for that person, not for every Zelle. AI can suggest categories too, if you've set it up: you see what's sent and confirm each one.",
+        "tryIt": "/review"
+      }
+    ]
+  },
+  {
+    "version": "0.32.0",
+    "title": "Where your pay comes from",
+    "features": [
+      {
+        "id": "pay-sources",
+        "title": "Money in, broken down by source",
+        "body": "The savings rate sheet now lists each payer under Money in: how many paychecks came from your employer, and who sent any other money. Taxes show where they came from too: withheld on your pay stubs, estimated from your usual stub for paychecks without one, or paid from your accounts to the IRS or state.",
+        "tryIt": "/budget"
+      },
+      {
+        "id": "bonus-third-paycheck",
+        "title": "Bonuses and third paychecks don't skew your month",
+        "body": "A paycheck well above your usual one counts as a bonus. It's still money in, but it's shown on its own line and left out of your usual month, and Plan leaves it out of what you usually save. In a month with a third biweekly paycheck, the sheet also shows what you'd save in a usual two-paycheck month.",
+        "tryIt": "/budget"
+      },
+      {
+        "id": "paystub-adp",
+        "title": "Pay stubs read more reliably",
+        "body": "Stubs that print amounts in two columns, or lose the commas and decimal points when read, are now read in full: gross pay, every tax, 401(k) and ESPP, the employer match and net pay. Paychecks without a stub use your usual stub to fill in taxes and savings until the stub arrives.",
+        "tryIt": "/budget"
+      },
+      {
+        "id": "stub-requests",
+        "title": "Asks for a pay stub only when it matters",
+        "body": "When a paycheck comes in different from the one before (a raise, a W-4 or 401(k) change, the Social Security cap), it's the first of the year, or it's a bonus, Budget shows an Add your pay stub card and you get a notification. Other paychecks are filled in from your usual stub, so there's no need to upload every one. A paycheck split across several accounts now counts once, and its stub matches the deposits together.",
+        "tryIt": "/budget"
+      },
+      {
+        "id": "etrade-morgan-stanley",
+        "title": "Money into E*TRADE counts as investing",
+        "body": "Transfers worded Morgan Stanley, or naming the last digits of a linked E*TRADE account, now count as money moved into investing instead of spending."
+      }
+    ]
+  },
+  {
     "version": "0.31.0",
     "title": "Money into E*TRADE counts as investing",
     "features": [

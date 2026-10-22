@@ -163,3 +163,39 @@ def test_upload_then_save_with_frequency(client, home):
     assert schedule["monthly_gross_cents"] == 975_000  # $4,500 x 26 / 12
     bad = {**body, "frequency": "fortnightly"}
     assert client.post("/api/paychecks", json=bad, headers=csrf(client)).status_code == 422
+
+
+def test_stub_whose_amounts_lose_their_punctuation():
+    """ADP stubs can come out as "Gross Pay $5 000 00 90 000 00", two columns to a line, deductions printed negative
+    this period and blank (year to date only) otherwise. Made-up numbers, in that layout."""
+    from financeapp import paystub
+
+    lines = [
+        "ACME, INC. Period Beginning: 10/04/2026",
+        "1 MAIN ST Period Ending: 10/17/2026",
+        "SAN JOSE, CA 95128-2155 Pay Date: 10/16/2026",
+        "rate salary/hours this period year to date this period year to date",
+        "Regular 4900 00 80 00 4 900 00 88 200 00 Emp Sup Life -5 00 90 00",
+        "Ltd2 Plan 10 00 180 00 Espp_2 -490 00 8 820 00",
+        "Restrict Stock 40 000 00 Health Savings -200 00* 3 600 00",
+        "Gross Pay $4 910 00 128 380 00 Disq Espp 1 000 00",
+        "Espp_1 4 000 00",
+        "Federal Income Tax -700 00 12 600 00 Medicare Tax -71 20 1 281 60",
+        "Social Security Tax 10 918 20 NC State Income Tax -190 00 3 420 00",
+        "401K Pln -245 00* 4 410 00 401K Roth -300 00 5 400 00",
+        "Dental -15 00* 270 00 401K Er Match 4 000 00",
+        "Net Pay $2 693 80",
+        "Net Check $0 00",
+    ]
+    s = paystub.parse(lines)
+    assert (s.gross_cents, s.net_cents) == (4_910_00, 2_693_80)
+    assert s.taxes_cents == 700_00 + 71_20 + 190_00  # Social Security is maxed out: year to date only
+    assert s.savings_cents == 490_00 + 200_00 + 245_00 + 300_00  # not Espp_1's year-to-date
+    assert s.employer_match_cents == 0  # the match line is year to date only
+    assert s.detail["espp"] == 490_00 and s.detail["roth"] == 300_00 and s.detail["hsa"] == 200_00
+    assert s.ytd["gross"] == 128_380_00 and s.ytd["federal"] == 12_600_00
+    assert s.frequency == "biweekly" and s.pay_date.isoformat() == "2026-10-16"
+    assert not s.warnings
+    assert (
+        paystub.restore_amounts("MORRISVILLE NC 27560-5299 3060 OLSEN DR") == "MORRISVILLE NC 27560-5299 3060 OLSEN DR"
+    )
