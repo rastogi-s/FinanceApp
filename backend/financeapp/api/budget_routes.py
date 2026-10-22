@@ -171,12 +171,22 @@ class StubAmounts(BaseModel):
     stock: int | None = Field(default=None, ge=0, le=MAX_CENTS)
 
 
+class StubDeposit(BaseModel):
+    """One account take-home was paid into: its last four digits and the amount."""
+
+    model_config = ConfigDict(extra="forbid")
+    mask: str = Field(pattern=r"^\d{4}$")
+    cents: int = Field(gt=0, le=MAX_CENTS)
+
+
 class StubDetail(BaseModel):
-    """What the Taxes page uses: this paycheck's taxes and deductions by kind, and the stub's year-to-date column."""
+    """What the Taxes page uses: this paycheck's taxes and deductions by kind, and the stub's year-to-date column.
+    Where take-home was split to, so each of those deposits is known as part of this paycheck."""
 
     model_config = ConfigDict(extra="forbid")
     this: StubAmounts = StubAmounts()
     ytd: StubAmounts = StubAmounts()
+    deposits: list[StubDeposit] = Field(default=[], max_length=10)
 
 
 class PaycheckIn(BaseModel):

@@ -1,5 +1,17 @@
 [
   {
+    "version": "0.34.0",
+    "title": "One paycheck, however many accounts",
+    "features": [
+      {
+        "id": "split-paychecks",
+        "title": "A paycheck split across accounts counts once",
+        "body": "When your take-home is split between several accounts, each bank words its deposit differently, and one may land a day or two early. The app now sees them as one paycheck from one employer. Plan counts paychecks a month, not deposits, and Budget's Money in lists your employer once. A pay stub that lists where take-home went (the accounts and amounts) also teaches the app which deposits belong to the paycheck, even ones that don't name your employer. Two people paid on the same day into a shared account stay two paychecks.",
+        "tryIt": "/plan"
+      }
+    ]
+  },
+  {
     "version": "0.33.0",
     "title": "Categories you can trust",
     "features": [

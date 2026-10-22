@@ -76,6 +76,7 @@ def test_reads_an_adp_style_stub():
                 "hsa": 285_000,
                 "benefits": 228_000,
             },
+            "deposits": [],
         },
         "warnings": [],
     }
@@ -186,6 +187,8 @@ def test_stub_whose_amounts_lose_their_punctuation():
         "Dental -15 00* 270 00 401K Er Match 4 000 00",
         "Net Pay $2 693 80",
         "Net Check $0 00",
+        "JANE DOE xxxxxxxxx1234 xxxx xxxx $2 154 80",
+        "xxxx5678 xxxx xxxx $539 00",
     ]
     s = paystub.parse(lines)
     assert (s.gross_cents, s.net_cents) == (4_910_00, 2_693_80)
@@ -196,6 +199,7 @@ def test_stub_whose_amounts_lose_their_punctuation():
     assert s.ytd["gross"] == 128_380_00 and s.ytd["federal"] == 12_600_00
     assert s.frequency == "biweekly" and s.pay_date.isoformat() == "2026-10-16"
     assert not s.warnings
+    assert s.deposits == [{"mask": "1234", "cents": 2_154_80}, {"mask": "5678", "cents": 539_00}]  # where it went
     assert (
         paystub.restore_amounts("MORRISVILLE NC 27560-5299 3060 OLSEN DR") == "MORRISVILLE NC 27560-5299 3060 OLSEN DR"
     )

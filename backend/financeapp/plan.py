@@ -256,7 +256,8 @@ def month_row(ledger: budget.Ledger, m: date, payers: budget.Payroll, moved: int
 
 
 def pay_merchants(ledger: budget.Ledger, paychecks: list[dict], prefs: dict) -> budget.Payroll:
-    return budget.pay_merchants(ledger, [(date.fromisoformat(p["date"]), p["net_cents"]) for p in paychecks], prefs)
+    stubs = [(date.fromisoformat(p["date"]), p["net_cents"]) for p in paychecks]
+    return budget.pay_merchants(ledger, stubs, prefs, budget.latest_splits(paychecks))
 
 
 MONEY_IN_ROWS = 12
@@ -274,7 +275,7 @@ def money_in(ledger: budget.Ledger, months: list[date], payers: budget.Payroll, 
             continue
         sender = transfers.sender_of(t)
         if budget.is_pay_deposit(ledger, t, payers):
-            kind, key = "pay", payers.employer_of(t) or budget.employer_key(budget.text_of(t)) or budget.payer(t)
+            kind, key = "pay", payers.source(t)
         elif sender is not None and transfers.is_own(t, names):
             kind, key = "me", sender
         elif ledger.is_income(t) or (ledger.kind(t) == "other" and sender is not None):
@@ -282,12 +283,16 @@ def money_in(ledger: budget.Ledger, months: list[date], payers: budget.Payroll, 
         else:
             continue
         g = groups.setdefault(
-            (kind, key), {"key": key, "as": kind, "sender": sender is not None, "cents": 0, "count": 0}
+            (kind, key), {"key": key, "as": kind, "sender": sender is not None, "cents": 0, "count": 0, "days": set()}
         )
         g["cents"] += t.amount_cents
-        g["count"] += 1
+        day = payers.payday_of(t)[1] if kind == "pay" else t.date
+        if kind != "pay" or day not in g["days"]:  # a paycheck split across accounts is one paycheck
+            g["count"] += 1
+        g["days"].add(day)
     rows = sorted(groups.values(), key=lambda g: -g["cents"])[:MONEY_IN_ROWS]
     for g in rows:
+        del g["days"]
         g["monthly_cents"] = round(g["cents"] / len(months))
     return rows
 
@@ -363,10 +368,10 @@ def derive_savings(
         who = sorted(employers)
         pay = line("Pay landing in your accounts", avg(rows, "pay_cents"))
         pay["detail"] = (
-            f"{per_month:g} payroll deposit{'' if per_month == 1 else 's'} a month"
+            f"{per_month:g} paycheck{'' if per_month == 1 else 's'} a month"
             + (f" from {', '.join(w.upper() for w in who[:3])}" if who else "")
             if per_month
-            else "No payroll deposits found. Mark who pays you below."
+            else "No paychecks found. Mark who pays you below."
         )
         breakdown = [pay]
         other = avg(rows, "other_in_cents")
@@ -483,7 +488,7 @@ def inputs(db: DbSession, state: dict, net_worth: int, on: date, holdings: list[
     moved = moved_in(db, accounts, months)
     rows = [month_row(ledger, m, payers, moved.get(m, 0)) for m in months]
     spending = Spending(ledger, months, on, rows)
-    measured = derive_savings(state, ledger, spending, on, rows, payers.employers)
+    measured = derive_savings(state, ledger, spending, on, rows, set(payers.counts))  # employers paid
     returns = derive_returns(db, holdings, allocation)
     typed_return = prefs.get("return_mid")
     if typed_return is not None:

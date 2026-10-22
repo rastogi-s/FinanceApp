@@ -523,7 +523,7 @@ function Breakdown({
                     Month
                   </th>
                   <th scope="col" className="py-1 font-normal">
-                    Pay (deposits)
+                    Pay (paychecks)
                   </th>
                   <th scope="col" className="py-1 font-normal">
                     Other in
@@ -587,7 +587,8 @@ function MoneyInList({ rows, months, onCountAs }: { rows: MoneyIn[]; months: num
             <div className="min-w-0 flex-1">
               <p className="truncate text-foreground capitalize">{r.key}</p>
               <p className="money text-muted-foreground tabular-nums">
-                <Money cents={r.monthly_cents} /> a month, {r.count} deposit{r.count === 1 ? "" : "s"} in {months} month
+                <Money cents={r.monthly_cents} /> a month, {r.count} {r.as === "pay" ? "paycheck" : "deposit"}
+                {r.count === 1 ? "" : "s"} in {months} month
                 {months === 1 ? "" : "s"}
               </p>
             </div>
