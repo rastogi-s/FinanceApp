@@ -130,6 +130,18 @@ def household(today: date | None = None) -> dict:
             "transfer": True,
         },
     )
+    transactions.insert(
+        6,
+        {
+            "id": "demo-card-payment",
+            "date": (today - timedelta(days=2)).isoformat(),
+            "merchant": "AMEX EPAYMENT ACH PMT",
+            "category": "Credit card payment",
+            "amount_cents": -_cents(2140),
+            "account": "Chase checking",
+            "transfer": True,
+        },
+    )
 
     by_class: dict[str, int] = {}
     for _, _, asset_class, _, dollars, _ in HOLDINGS:
@@ -221,6 +233,7 @@ CATEGORY_NAMES = [
     ("Shopping", "flexible"),
     ("Transport", "flexible"),
     ("Entertainment", "flexible"),
+    ("Credit card payment", "transfer"),
     ("Transfer", "transfer"),
     ("Uncategorized", "other"),
 ]

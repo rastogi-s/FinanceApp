@@ -152,6 +152,10 @@ class Ledger:
         c = self.categories.get(t.category_id) if t.category_id else None
         return c is not None and c.name == "Taxes"
 
+    def is_card_payment(self, t: Transaction) -> bool:
+        c = self.categories.get(t.category_id) if t.category_id else None
+        return c is not None and c.name == transfers.CARD_CATEGORY
+
     def is_spending(self, t: Transaction) -> bool:
         return self.kind(t) not in ("transfer", "income") and not self.is_taxes(t)
 
@@ -432,7 +436,7 @@ def where_it_went(ledger: Ledger, moves: Moves, m: date, saved: int, put_away: i
         text = f"{t.merchant} {t.description}"
         if t.amount_cents > 0:
             moved_in += t.amount_cents
-        elif CARD_PAYMENT.search(text):
+        elif ledger.is_card_payment(t) or CARD_PAYMENT.search(text):
             cards -= t.amount_cents
         elif hit := BROKERAGE.search(text):
             name = hit.group(0).lower()
