@@ -38,7 +38,8 @@ CARD_PAYMENT = (
 CARD_TEXT = re.compile(CARD_PAYMENT, re.IGNORECASE)
 CARD_CODE = "LOAN_PAYMENTS_CREDIT_CARD_PAYMENT"  # Plaid's own name for paying a card
 CARD_CATEGORY = "Credit card payment"
-BROKERAGES = r"fidelity|e\*?trade|vanguard|schwab|robinhood|wealthfront|betterment"
+# E*TRADE is Morgan Stanley: its transfers often say only that ("MORGAN STANLEY", "MSPBNA").
+BROKERAGES = r"fidelity|e\*?trade|morgan stanley|mspbna|ms&co|vanguard|schwab|robinhood|wealthfront|betterment"
 ONE_SIDED = re.compile(
     CARD_PAYMENT + "|"
     # Moves between accounts, and into brokerages.

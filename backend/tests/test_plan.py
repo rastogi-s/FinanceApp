@@ -489,3 +489,67 @@ def test_only_payroll_counts_as_pay(client, home):
     p = client.put("/api/plan/money-in", json={"key": "netapp", "counts_as": "pay"}, headers=h).json()
     assert september(p)["pay_cents"] == 6_500_00
     assert client.put("/api/plan/money-in", json={"key": "!!", "counts_as": "pay"}, headers=h).status_code == 422
+
+
+def test_savings_rate_sources_bonus_third_paycheck_and_etrade(client, home):
+    """Pay broken down by employer and paychecks; a bonus and a third two-weekly paycheck kept out of the usual
+    month; withholding filled in from the usual stub for paychecks without one; transfers to E*TRADE invested."""
+    from datetime import timedelta
+
+    from financeapp import transfers
+
+    home.setup()
+    history(client)
+    rows = []
+    day = date(2026, 5, 8)
+    while day < date(2026, 10, 21):  # every two weeks: July has three
+        rows.append((day.isoformat(), "Deposit from NETAPP INC PAYROLL", 3_000, None))
+        day += timedelta(days=14)
+    rows += [
+        ("2026-08-20", "NETAPP INC PAYROLL", 9_000, None),  # a bonus
+        ("2026-09-10", "MORGAN STANLEY ACH", -1_000, "Transfer"),
+        ("2026-09-11", "Online transfer to brokerage xxxx2600", -500, "Transfer"),
+        ("2026-09-12", "Zelle from Mom", 200, "Other income"),
+    ]
+    add_transactions(client, rows)
+    add_to(client, "etrade", [("2026-09-01", "Dividend", 1, None)], kind="investment")
+    with db_of(client).session() as db:
+        a = db.scalar(select(Account).where(Account.external_id == "etrade"))
+        a.mask, a.name = "2600", "E*TRADE Individual"
+        db.add(
+            Paycheck(
+                date=date(2026, 10, 9),
+                frequency="biweekly",
+                gross_cents=4_500_00,
+                taxes_cents=900_00,
+                savings_cents=400_00,
+                net_cents=3_000_00,
+            )
+        )
+        transfers.match_transfers(db, date(2026, 5, 1))
+    months = {m["month"]: m for m in client.get("/api/budget").json()["savings_history"]}
+
+    jul = months["2026-07-01"]
+    assert jul["basis"] == "gross" and jul["estimated_paychecks"] == 3
+    money_in = {x["label"]: x for x in jul["breakdown"]["money_in"]}
+    pay = money_in["Pay before taxes, 3 paychecks without a stub (from your usual stub)"]
+    assert pay["cents"] == 3 * 4_500_00 and pay["items"] == [{"label": "NETAPP: 3 paychecks", "cents": 9_000_00}]
+    taxes = next(x for x in jul["breakdown"]["money_out"] if x["label"] == "Taxes")
+    assert taxes["items"] == [{"label": "Withheld, estimated from your usual stub", "cents": 3 * 900_00}]
+    assert jul["usual"]["extra_paychecks"] == 1 and jul["usual"]["percent"] < jul["percent"]
+
+    aug = months["2026-08-01"]
+    labels = [x["label"] for x in aug["breakdown"]["money_in"]]
+    assert "Bonus (take-home), left out of your usual month" in labels
+    assert aug["usual"]["bonus_cents"] == 9_000_00 and aug["usual"]["saved_cents"] == aug["saved_cents"] - 9_000_00
+
+    sep = months["2026-09-01"]
+    assert sep["usual"] is None  # two paychecks, no bonus
+    went = {x["label"]: x["cents"] for x in sep["breakdown"]["went"]}
+    assert went["Into E*TRADE"] == 1_000_00 and went["Into E*TRADE Individual"] == 500_00
+    other = next(x for x in sep["breakdown"]["money_in"] if x["label"] == "Other money in")
+    assert other["items"] == [{"label": "Zelle from Mom", "cents": 200_00}]
+
+    # Plan's usual month leaves the bonus out.
+    rows = {r["month"]: r for r in client.get("/api/plan").json()["inputs"]["savings_source"]["months"]}
+    assert rows["2026-08-01"]["pay_cents"] == 2 * 3_000_00

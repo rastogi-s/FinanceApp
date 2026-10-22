@@ -37,6 +37,10 @@ export type SavingsMonth = {
   saved_cents: number;
   match_cents: number;
   stubs: number;
+  /** Paychecks that landed without their stub, filled in from the usual stub (pay before taxes, withholding). */
+  estimated_paychecks?: number;
+  /** The month without a bonus or a rare third paycheck, when it had one: what a usual month looks like. */
+  usual?: { percent: number; saved_cents: number; bonus_cents: number; extra_paychecks: number } | null;
   /** The month line by line: money in, money out (spending by group), where the savings went, what to check. */
   breakdown?: SavingsBreakdown;
 };

@@ -42,7 +42,9 @@ TAX = re.compile(
     r"\b[A-Z]{2}\s+(state\s+)?(income\s+)?tax\b|\b(city|local|county)\s+tax\b",
     re.I,
 )
-SAVINGS = re.compile(r"\b(40[13]\s*\(?[kb]\)?|457\s*\(?b?\)?|hsa|health\s+savings|espp|stock\s+purchase)\b", re.I)
+SAVINGS = re.compile(
+    r"\b(40[13]\s*\(?[kb]\)?|457\s*\(?b?\)?|hsa|health\s+savings|stock\s+purchase)\b|(?<![a-z])espp(?![a-z])", re.I
+)  # "Espp_2" is ESPP too
 EMPLOYER = re.compile(r"\b(employer|company|er)\b.*\b(match|contrib|contribution|401|hsa)\b|\bmatch\b", re.I)
 TAXABLE = re.compile(r"\btaxable\b", re.I)  # "Federal Taxable Wages" is a wage total, not a tax
 BENEFITS = re.compile(
@@ -162,7 +164,7 @@ def savings_kind(line: str) -> str:
         return "roth"
     if re.search(r"\bhsa\b|\bhealth\s+savings\b", line, re.I):
         return "hsa"
-    if re.search(r"\bespp\b|\bstock\s+purchase\b", line, re.I):
+    if re.search(r"(?<![a-z])espp(?![a-z])|\bstock\s+purchase\b", line, re.I):
         return "espp"
     return "retirement"
 
@@ -201,8 +203,79 @@ def frequency_from(stub: Stub, lines: list[str]) -> str | None:
     return None
 
 
+# Some stubs (ADP's among them) draw the comma and the decimal point apart from the digits, so the text comes out
+# as "Gross Pay $7 773 08 239 276 46": dollars in groups of three, then two digits of cents.
+BARE = re.compile(r"^(\(?-?\$?)(\d+)(\*?)$")
+CENTS = re.compile(r"^(\d{2})(\*?\)?)$")
+
+
+def restore_amounts(line: str) -> str:
+    """ "Gross Pay $7 773 08 239 276 46" -> "Gross Pay $7,773.08 239,276.46"."""
+    tokens = line.split(" ")
+    out = []
+    i = 0
+    while i < len(tokens):
+        head = BARE.match(tokens[i])
+        if head and not head.group(3):
+            j = i + 1
+            groups = [head.group(2)]
+            while j < len(tokens) and re.fullmatch(r"\d{3}", tokens[j]) and j + 1 < len(tokens):
+                groups.append(tokens[j])
+                j += 1
+            if j < len(tokens) and (tail := CENTS.match(tokens[j])) and (len(groups) == 1 or len(groups[0]) <= 3):
+                dollars = int("".join(groups))
+                out.append(f"{head.group(1)}{dollars:,}.{tail.group(1)}{tail.group(2)}")
+                i = j + 1
+                continue
+        out.append(tokens[i])
+        i += 1
+    return " ".join(out)
+
+
+AMOUNT_TOKEN = re.compile(r"^\(?-?\$?\d[\d,]*\.\d{2}\)?\*?$")
+
+
+def split_columns(line: str) -> list[str]:
+    """A line with two columns side by side ("Regular 7,743.62 147,936.83 Dental -21.39 449.19") as one line per
+    item: a label, then its amounts; a word after an amount starts the next item."""
+    parts: list[list[str]] = [[]]
+    seen_amount = False
+    for token in line.split(" "):
+        is_amount = bool(AMOUNT_TOKEN.match(token))
+        if not is_amount and seen_amount:
+            parts.append([])
+            seen_amount = False
+        parts[-1].append(token)
+        seen_amount = seen_amount or is_amount
+    return [" ".join(p) for p in parts if p]
+
+
+def signed(line: str, label: re.Match) -> list[int]:
+    return [cents(m.group()) for m in AMOUNT.finditer(line[label.end() :])]
+
+
 def read(data: bytes) -> Stub:
-    lines = text_of(data)
+    return parse(text_of(data))
+
+
+def parse(lines: list[str]) -> Stub:
+    """The numbers on a stub, from its lines of text."""
+    if not any(AMOUNT.search(line) for line in lines if NET.search(line) or GROSS.search(line)):
+        lines = [restore_amounts(line) for line in lines]
+    lines = [part for line in lines for part in split_columns(line)]
+    # Stubs that print this paycheck's deductions as negative amounts ("Dental -21.39 449.19") leave the column
+    # blank when nothing came out this time, so a deduction with no negative amount is a year-to-date figure only.
+    negatives = sum(1 for line in lines if re.search(r"(^|\s)\(?-\$?\d[\d,]*\.\d{2}", line)) >= 3
+
+    def this_period(line: str, m: re.Match, earnings: bool = False) -> int | None:
+        found = signed(line, m)
+        if not negatives:
+            return abs(found[0]) if found else None
+        if earnings:  # an earning with one amount printed is the year to date
+            return abs(found[-2]) if len(found) >= 2 else None
+        neg = [v for v in found if v < 0]
+        return abs(neg[0]) if neg else None
+
     stub = Stub()
     tax_lines = 0
     tax_sum = 0
@@ -230,22 +303,20 @@ def read(data: bytes) -> Stub:
         elif (
             (m := STOCK.search(line))
             and not re.search(r"\b(offset|refund|tax)\b", line, re.I)
-            and (value := first_amount(line, m))
+            and (value := this_period(line, m, earnings=True))
         ):
             add("stock", line, m, value)
-        elif (m := SAVINGS.search(line)) and (value := first_amount(line, m)) is not None:
-            if EMPLOYER.search(line):
+        elif EMPLOYER.search(line) and (m := EMPLOYER.search(line)):
+            if (value := this_period(line, m, earnings=True)) is not None:
                 match += value
-            else:
-                savings += value
-                add(savings_kind(line), line, m, value)
-        elif EMPLOYER.search(line) and (m := EMPLOYER.search(line)) and (value := first_amount(line, m)) is not None:
-            match += value
-        elif (m := TAX.search(line)) and (value := first_amount(line, m)) is not None:
+        elif (m := SAVINGS.search(line)) and (value := this_period(line, m)) is not None:
+            savings += value
+            add(savings_kind(line), line, m, value)
+        elif (m := TAX.search(line)) and (value := this_period(line, m)) is not None:
             tax_lines += 1
             tax_sum += value
             add(tax_kind(line), line, m, value)
-        elif (m := BENEFITS.search(line)) and (value := first_amount(line, m)):
+        elif (m := BENEFITS.search(line)) and (value := this_period(line, m)):
             add("benefits", line, m, value)
 
         if stub.pay_date is None and (m := PAY_DATE.search(line)) and (found := dates(line[m.end() :])):
