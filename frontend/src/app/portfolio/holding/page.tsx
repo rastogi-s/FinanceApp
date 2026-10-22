@@ -174,6 +174,8 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
   );
 }
 
+const shares = (n: number) => n.toLocaleString("en-US", { maximumFractionDigits: 4 });
+
 function PositionCard({ s }: { s: Security }) {
   const p = s.position!;
   const gainUp = (p.gain_cents ?? 0) >= 0;
@@ -195,7 +197,7 @@ function PositionCard({ s }: { s: Security }) {
         )}
         <dl className="mt-3 divide-y">
           <Row label="Shares">
-            <span className="money">{p.quantity.toLocaleString("en-US", { maximumFractionDigits: 4 })}</span>
+            <span className="money">{shares(p.quantity)}</span>
           </Row>
           {p.cost_basis_cents != null && p.quantity > 0 && (
             <Row label="Average cost">
@@ -208,7 +210,20 @@ function PositionCard({ s }: { s: Security }) {
             </Row>
           ))}
         </dl>
-        <p className="mt-2 text-xs text-muted-foreground">Shares as of the sync on {asOf(p.as_of)}.</p>
+        {p.unvested && (
+          <div className="mt-3 rounded-lg bg-muted/60 px-3 py-2.5 text-sm">
+            <div className="flex items-baseline justify-between gap-3">
+              <span className="text-muted-foreground">Not vested yet</span>
+              <span className="font-medium tabular-nums">
+                {shares(p.unvested.quantity)} sh · <Money cents={p.unvested.value_cents} />
+              </span>
+            </div>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Unvested shares are left out of this position, your portfolio and net worth until they vest.
+            </p>
+          </div>
+        )}
+        {p.as_of && <p className="mt-2 text-xs text-muted-foreground">Shares as of the sync on {asOf(p.as_of)}.</p>}
       </CardContent>
     </Card>
   );

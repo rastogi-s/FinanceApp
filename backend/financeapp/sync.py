@@ -116,6 +116,8 @@ def save_holdings(db: DbSession, accounts: dict[str, Account], holdings: list[Ho
             m.value_cents += h.value_cents
             if h.cost_basis_cents is not None:
                 m.cost_basis_cents = (m.cost_basis_cents or 0) + h.cost_basis_cents
+            if h.unvested_quantity:
+                m.unvested_quantity = (m.unvested_quantity or 0) + h.unvested_quantity
             continue
         merged[key] = HoldingSnapshot(
             date=on,
@@ -127,6 +129,7 @@ def save_holdings(db: DbSession, accounts: dict[str, Account], holdings: list[Ho
             price=h.price,
             value_cents=h.value_cents,
             cost_basis_cents=h.cost_basis_cents,
+            unvested_quantity=h.unvested_quantity or None,
         )
     db.add_all(merged.values())
     db.flush()

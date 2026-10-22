@@ -64,6 +64,8 @@ def positions(db: DbSession, accounts: list[Account]) -> list[Position]:
     live = quotes.latest(db, {h.symbol for _, rows, _ in snapshots.values() for h in rows})
     for aid, (last, rows, prev_prices) in snapshots.items():
         for h in rows:
+            if not h.quantity and not h.value_cents:
+                continue  # a stock plan grant with nothing vested yet (unvested() has it)
             q = live.get(h.symbol)
             if quotes.quotable(h.symbol, h.asset_class) and quotes.fresh_for(q, last) and h.quantity > 0:
                 value = int((h.quantity * q.price * 100).to_integral_value())
@@ -83,6 +85,22 @@ def positions(db: DbSession, accounts: list[Account]) -> list[Position]:
                     round(change, 2), h.cost_basis_cents, last, None,
                 )
             )  # fmt: skip
+    return out
+
+
+def unvested(db: DbSession, accounts: list[Account], symbol: str) -> dict[int, Decimal]:
+    """Stock plan shares of `symbol` not vested yet, by account, from each account's latest snapshot. Never counted in
+    holdings, balances or net worth: the shares can still be forfeited."""
+    out: dict[int, Decimal] = {}
+    for a in accounts:
+        if a.type != "investment":
+            continue
+        last = db.scalar(select(func.max(HoldingSnapshot.date)).where(HoldingSnapshot.account_id == a.id))
+        if last is None:
+            continue
+        h = db.get(HoldingSnapshot, (last, a.id, symbol))
+        if h is not None and h.unvested_quantity:
+            out[a.id] = h.unvested_quantity
     return out
 
 

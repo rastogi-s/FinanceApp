@@ -203,7 +203,8 @@ def test_brief_is_due_once_in_the_morning_window(client, home):
 
 
 @needs_db
-def test_the_app_writes_and_sends_the_brief(client, home, sent):
+def test_the_app_writes_and_sends_the_brief(client, home, sent, monkeypatch):
+    monkeypatch.setattr(brief, "now", lambda: MORNING)  # "today" on Home is the brief's day, whatever the clock says
     home.setup()
     money_in_the_bank(client)
     add_transactions(client, [("2026-10-20", "Blue Bottle", -6.5, "Dining out"), ("2026-10-20", "Shell", -40, None)])
