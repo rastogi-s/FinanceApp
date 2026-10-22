@@ -490,7 +490,9 @@ function Payers({ p }: { p: Income }) {
                 >
                   <span className="min-w-0">
                     <span className="flex items-center gap-1.5 text-sm">
-                      <span className="font-semibold">{r.symbol}</span>
+                      <span className="max-w-[60%] shrink-0 truncate font-semibold" title={r.symbol}>
+                        {r.symbol}
+                      </span>
                       <span className="truncate text-muted-foreground">{r.name}</span>
                       {r.reinvesting && <Badge variant="muted" className="shrink-0 px-1.5 py-0 text-[10px]">DRIP</Badge>}
                     </span>

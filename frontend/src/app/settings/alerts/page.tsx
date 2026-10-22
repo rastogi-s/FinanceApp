@@ -182,7 +182,7 @@ export default function AlertsPage() {
                       <Icon />
                     </span>
                     <button className="min-w-0 flex-1 text-left" onClick={() => !guard() && setEditing(r)}>
-                      <span className={cn("block text-sm font-medium", !r.enabled && "text-muted-foreground")}>{r.summary}</span>
+                      <span className={cn("block text-sm font-medium wrap-anywhere", !r.enabled && "text-muted-foreground")}>{r.summary}</span>
                       <span className="block text-xs text-muted-foreground">
                         {r.kind === "price"
                           ? "Checked every 15 minutes while markets are open"
