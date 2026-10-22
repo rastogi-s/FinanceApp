@@ -367,12 +367,17 @@ class Moves:
         self.groups: dict = defaultdict(list)
         for t in rows:
             self.groups[t.transfer_group_id].append(t)
+        # A bank transaction paired with a brokerage's own deposit record: that record is the other side.
+        brokerages = [a.id for a in accounts if a.type == "investment"]
+        for m in transfers.brokerage_moves(db, brokerages, since - timedelta(days=transfers.WINDOW_DAYS)):
+            if (group := transfers.brokerage_group(m)) in self.groups:
+                self.groups[group].append(m)
 
 
 EVERYDAY_SUBTYPES = (None, "checking", "paypal", "prepaid", "cash management")
 CARD_PAYMENT = re.compile(transfers.CARD_PAYMENT, re.IGNORECASE)
 BROKERAGE = re.compile(transfers.BROKERAGES, re.IGNORECASE)
-BROKERAGE_NAMES = {"etrade": "E*TRADE", "e*trade": "E*TRADE"}
+BROKERAGE_NAMES = {"etrade": "E*TRADE", "e*trade": "E*TRADE", "e trade": "E*TRADE", "e-trade": "E*TRADE"}
 SPENDING_GROUPS = (("fixed", "Bills"), ("flexible", "Everyday"), ("other", "Other spending"))
 INCOME_NAMES = {"Other income": "Other money in"}
 WORTH_A_LOOK_CENTS = 100_00
@@ -421,10 +426,13 @@ def where_it_went(ledger: Ledger, moves: Moves, m: date, saved: int, put_away: i
         if not cents or (a.type == "depository" and (a.subtype or None) in EVERYDAY_SUBTYPES):
             continue
         kind = {"investment": "invest", "loan": "loan"}.get(a.type, "savings")
-        if cents > 0:
-            label = f"Paid down {a.name}" if kind == "loan" else f"Into {a.name}"
+        if kind == "invest":
+            from financeapp.household import display_name  # household imports this module
+
+            name = display_name(a)  # whose brokerage: "E*TRADE Brokerage ••2600"
         else:
-            label = f"Taken out of {a.name}"
+            name = a.name
+        label = (f"Paid down {name}" if kind == "loan" else f"Into {name}") if cents > 0 else f"Taken out of {name}"
         lines.append(item(label, cents, kind=kind))
 
     brokerages: dict[str, int] = defaultdict(int)

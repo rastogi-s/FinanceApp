@@ -5,6 +5,13 @@ same amount into another. Pairs of equal and opposite amounts in two different a
 as one transfer (they share a transfer_group_id) and put in the Transfer category, or in "Credit card payment" when
 one side is a card.
 
+A brokerage contribution has its other side in the brokerage's own activity (Plaid Investments), not in its
+transactions: E*TRADE lists "deposit" or "transfer" with the amount that arrived. A bank withdrawal is paired with
+the brokerage deposit of the same amount within 5 days (and a brokerage withdrawal with the bank deposit), so it
+counts as money moved into investing whatever the bank called it. Brokerage moves are matched before bank pairs,
+since they come from the brokerage's own records. The pair's group id is made from the brokerage entry's id
+(brokerage_group), so the bank side is all that's stored.
+
 Some transfers only show one side, because the other account isn't linked (paying a card you haven't connected,
 or a payment arriving on a card whose bank account isn't connected). Those are recognised by their description
 ("AUTOPAY", "PAYMENT THANK YOU", ...) and also go in Transfer (or Credit card payment), without a pair.
@@ -20,11 +27,11 @@ import re
 import uuid
 from datetime import date, timedelta
 
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session as DbSession
 
 from financeapp.categorize import categorize, normalize_merchant
-from financeapp.models import Account, Category, Preference, Transaction, User
+from financeapp.models import Account, Category, InvestmentTransaction, Preference, Transaction, User
 
 WINDOW_DAYS = 5
 
@@ -38,7 +45,7 @@ CARD_PAYMENT = (
 CARD_TEXT = re.compile(CARD_PAYMENT, re.IGNORECASE)
 CARD_CODE = "LOAN_PAYMENTS_CREDIT_CARD_PAYMENT"  # Plaid's own name for paying a card
 CARD_CATEGORY = "Credit card payment"
-BROKERAGES = r"fidelity|e\*?trade|vanguard|schwab|robinhood|wealthfront|betterment"
+BROKERAGES = r"fidelity|\be[ *-]?trade|morgan stanley|vanguard|schwab|robinhood|wealthfront|betterment"
 ONE_SIDED = re.compile(
     CARD_PAYMENT + "|"
     # Moves between accounts, and into brokerages.
@@ -46,6 +53,35 @@ ONE_SIDED = re.compile(
     rf"({BROKERAGES}).{{0,24}}(transfer|contribution|moneyline|ach|deposit|invest)",
     re.IGNORECASE,
 )
+
+BROKERAGE_TEXT = re.compile(BROKERAGES, re.IGNORECASE)
+# Cash arriving in or leaving a brokerage account (Plaid types and subtypes), as opposed to trades and income.
+CASH_MOVE_SUBTYPES = {"deposit", "contribution", "withdrawal", "transfer"}
+BROKERAGE_GROUPS = uuid.UUID("6d2f4b1e-6f0c-4a51-9a63-3f1d2b7c0e11")
+
+
+def brokerage_group(move: InvestmentTransaction) -> uuid.UUID:
+    """The transfer group a bank transaction shares with the brokerage entry it was paired with."""
+    return uuid.uuid5(BROKERAGE_GROUPS, str(move.id))
+
+
+def is_cash_move(move: InvestmentTransaction) -> bool:
+    return move.type in ("cash", "transfer") and move.subtype.lower() in CASH_MOVE_SUBTYPES and not move.symbol
+
+
+def brokerage_moves(db: DbSession, account_ids: list[int], since: date) -> list[InvestmentTransaction]:
+    """Money moved in or out of these brokerage accounts on or after `since`, from the brokerage's own records."""
+    if not account_ids:
+        return []
+    rows = db.scalars(
+        select(InvestmentTransaction).where(
+            InvestmentTransaction.account_id.in_(account_ids),
+            InvestmentTransaction.date >= since,
+            InvestmentTransaction.type.in_(["cash", "transfer"]),
+        )
+    )
+    return [m for m in rows if is_cash_move(m) and abs(m.amount_cents) >= 100]
+
 
 P2P = re.compile(r"zelle|venmo|cash ?app|paypal|apple cash", re.IGNORECASE)
 SENDER = re.compile(
@@ -107,8 +143,8 @@ def match_transfers(db: DbSession, since: date | None = None) -> int:
     """Tags transfers among transactions on or after `since` (default: the last 90 days). Returns pairs found."""
     since = since or date.today() - timedelta(days=90)
     transfer = db.query(Category).filter_by(name="Transfer").one()
+    pairs = match_brokerage_moves(db, since, transfer)
     used: set[int] = set()
-    pairs = 0
     for out_id, in_id, _gap, _out_type, _in_type in db.execute(
         PAIRS_SQL, {"window": WINDOW_DAYS, "since": since}
     ).all():
@@ -144,6 +180,64 @@ def match_transfers(db: DbSession, since: date | None = None) -> int:
             t.category_source = "transfer"
     db.flush()
     label_card_payments(db, since)
+    return pairs
+
+
+def match_brokerage_moves(db: DbSession, since: date, transfer: Category) -> int:
+    """Pairs bank transactions with deposits into (and withdrawals from) linked brokerage accounts."""
+    brokerages = db.scalars(
+        select(Account.id).where(Account.type == "investment", Account.is_authoritative.is_(True))
+    ).all()
+    moves = brokerage_moves(db, list(brokerages), since - timedelta(days=WINDOW_DAYS))
+    if not moves:
+        return 0
+    taken = set(
+        db.scalars(
+            select(Transaction.transfer_group_id).where(
+                Transaction.transfer_group_id.in_([brokerage_group(m) for m in moves])
+            )
+        )
+    )
+    banks = (
+        db.query(Transaction)
+        .join(Account, Account.id == Transaction.account_id)
+        .filter(
+            Account.type == "depository",
+            Account.is_authoritative.is_(True),
+            Transaction.date >= since - timedelta(days=WINDOW_DAYS),
+            Transaction.transfer_group_id.is_(None),
+            Transaction.pending.is_(False),
+            Transaction.category_source != "user",
+        )
+        .all()
+    )
+    by_amount: dict[int, list[Transaction]] = {}
+    for t in banks:
+        by_amount.setdefault(t.amount_cents, []).append(t)
+    pairs = 0
+    for m in sorted(moves, key=lambda m: (m.date, m.id)):
+        group = brokerage_group(m)
+        if group in taken:
+            continue
+        near = [t for t in by_amount.get(-m.amount_cents, []) if abs((t.date - m.date).days) <= WINDOW_DAYS]
+        if not near:
+            continue
+        # The bank's own wording naming a brokerage first, then the closest day.
+        t = min(
+            near,
+            key=lambda t: (
+                not BROKERAGE_TEXT.search(f"{t.merchant} {t.description}"),
+                abs((t.date - m.date).days),
+                t.id,
+            ),
+        )
+        by_amount[t.amount_cents].remove(t)
+        t.transfer_group_id = group
+        t.category_id = transfer.id
+        t.category_source = "transfer"
+        taken.add(group)
+        pairs += 1
+    db.flush()
     return pairs
 
 
