@@ -685,3 +685,79 @@ def test_brokerage_wording_spots_more_etrade_transfers():
     for text in ("E TRADE SECURITIES ACH", "ETRADE TRANSFER", "MORGAN STANLEY ACH DEPOSIT"):
         assert ONE_SIDED.search(text), text
     assert not ONE_SIDED.search("The Trade Desk deposit")
+
+
+@needs_db
+def test_one_paycheck_split_four_ways_and_worded_four_ways(client, home):
+    """ADP pays take-home into four accounts. Each bank words its deposit its own way ("Early Paycheck", a payroll
+    code, or nothing at all), and one even lands two days early. It's still one NETAPP paycheck each payday."""
+    from datetime import timedelta
+
+    home.setup()
+    history(client)
+    checking, boa, small, saving = [], [], [], []
+    day = date(2026, 5, 8)
+    while day < date(2026, 10, 21):
+        checking.append(((day - timedelta(days=2)).isoformat(), "Early Paycheck NETAPP INC PAYROLL", 3_084.55, None))
+        boa.append((day.isoformat(), "NETAPP INC DES:DIR DEP ID:0042 INDN:RASTOGI", 395.45, None))
+        small.append((day.isoformat(), "NETAPP INC", 237.27, None))
+        saving.append((day.isoformat(), "ONLINE DEPOSIT", 237.27, None))  # says nothing about pay
+        day += timedelta(days=14)
+    add_transactions(client, checking)
+    add_to(client, "boa", boa, kind="depository")
+    add_to(client, "small", small, kind="depository")
+    add_to(client, "saving", saving, kind="depository")
+    with db_of(client).session() as db:
+        for external_id, mask in (("boa", "7006"), ("small", "3976"), ("saving", "9933")):
+            db.scalar(select(Account).where(Account.external_id == external_id)).mask = mask
+        splits = [
+            {"mask": "3976", "cents": 237_27},
+            {"mask": "0115", "cents": 3_084_55},
+            {"mask": "7006", "cents": 395_45},
+            {"mask": "9933", "cents": 237_27},
+        ]
+        db.add(
+            Paycheck(
+                date=date(2026, 10, 16),
+                frequency="biweekly",
+                gross_cents=7_773_08,
+                taxes_cents=1_662_15,
+                savings_cents=1_893_47,
+                net_cents=3_954_54,
+                detail={"deposits": splits},
+            )
+        )
+    state = client.get("/api/budget").json()
+    sep = {m["month"]: m for m in state["savings_history"]}["2026-09-01"]
+    assert sep["breakdown"]["money_in"][0]["items"] == [{"label": "NETAPP: 2 paychecks", "cents": 2 * 3_954_54}]
+    assert sep["usual"] is None and sep["estimated_paychecks"] == 2
+    assert state["stub_requests"] == []  # every paycheck the same
+
+    p = client.get("/api/plan").json()["inputs"]
+    pay = p["savings_source"]["breakdown"][0]
+    assert pay["detail"].startswith("2") and pay["detail"].endswith("paychecks a month from NETAPP")
+    rows = [r for r in p["savings_source"]["money_in"] if r["as"] == "pay"]
+    months = p["savings_source"]["months"]
+    assert [r["key"] for r in rows] == ["netapp"]
+    assert rows[0]["count"] == sum(m["pay_deposits"] for m in months)  # paydays, not four deposits each
+    assert not [r for r in p["savings_source"]["money_in"] if r["key"] == "online deposit"]
+
+
+@needs_db
+def test_two_people_paid_on_the_same_days_stay_two_employers(client, home):
+    from datetime import timedelta
+
+    home.setup()
+    history(client)
+    rows = []
+    day = date(2026, 5, 8)
+    while day < date(2026, 10, 21):
+        rows.append((day.isoformat(), "NETAPP INC PAYROLL", 3_000, None))
+        rows.append((day.isoformat(), "ACME CORP DIR DEP", 2_000, None))  # into the same joint account
+        day += timedelta(days=14)
+    add_transactions(client, rows)
+    sep = {m["month"]: m for m in client.get("/api/budget").json()["savings_history"]}["2026-09-01"]
+    assert sep["breakdown"]["money_in"][0]["items"] == [
+        {"label": "NETAPP: 2 paychecks", "cents": 6_000_00},
+        {"label": "ACME: 2 paychecks", "cents": 4_000_00},
+    ]

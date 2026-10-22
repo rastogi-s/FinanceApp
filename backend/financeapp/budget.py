@@ -129,6 +129,7 @@ class Ledger:
 
     def __init__(self, db: DbSession, accounts: list[Account], since: date) -> None:
         self.categories = {c.id: c for c in db.scalars(select(Category))}
+        self.accounts = {a.id: a for a in accounts}
         self.txns = (
             db.scalars(
                 select(Transaction).where(
@@ -301,10 +302,17 @@ class Payroll:
         # is counted by payday: txn id -> (employer, payday, the whole paycheck).
         self.paydays: dict[int, tuple[str, date, int]] = {}
         self.every_days: dict[str, float] = {}  # employer -> days between paychecks, typically
+        # Names that turned out to be the same employer (one bank says "EARLY NETAPP", another "NETAPP"), and
+        # deposits that are part of a paycheck without saying so (into an account the stub says pay is split to).
+        self.alias: dict[str, str] = {}
+        self.split_ids: dict[int, str] = {}
 
     def source(self, t: Transaction) -> str:
         """Who a pay deposit is from: its employer, however the bank words it."""
-        return self.employer_of(t) or employer_key(text_of(t)) or payer(t)
+        if t.id in self.split_ids:
+            return self.split_ids[t.id]
+        name = self.employer_of(t) or employer_key(text_of(t)) or payer(t)
+        return self.alias.get(name, name)
 
     def is_bonus(self, t: Transaction) -> bool:
         """A paycheck well over the usual one from the same employer: a bonus, or RSU or commission pay."""
@@ -327,14 +335,16 @@ class Payroll:
 
     def employer_of(self, t: Transaction) -> str | None:
         words = set(text_of(t).split())
-        for e in sorted(self.employers, key=len, reverse=True):
+        for e in sorted(self.employers, key=lambda e: (len(e.split()), e)):  # "netapp" before "early netapp"
             if set(e.split()) <= words:
-                return e
+                return self.alias.get(e, e)
         return None
 
     def matches(self, t: Transaction) -> bool:
         if t.amount_cents <= 0:
             return False
+        if t.id in self.split_ids:
+            return True
         text = text_of(t)
         if employer_key(text) in self.not_pay or payer(t) in self.not_pay:
             return False
@@ -360,13 +370,22 @@ def is_pay_deposit(ledger: Ledger, t: Transaction, payers: Payroll | None) -> bo
     """A deposit of pay, even one left uncategorized (which would otherwise count as a refund against spending)."""
     if payers is None or ledger.kind(t) not in ("income", "other", "transfer") or not payers.matches(t):
         return False
+    if t.id in payers.split_ids:
+        return True
     # Something filed as a transfer is pay only if its words say so, not just because the amount fits a stub.
     return ledger.kind(t) != "transfer" or bool(PAYROLL_WORDS.search(text_of(t))) or payers.employer_of(t) is not None
 
 
-def pay_merchants(ledger: Ledger, stubs: list[tuple[date, int]], prefs: dict | None = None) -> Payroll:
+def pay_merchants(
+    ledger: Ledger, stubs: list[tuple[date, int]], prefs: dict | None = None, splits: list[dict] | None = None
+) -> Payroll:
     """Who pays the household, from recent pay stubs (`stubs` is (pay date, take-home cents) each), the deposits
-    themselves, and what the household typed in or ruled out (budget preferences "payroll" and "not_pay")."""
+    themselves, and what the household typed in or ruled out (budget preferences "payroll" and "not_pay").
+
+    A paycheck split across accounts lands as several deposits on one payday, often worded differently by each
+    bank. They're one paycheck: an employer name whose paydays are the main employer's paydays is the same
+    employer, and a deposit into an account the latest stub says pay goes to (`splits`, [{"mask", "cents"}]) on
+    payday is part of that paycheck whatever its wording."""
     prefs = prefs or {}
     not_pay = set(prefs.get("not_pay", []))
     probe = Payroll(not_pay=not_pay, stubs=stubs)
@@ -384,6 +403,8 @@ def pay_merchants(ledger: Ledger, stubs: list[tuple[date, int]], prefs: dict | N
     for t in ledger.txns:
         if is_pay_deposit(ledger, t, payroll):
             by_source[payroll.source(t)].append(t)
+    same_employers(payroll, by_source)
+    split_deposits(ledger, payroll, by_source, splits or [])
     for name, deps in by_source.items():
         paydays = group_paydays(deps)
         for day, group in paydays:
@@ -396,6 +417,77 @@ def pay_merchants(ledger: Ledger, stubs: list[tuple[date, int]], prefs: dict | N
         if len(days) >= 3:
             payroll.every_days[name] = statistics.median((b - a).days for a, b in itertools.pairwise(days))
     return payroll
+
+
+SAME_PAYDAYS = 0.75  # an employer name this often paid on another's paydays is the same employer
+
+
+def near(day: date, days: list[date]) -> bool:
+    return any(abs((day - d).days) <= PAYDAY_DAYS for d in days)
+
+
+def same_employers(payroll: Payroll, by_source: dict[str, list[Transaction]]) -> None:
+    """Folds names paid on the same paydays as a bigger one, into other accounts, into it (in place), so each
+    bank's wording of one paycheck isn't a separate employer."""
+    order = sorted(by_source, key=lambda n: -sum(t.amount_cents for t in by_source[n]))
+    for i, name in enumerate(order):
+        days = sorted({t.date for t in by_source[name]})
+        for main in order[:i]:
+            if main not in by_source:
+                continue
+            main_days = sorted({t.date for t in by_source[main]})
+            # Two people paid on the same days usually land in the same (joint) account; one split paycheck
+            # lands in different accounts.
+            landed = {(t.account_id, t.date) for t in by_source[main]}
+            shared = any(
+                (t.account_id, t.date + timedelta(days=k)) in landed
+                for t in by_source[name]
+                for k in range(-PAYDAY_DAYS, PAYDAY_DAYS + 1)
+            )
+            if not shared and len(days) >= 2 and sum(near(d, main_days) for d in days) >= SAME_PAYDAYS * len(days):
+                payroll.alias[name] = main
+                for e, target in list(payroll.alias.items()):
+                    if target == name:
+                        payroll.alias[e] = main
+                by_source[main] += by_source.pop(name)
+                break
+    # Call each employer by the words all its names share: "early paycheck netapp" and "netapp des" are NETAPP.
+    for main in list(by_source):
+        names = [main] + [e for e, target in payroll.alias.items() if target == main]
+        if len(names) == 1:
+            continue
+        shared = set.intersection(*(set(n.split()) for n in names))
+        best = " ".join(w for w in main.split() if w in shared)
+        if best and best != main:
+            for e in names:
+                payroll.alias[e] = best
+            by_source[best] = by_source.pop(main) + by_source.pop(best, [])
+
+
+SPLIT_SHARE = 0.25  # a split deposit can be this far off the stub's amount (a raise moves percentage splits)
+
+
+def split_deposits(
+    ledger: Ledger, payroll: Payroll, by_source: dict[str, list[Transaction]], splits: list[dict]
+) -> None:
+    """Deposits on payday into the accounts the stub splits pay to, that didn't say whose pay they are."""
+    if not splits or not by_source:
+        return
+    amounts: dict[str, list[int]] = defaultdict(list)
+    for d in splits:
+        amounts[str(d.get("mask"))].append(int(d.get("cents") or 0))
+    main = max(by_source, key=lambda n: sum(t.amount_cents for t in by_source[n]))
+    paydays = sorted({t.date for t in by_source[main]})
+    counted = {t.id for deps in by_source.values() for t in deps}
+    for t in ledger.txns:
+        a = ledger.accounts.get(t.account_id)
+        if t.id in counted or t.amount_cents <= 0 or a is None or a.mask not in amounts:
+            continue
+        if ledger.kind(t) not in ("income", "other", "transfer") or not near(t.date, paydays):
+            continue
+        if any(abs(t.amount_cents - c) <= c * SPLIT_SHARE for c in amounts[a.mask]):
+            payroll.split_ids[t.id] = main
+            by_source[main].append(t)
 
 
 def group_paydays(deposits: list[Transaction]) -> list[tuple[date, list[Transaction]]]:
@@ -838,7 +930,7 @@ def build(db: DbSession) -> dict:
 
     stubs = list(db.scalars(select(Paycheck).where(Paycheck.date >= since - timedelta(days=MATCH_DAYS))))
     recent = db.scalars(select(Paycheck).order_by(Paycheck.date.desc(), Paycheck.id.desc()).limit(12)).all()
-    payers = pay_merchants(ledger, [(p.date, p.net_cents) for p in recent], prefs)
+    payers = pay_merchants(ledger, [(p.date, p.net_cents) for p in recent], prefs, latest_splits(recent))
     moves = Moves(db, accounts, since)
     usual = UsualStub(list(recent))
     history = [s for m in months if (s := savings_for(ledger, stubs, m, prefs["include_match"], payers, moves, usual))]
@@ -896,6 +988,7 @@ def build(db: DbSession) -> dict:
                 "net_cents": p.net_cents,
                 "employer_match_cents": p.employer_match_cents,
                 "frequency": p.frequency,
+                "deposits": (p.detail or {}).get("deposits", []),
                 "deposit": {"date": matched[p.id].date.isoformat(), "merchant": matched[p.id].merchant}
                 if p.id in matched
                 else None,
@@ -911,6 +1004,15 @@ def build(db: DbSession) -> dict:
             if c.kind in BUDGETED
         ],
     }
+
+
+def latest_splits(stubs) -> list[dict]:
+    """Where the newest stub that says so split take-home: [{"mask", "cents"}] (stubs as rows or as JSON)."""
+    for p in stubs:
+        found = p.get("deposits") if isinstance(p, dict) else (p.detail or {}).get("deposits")
+        if found:
+            return found
+    return []
 
 
 # ---- asking for a pay stub when the usual one stops fitting

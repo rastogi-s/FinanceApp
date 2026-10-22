@@ -87,6 +87,8 @@ class Stub:
     # For the Taxes page: this paycheck's amounts and the year to date, by kind (see DETAIL).
     detail: dict[str, int] = field(default_factory=dict)
     ytd: dict[str, int] = field(default_factory=dict)
+    # Where take-home went, when it's split across accounts: [{"mask": "0115", "cents": 308455}, ...].
+    deposits: list[dict] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
 
 
@@ -232,6 +234,21 @@ def restore_amounts(line: str) -> str:
     return " ".join(out)
 
 
+# A line of the deposit split: "xxxxxxx0115 xxxx xxxx $3,084.55", "Checking2 (xxxxxxx0115) $3,084.55".
+DEPOSIT = re.compile(r"x{2,}(\d{4})\b\)?.*?\$?(\d[\d,]*\.\d{2})\s*$", re.IGNORECASE)
+
+
+def deposits_of(lines: list[str], net: int | None) -> list[dict]:
+    """The accounts take-home was paid into, if the stub lists them and they add up to take-home pay."""
+    found = []
+    for line in lines:
+        if m := DEPOSIT.search(line):
+            found.append({"mask": m.group(1), "cents": cents(m.group(2))})
+    if not net or not found or abs(sum(d["cents"] for d in found) - net) > 100:
+        return []
+    return found
+
+
 AMOUNT_TOKEN = re.compile(r"^\(?-?\$?\d[\d,]*\.\d{2}\)?\*?$")
 
 
@@ -262,6 +279,7 @@ def parse(lines: list[str]) -> Stub:
     """The numbers on a stub, from its lines of text."""
     if not any(AMOUNT.search(line) for line in lines if NET.search(line) or GROSS.search(line)):
         lines = [restore_amounts(line) for line in lines]
+    whole = lines
     lines = [part for line in lines for part in split_columns(line)]
     # Stubs that print this paycheck's deductions as negative amounts ("Dental -21.39 449.19") leave the column
     # blank when nothing came out this time, so a deduction with no negative amount is a year-to-date figure only.
@@ -335,6 +353,7 @@ def parse(lines: list[str]) -> Stub:
     if stub.pay_date is None and stub.period_end is not None:
         stub.pay_date = stub.period_end
     stub.frequency = frequency_from(stub, lines)
+    stub.deposits = deposits_of(whole, stub.net_cents)
 
     if stub.gross_cents is None and stub.net_cents is None:
         raise StubError("No gross or take-home pay found in that PDF. Is it a pay stub? You can type the numbers in.")
@@ -367,7 +386,7 @@ def to_json(stub: Stub) -> dict:
         "savings_cents": stub.savings_cents,
         "net_cents": stub.net_cents,
         "employer_match_cents": stub.employer_match_cents,
-        "detail": {"this": stub.detail, "ytd": stub.ytd},
+        "detail": {"this": stub.detail, "ytd": stub.ytd, "deposits": stub.deposits},
         "warnings": stub.warnings,
     }
 

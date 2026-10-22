@@ -48,7 +48,8 @@ class Look:
         self.ledger = budget.Ledger(db, list(self.accounts.values()), self.since)
         self.txns = [t for t in self.ledger.txns if not t.pending]
         recent = db.scalars(select(Paycheck).order_by(Paycheck.date.desc(), Paycheck.id.desc()).limit(12)).all()
-        self.payers = budget.pay_merchants(self.ledger, [(p.date, p.net_cents) for p in recent], budget.preferences(db))
+        stubs = [(p.date, p.net_cents) for p in recent]
+        self.payers = budget.pay_merchants(self.ledger, stubs, budget.preferences(db), budget.latest_splits(recent))
         self.names = transfers.own_names(db)
 
     def category(self, t: Transaction) -> Category | None:

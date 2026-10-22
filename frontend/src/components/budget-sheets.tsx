@@ -278,7 +278,11 @@ const FREQUENCIES = [
 ] as const;
 export const FREQUENCY_LABEL: Record<string, string> = Object.fromEntries(FREQUENCIES);
 
-export type StubDetail = { this: Partial<Record<string, number>>; ytd: Partial<Record<string, number>> };
+export type StubDetail = {
+  this: Partial<Record<string, number>>;
+  ytd: Partial<Record<string, number>>;
+  deposits?: { mask: string; cents: number }[]; // where take-home was split to
+};
 const SPLIT = [
   ["federal", "Federal income tax"],
   ["state", "State income tax"],
@@ -373,7 +377,10 @@ function PaycheckForm({
       });
       setReadDetail(r.detail ?? null);
       setSplit(
-        Object.fromEntries(SPLIT.map(([k]) => [k, r.detail?.this[k] !== undefined ? dollars(r.detail.this[k]!) : ""])) as Record<SplitKey, string>,
+        Object.fromEntries(SPLIT.map(([k]) => [k, r.detail?.this[k] !== undefined ? dollars(r.detail.this[k]!) : ""])) as Record<
+          SplitKey,
+          string
+        >,
       );
       if (r.date) setDate(r.date);
       if (r.frequency) setFrequency(r.frequency);
@@ -421,6 +428,7 @@ function PaycheckForm({
         detail: {
           this: { ...readDetail?.this, ...Object.fromEntries(Object.entries(splitCents).filter(([, v]) => v !== undefined)) },
           ytd: readDetail?.ytd ?? {},
+          deposits: readDetail?.deposits ?? [],
         },
       });
       toast("Pay stub saved. The savings rate now uses gross pay.");
@@ -560,7 +568,10 @@ function PaycheckForm({
                 : "Federal, state, Social Security, Medicare. Without them, the Taxes page splits the total by the usual rates."}
             </span>
           </span>
-          <ChevronDown className={cn("size-4 shrink-0 text-muted-foreground transition-transform", splitOpen && "rotate-180")} aria-hidden />
+          <ChevronDown
+            className={cn("size-4 shrink-0 text-muted-foreground transition-transform", splitOpen && "rotate-180")}
+            aria-hidden
+          />
         </button>
         {splitOpen && (
           <div className="grid grid-cols-2 gap-3 px-4 pb-4">
