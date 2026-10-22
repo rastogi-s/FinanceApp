@@ -489,3 +489,73 @@ def test_only_payroll_counts_as_pay(client, home):
     p = client.put("/api/plan/money-in", json={"key": "netapp", "counts_as": "pay"}, headers=h).json()
     assert september(p)["pay_cents"] == 6_500_00
     assert client.put("/api/plan/money-in", json={"key": "!!", "counts_as": "pay"}, headers=h).status_code == 422
+
+
+def test_money_into_etrade_is_investing(client, home):
+    """A bank withdrawal whose wording names no brokerage is paired with E*TRADE's own deposit record, so it counts
+    as money moved into investing (not spending), and Budget says it went into that E*TRADE account."""
+    from financeapp import transfers
+    from financeapp.models import Connection, InvestmentTransaction
+
+    home.setup()
+    history(client)
+    add_transactions(
+        client,
+        [
+            ("2026-09-01", "ACME CORP", 6_000, "Paycheck"),
+            ("2026-09-08", "ONLINE ACH DEBIT 0042", -1_500, None),  # into E*TRADE, the bank doesn't say so
+            ("2026-09-20", "ACH DEBIT WEB", -700, None),  # no deposit of this amount anywhere: stays spending
+            ("2026-09-25", "ACH CREDIT", 400, None),  # taken out of E*TRADE
+            ("2026-09-28", "Pending ACH", -900, None),
+        ],
+    )
+    with db_of(client).session() as db:
+        db.scalar(select(Transaction).where(Transaction.merchant == "Pending ACH")).pending = True
+        conn = Connection(provider="plaid", institution="E*TRADE", state={})
+        db.add(conn)
+        db.flush()
+        etrade = Account(
+            connection_id=conn.id, external_id="et", name="Brokerage", institution="E*TRADE", type="investment",
+            mask="2600",
+        )  # fmt: skip
+        db.add(etrade)
+        db.flush()
+        for n, (day, kind, subtype, cents, symbol) in enumerate(
+            [
+                ("2026-09-10", "cash", "deposit", 1_500_00, None),
+                ("2026-09-24", "transfer", "transfer", -400_00, None),
+                ("2026-09-28", "cash", "deposit", 900_00, None),  # the bank side is still pending
+                ("2026-09-12", "buy", "buy", -1_500_00, "VTI"),  # buying with it isn't a move
+            ]
+        ):
+            db.add(
+                InvestmentTransaction(
+                    account_id=etrade.id, external_id=f"e{n}", date=date.fromisoformat(day), type=kind,
+                    subtype=subtype, symbol=symbol, name="", amount_cents=cents, source="plaid",
+                )
+            )  # fmt: skip
+        db.flush()
+        assert transfers.match_transfers(db, date(2026, 9, 1)) == 2
+        assert transfers.match_transfers(db, date(2026, 9, 1)) == 0  # already paired
+        paired = {
+            t.merchant: t for t in db.scalars(select(Transaction).where(Transaction.transfer_group_id.is_not(None)))
+        }
+        assert {"ONLINE ACH DEBIT 0042", "ACH CREDIT"} <= set(paired)
+        assert "ACH DEBIT WEB" not in paired and "Pending ACH" not in paired
+
+    rate = client.get("/api/budget").json()["savings_rate"]
+    # $6,000 pay; $2,000 rent + $550 groceries + the unexplained $700 and the still-pending $900 spent. The $400
+    # back from E*TRADE isn't income.
+    assert rate["income_cents"] == 600_000 and rate["spending_cents"] == 415_000
+    went = {x["label"]: x for x in rate["breakdown"]["went"]}
+    assert went["Into E*TRADE Brokerage ••2600"]["cents"] == 1_100_00
+    assert went["Into E*TRADE Brokerage ••2600"]["kind"] == "invest"
+    assert sum(x["cents"] for x in went.values()) == rate["saved_cents"]
+
+
+def test_brokerage_wording_spots_more_etrade_transfers():
+    from financeapp.transfers import ONE_SIDED
+
+    for text in ("E TRADE SECURITIES ACH", "ETRADE TRANSFER", "MORGAN STANLEY ACH DEPOSIT"):
+        assert ONE_SIDED.search(text), text
+    assert not ONE_SIDED.search("The Trade Desk deposit")

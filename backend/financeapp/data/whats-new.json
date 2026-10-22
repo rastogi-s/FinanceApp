@@ -1,5 +1,17 @@
 [
   {
+    "version": "0.31.0",
+    "title": "Money into E*TRADE counts as investing",
+    "features": [
+      {
+        "id": "brokerage-deposits",
+        "title": "Transfers into your brokerage accounts are matched from the brokerage's side",
+        "body": "Money you move from the bank into E*TRADE (or any linked brokerage) is now paired with the deposit the brokerage itself records, even when the bank calls it something vague like ONLINE ACH DEBIT. It counts as money moved into investing, not spending, so your savings rate goes up by that amount, and the savings breakdown on Budget shows it under Into E*TRADE with the account's last digits. Money taken back out of the brokerage isn't counted as income either. Past transfers from the last 13 months are sorted after this update.",
+        "tryIt": "/budget?savings=1"
+      }
+    ]
+  },
+  {
     "version": "0.30.0",
     "title": "Stock plan shares, counted right",
     "features": [
