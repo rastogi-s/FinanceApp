@@ -304,5 +304,7 @@ def latest(db: DbSession, symbols: list[str] | set[str]) -> dict[str, Quote]:
 
 
 def fresh_for(q: Quote | None, snapshot_day: date) -> bool:
-    """A quote counts only when it is from after the start of the day the holdings were synced."""
-    return q is not None and q.as_of.astimezone(ET).date() >= snapshot_day
+    """A quote counts only when it is from after the start of the day the holdings were synced. The snapshot's day is
+    the server's own date (sync.today), so the quote's time is read in the same zone: in Eastern time, a sync after
+    8 PM ET on a UTC server is already "tomorrow" and no quote would count until the next morning."""
+    return q is not None and q.as_of.astimezone().date() >= snapshot_day
