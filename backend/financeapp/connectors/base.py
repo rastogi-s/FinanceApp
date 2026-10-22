@@ -41,6 +41,7 @@ class HoldingData:
     price: Decimal
     value_cents: int
     cost_basis_cents: int | None = None
+    unvested_quantity: Decimal | None = None  # stock plan shares granted but not vested: not counted anywhere
 
 
 @dataclass

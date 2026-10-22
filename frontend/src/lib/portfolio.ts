@@ -128,7 +128,9 @@ export type Security = {
     gain_percent: number | null;
     percent_of_portfolio: number | null;
     accounts: { account: string; quantity: number; value_cents: number }[];
-    as_of: string;
+    as_of: string | null;
+    // Stock plan shares not vested yet: shown here, never counted in the position, portfolio or net worth.
+    unvested?: { quantity: number; value_cents: number; accounts: { account: string; quantity: number }[] };
   } | null;
   exposure: Company | null;
   fund: FundRow | null;

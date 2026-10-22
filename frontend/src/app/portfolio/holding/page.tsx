@@ -90,7 +90,7 @@ function Holding() {
       <Back />
       <div className="mb-4 flex items-start justify-between gap-4">
         <div className="min-w-0">
-          <h1 className="text-3xl font-semibold tracking-tight md:text-4xl">{data.symbol}</h1>
+          <h1 className="text-3xl font-semibold tracking-tight wrap-anywhere md:text-4xl">{data.symbol}</h1>
           <p className="mt-0.5 truncate text-sm text-muted-foreground">
             {data.name}
             {data.exchange && ` · ${data.exchange}`}
@@ -174,6 +174,8 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
   );
 }
 
+const shares = (n: number) => n.toLocaleString("en-US", { maximumFractionDigits: 4 });
+
 function PositionCard({ s }: { s: Security }) {
   const p = s.position!;
   const gainUp = (p.gain_cents ?? 0) >= 0;
@@ -195,7 +197,7 @@ function PositionCard({ s }: { s: Security }) {
         )}
         <dl className="mt-3 divide-y">
           <Row label="Shares">
-            <span className="money">{p.quantity.toLocaleString("en-US", { maximumFractionDigits: 4 })}</span>
+            <span className="money">{shares(p.quantity)}</span>
           </Row>
           {p.cost_basis_cents != null && p.quantity > 0 && (
             <Row label="Average cost">
@@ -208,7 +210,20 @@ function PositionCard({ s }: { s: Security }) {
             </Row>
           ))}
         </dl>
-        <p className="mt-2 text-xs text-muted-foreground">Shares as of the sync on {asOf(p.as_of)}.</p>
+        {p.unvested && (
+          <div className="mt-3 rounded-lg bg-muted/60 px-3 py-2.5 text-sm">
+            <div className="flex items-baseline justify-between gap-3">
+              <span className="text-muted-foreground">Not vested yet</span>
+              <span className="font-medium tabular-nums">
+                {shares(p.unvested.quantity)} sh · <Money cents={p.unvested.value_cents} />
+              </span>
+            </div>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Unvested shares are left out of this position, your portfolio and net worth until they vest.
+            </p>
+          </div>
+        )}
+        {p.as_of && <p className="mt-2 text-xs text-muted-foreground">Shares as of the sync on {asOf(p.as_of)}.</p>}
       </CardContent>
     </Card>
   );
@@ -412,8 +427,8 @@ function AlertsCard({ s, onAdd }: { s: Security; onAdd: () => void }) {
           <ul className="mb-3 divide-y">
             {s.rules.map((r) => (
               <li key={r.id} className="flex items-center gap-3 py-2.5 text-sm">
-                <Bell className={cn("size-4", r.enabled ? "text-primary" : "text-muted-foreground")} aria-hidden />
-                <span className={cn("flex-1", !r.enabled && "text-muted-foreground line-through")}>{r.summary}</span>
+                <Bell className={cn("size-4 shrink-0", r.enabled ? "text-primary" : "text-muted-foreground")} aria-hidden />
+                <span className={cn("min-w-0 flex-1 wrap-anywhere", !r.enabled && "text-muted-foreground line-through")}>{r.summary}</span>
                 {r.triggered && <Badge variant="warning">Triggered</Badge>}
               </li>
             ))}
