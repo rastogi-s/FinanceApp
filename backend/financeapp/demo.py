@@ -999,6 +999,7 @@ def taxes_page(today: date | None = None) -> dict:
     from financeapp.models import Paycheck
 
     today = today or datetime.now(UTC).date()
+    pays, hs, _, _ = _sample_income(today)
     paycheck = today.replace(day=1) - timedelta(days=1)
     gross = _cents(4_500)
     stubs = []
@@ -1032,7 +1033,9 @@ def taxes_page(today: date | None = None) -> dict:
         "viewer_id": 0,
         "people": {0: "Sample"},
         "stubs": {0: stubs},
-        "investments": {"interest_cents": _cents(1_270), "dividends_cents": _cents(2_340), "basis": "trailing"},
+        "investments": taxes.from_payments(
+            pays, {h.symbol: h.asset_class for h in hs}, today - timedelta(days=730), today
+        ),
         "unrealized_gain_cents": _cents(41_800),
         "birth_year": 1990,
     }

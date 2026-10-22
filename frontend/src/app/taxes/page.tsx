@@ -90,6 +90,13 @@ function TaxView({ t, onSaved }: { t: TaxState; onSaved: (t: TaxState) => void }
             and pay, withholding and pre-tax savings fill in by themselves.
           </p>
         )}
+        <p className="mb-2 text-sm text-muted-foreground">
+          Interest, dividends and fund gain distributions come from{" "}
+          <Link href="/portfolio/income" className="font-medium text-primary">
+            Dividends &amp; interest
+          </Link>
+          .
+        </p>
       </ItemCard>
       {pick(DEDUCTIONS).length > 0 && <ItemCard title="Deductions and credits" items={pick(DEDUCTIONS)} onEdit={setEditing} />}
       <Federal t={t} />
@@ -506,7 +513,7 @@ function AnswersForm({ t, save, saving, onDone }: { t: TaxState; save: Save; sav
       <Field
         id="tax-qualified"
         label="Dividends that are qualified (%)"
-        hint="Most US stock fund dividends are. Your 1099-DIV, box 1b, has the real number."
+        hint="Used only when the app hasn't seen dividends to sort. Most US stock fund dividends are qualified; your 1099-DIV, box 1b, has the real number."
         error={shareBad ? "Enter a whole number from 0 to 100." : null}
       >
         <Input inputMode="numeric" autoComplete="off" value={share} onChange={(e) => setShare(e.target.value)} />
