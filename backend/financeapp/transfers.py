@@ -20,11 +20,11 @@ import re
 import uuid
 from datetime import date, timedelta
 
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session as DbSession
 
-from financeapp.categorize import categorize, normalize_merchant
-from financeapp.models import Account, Category, Preference, Transaction, User
+from financeapp.categorize import P2P, PERSON, categorize, normalize_merchant, sender_of
+from financeapp.models import Account, Category, MerchantRule, Preference, Transaction, User
 
 WINDOW_DAYS = 5
 
@@ -46,22 +46,6 @@ ONE_SIDED = re.compile(
     rf"({BROKERAGES}).{{0,24}}(transfer|contribution|moneyline|ach|deposit|invest)",
     re.IGNORECASE,
 )
-
-P2P = re.compile(r"zelle|venmo|cash ?app|paypal|apple cash", re.IGNORECASE)
-SENDER = re.compile(
-    r"\b(?:from|to)\s+([a-z][a-z .'-]*?)(?=\s+(?:conf|confirmation|on|ref|id|for|memo|via|trn|txn)\b|\s*\d|$)"
-)
-
-
-def sender_of(t: Transaction) -> str | None:
-    """Who sent (or got) a Zelle or Venmo payment, from its description: "Zelle payment from JANE DOE conf# 12"."""
-    text = normalize_merchant(f"{t.merchant} {t.description}")
-    if not P2P.search(text):
-        return None
-    m = SENDER.search(text)
-    name = m.group(1).strip() if m else ""
-    name = re.sub(r"^(zelle|venmo|cash app|cashapp|paypal)\s+", "", name)
-    return name or None
 
 
 def own_names(db: DbSession) -> set[str]:
@@ -136,15 +120,40 @@ def match_transfers(db: DbSession, since: date | None = None) -> int:
         .all()
     )
     names = own_names(db)
+    people = people_with_rules(db)
     for t, account_type in singles:
         paid_off = account_type in ("credit", "loan") and t.amount_cents > 0 and not _looks_like_refund(t)
         text = f"{t.merchant} {t.description}"
+        if sender_of(t) in people and not is_own(t, names):
+            continue  # someone the household said they pay for something (a sitter, a contractor): not a transfer
         if paid_off or ONE_SIDED.search(text) or t.provider_category == CARD_CODE or is_own(t, names):
             t.category_id = transfer.id
             t.category_source = "transfer"
     db.flush()
     label_card_payments(db, since)
     return pairs
+
+
+def people_with_rules(db: DbSession) -> set[str]:
+    """Zelle and Venmo names the household gave a category to (a MerchantRule "person jane doe")."""
+    return {
+        r.removeprefix(PERSON)
+        for r in db.scalars(select(MerchantRule.pattern).where(MerchantRule.pattern.startswith(PERSON)))
+    }
+
+
+def release_person(db: DbSession, name: str) -> list[Transaction]:
+    """After someone gives a Zelle or Venmo name a category: that person's payments that were taken for one-sided
+    transfers go back to normal categorizing (where the new rule picks them up). Returns them."""
+    back = []
+    for t in db.query(Transaction).filter(
+        Transaction.category_source == "transfer", Transaction.transfer_group_id.is_(None)
+    ):
+        if sender_of(t) == name:
+            t.category_source = "none"
+            back.append(t)
+    db.flush()
+    return back
 
 
 def _is_card_payment(t: Transaction, account_type: str) -> bool:

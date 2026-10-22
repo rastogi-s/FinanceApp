@@ -239,8 +239,8 @@ function Notes({ notes }: { notes: SavingsBreakdown["notes"] }) {
                 <>
                   <Money cents={n.cents ?? 0} className="font-medium" /> went out as transfers to accounts that aren&apos;t linked, like
                   Zelle or Venmo. If some of it paid for something (rent, a sitter), give it a category in{" "}
-                  <Link href="/spending" className="font-medium text-primary underline-offset-4 hover:underline">
-                    Spending
+                  <Link href="/review" className="font-medium text-primary underline-offset-4 hover:underline">
+                    Check categories
                   </Link>{" "}
                   and it counts as spending.
                 </>
@@ -248,9 +248,9 @@ function Notes({ notes }: { notes: SavingsBreakdown["notes"] }) {
               {n.kind === "other_income" && (
                 <>
                   <Money cents={n.cents ?? 0} className="font-medium" /> came in that isn&apos;t pay or interest. If some of it was money
-                  moved from one of your own accounts, mark it as Transfer in{" "}
-                  <Link href="/spending" className="font-medium text-primary underline-offset-4 hover:underline">
-                    Spending
+                  moved from one of your own accounts, mark it as yours in{" "}
+                  <Link href="/review" className="font-medium text-primary underline-offset-4 hover:underline">
+                    Check categories
                   </Link>{" "}
                   so it isn&apos;t counted as income.
                 </>
