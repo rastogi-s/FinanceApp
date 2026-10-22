@@ -184,6 +184,19 @@ def detail(
             ],
             "as_of": max(p.as_of for p in mine).isoformat(),
         }
+    locked = portfolio.unvested(db, accounts, symbol)
+    if locked and price:
+        if position is None:
+            position = {
+                "quantity": 0.0, "value_cents": 0, "cost_basis_cents": None, "gain_cents": None, "gain_percent": None,
+                "percent_of_portfolio": None, "accounts": [], "as_of": None,
+            }  # fmt: skip
+        count = float(sum(locked.values()))
+        position["unvested"] = {
+            "quantity": count,
+            "value_cents": round(count * price * 100),
+            "accounts": [{"account": names.get(aid, ""), "quantity": float(q)} for aid, q in locked.items()],
+        }
 
     look = lookthrough.exposure(db, accounts, ps) if mine or db.get(Fund, symbol) else None
     company = next((c for c in (look or {}).get("companies", []) if c["symbol"] == symbol), None)

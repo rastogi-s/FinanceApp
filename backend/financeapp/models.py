@@ -250,6 +250,8 @@ class HoldingSnapshot(Base):
     price: Mapped[Decimal]  # dollars per share
     value_cents: Mapped[int] = mapped_column(BigInteger)
     cost_basis_cents: Mapped[int | None] = mapped_column(BigInteger)
+    # Stock plan shares not vested yet. Left out of quantity, value and cost basis; shown on the holding only.
+    unvested_quantity: Mapped[Decimal | None]
 
 
 class InvestmentTransaction(Base):

@@ -383,6 +383,17 @@ class FakePlaid:
                             "institution_price": 100,
                             "institution_value": 3000,
                             "vested_value": 1000,
+                            "cost_basis": 6000,  # every granted share, vested or not
+                        },
+                        {  # a later grant, nothing vested yet
+                            "account_id": "brk",
+                            "security_id": "s2",
+                            "quantity": 20,
+                            "vested_quantity": 0,
+                            "institution_price": 100,
+                            "institution_value": 2000,
+                            "vested_value": 0,
+                            "cost_basis": 2000,
                         },
                     ],
                     "securities": [
@@ -521,6 +532,14 @@ def test_linking_and_syncing_plaid(client, home, plaid):
     h = client.get("/api/household").json()
     assert h["net_worth"]["cents"] == 500025 - 86010 + 1901200 + 100000  # vested shares only
     assert {x["symbol"]: x["value_cents"] for x in h["holdings"]} == {"AAPL": 1901200, "NTAP": 100000}
+    # The stock plan's cost basis covered all 30 granted shares: the 10 vested ones get a third of it.
+    assert {x["symbol"]: x["cost_basis_cents"] for x in h["holdings"]}["NTAP"] == 200000
+    ntap = client.get("/api/securities/NTAP").json()
+    position = ntap["position"]
+    assert position["quantity"] == 10 and position["cost_basis_cents"] == 200000
+    # Shown beside the position at today's price, never in it.
+    assert position["unvested"]["quantity"] == 40
+    assert position["unvested"]["value_cents"] == round(40 * ntap["price"] * 100)
     by_id = {t["merchant"]: t for t in h["transactions"]}
     assert by_id["Trader Joe's"]["category"] == "Groceries" and by_id["Trader Joe's"]["amount_cents"] == -5420
     assert by_id["CHASE CARD PAYMENT"]["transfer"] and by_id["PAYMENT"]["transfer"]

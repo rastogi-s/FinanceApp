@@ -168,13 +168,18 @@ class Plaid:
             price = Decimal(str(h.get("institution_price") or s.get("close_price") or 0))
             quantity = Decimal(str(h.get("quantity") or 0))
             value = cents(h.get("institution_value"))
-            # Stock plans list unvested shares too; the account balance already leaves them out.
+            basis = cents(h.get("cost_basis"))
+            unvested = None
+            # Stock plans list unvested shares too; the account balance already leaves them out. Their cost basis
+            # covers every share, vested or not, so the vested shares get their share of it.
             vested = h.get("vested_quantity")
             if vested is not None and Decimal(str(vested)) < quantity:
+                total = quantity
                 quantity = Decimal(str(vested))
-                value = cents(h.get("vested_value"))
-                if not quantity:
-                    continue
+                unvested = total - quantity
+                value = cents(h.get("vested_value")) if quantity else 0
+                if basis is not None:
+                    basis = int((Decimal(basis) * quantity / total).to_integral_value()) if total else None
             if value is None:
                 value = int(price * quantity * 100)
             out.append(
@@ -186,7 +191,8 @@ class Plaid:
                     quantity=quantity,
                     price=price,
                     value_cents=value,
-                    cost_basis_cents=cents(h.get("cost_basis")),
+                    cost_basis_cents=basis,
+                    unvested_quantity=unvested,
                 )
             )
         return out
