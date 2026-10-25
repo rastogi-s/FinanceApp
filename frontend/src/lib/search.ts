@@ -27,6 +27,7 @@ export type Results = {
   first: string | null;
   last: string | null;
   next_offset: number | null;
+  merchants: { merchant: string; cents: number; count: number }[]; // the most net spending first, across every match
   accounts: { id: number; name: string }[];
 };
 
@@ -157,3 +158,15 @@ export function sheetCount(f: Filters): number {
 }
 
 export const isEmpty = (f: Filters) => toParams(f).toString() === "";
+
+/**
+ * Spending for one category this month, the way Budget counts it: every transaction in the category, refunds
+ * taken off, transfers between your own accounts left out. Budget's rows open this.
+ */
+export const monthOf = (category: number | "none") => `/spending?category=${category}&range=month&from=budget`;
+
+/** Exactly one category over a whole month, nothing else narrowing it: the Spending page shows it as Budget does. */
+export function categoryMonth(f: Filters): string | null {
+  const only = f.categories.length === 1 && !f.q.trim() && !f.accounts.length && !f.kind && !f.min && !f.max;
+  return only && (f.range === "month" || f.range === "last-month") ? f.categories[0]! : null;
+}

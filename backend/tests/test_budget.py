@@ -98,6 +98,32 @@ def test_draft_from_recent_months(client, home):
 
 
 @needs_db
+def test_a_budget_row_and_its_spending_list_agree(client, home):
+    """Budget's rows open Spending filtered to the category and month; both have to show the same total."""
+    home.setup()
+    history(client)
+    add_transactions(
+        client, [("2026-10-14", "Trader Joe's", 40, "Groceries"), ("2026-10-15", "Costco", -120, "Groceries")]
+    )
+    b = client.get("/api/budget").json()
+    groceries = line(b, "Groceries")
+    found = client.get(
+        "/api/transactions", params={"category": groceries["category_id"], "start": "2026-10-01", "end": "2026-10-31"}
+    ).json()
+    assert groceries["spent_cents"] == found["out_cents"] - found["in_cents"] == 38_000  # $300 + $120 - $40 refund
+    # The transfer is listed but counts in neither; the merchants say where the money went, refunds taken off.
+    assert found["count"] == 4
+    assert found["merchants"] == [
+        {"merchant": "Trader Joe's", "cents": 26_000, "count": 2},
+        {"merchant": "Costco", "cents": 12_000, "count": 1},
+    ]
+    uncategorized = client.get(
+        "/api/transactions", params={"category": "none", "start": "2026-10-01", "end": "2026-10-31"}
+    ).json()
+    assert {u["category"]: u["spent_cents"] for u in b["unbudgeted"]}["Uncategorized"] == uncategorized["out_cents"]
+
+
+@needs_db
 def test_save_edit_and_restore(client, home):
     home.setup()
     history(client)

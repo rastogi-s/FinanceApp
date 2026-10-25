@@ -16,6 +16,7 @@ from financeapp import household
 from financeapp.models import Category, Transaction
 
 PAGE = 100
+MERCHANTS = 5
 Kind = Literal["out", "in", "transfer", "review"]
 Sort = Literal["newest", "oldest", "largest", "smallest", "merchant"]
 
@@ -78,7 +79,11 @@ def search(db: DbSession, f: Filters) -> dict:
 
     transfer_ids = [i for i, c in categories.items() if c.kind == "transfer"]
     not_spending_ids = [i for i, c in categories.items() if c.kind in ("transfer", "income")]
-    is_transfer = or_(Transaction.transfer_group_id.is_not(None), Transaction.category_id.in_(transfer_ids))
+    # Uncategorized is never a transfer; spelled out, since NULL IN (...) is NULL and would drop it from both totals.
+    is_transfer = or_(
+        Transaction.transfer_group_id.is_not(None),
+        and_(Transaction.category_id.is_not(None), Transaction.category_id.in_(transfer_ids)),
+    )
     is_spending = and_(
         Transaction.transfer_group_id.is_(None),
         or_(Transaction.category_id.is_(None), Transaction.category_id.not_in(not_spending_ids)),
@@ -122,6 +127,16 @@ def search(db: DbSession, f: Filters) -> dict:
             func.max(Transaction.date),
         ).where(*where)
     ).one()
+    # Where the money went: the merchants with the most net spending (refunds taken off), across every match.
+    net = func.sum(-Transaction.amount_cents)
+    merchants = db.execute(
+        select(Transaction.merchant, net, func.count())
+        .where(*where, counted)
+        .group_by(Transaction.merchant)
+        .having(net > 0)
+        .order_by(net.desc(), Transaction.merchant)
+        .limit(MERCHANTS)
+    ).all()
     rows = db.scalars(
         select(Transaction).where(*where).order_by(*_ORDER[f.sort], Transaction.id.desc()).offset(f.offset).limit(PAGE)
     ).all()
@@ -151,6 +166,7 @@ def search(db: DbSession, f: Filters) -> dict:
         "first": first.isoformat() if first else None,
         "last": last.isoformat() if last else None,
         "next_offset": f.offset + PAGE if f.offset + PAGE < count else None,
+        "merchants": [{"merchant": m, "cents": int(c), "count": n} for m, c, n in merchants],
         "accounts": [{"id": i, "name": n} for i, n in sorted(names.items(), key=lambda x: x[1])],
     }
 
@@ -187,6 +203,13 @@ def search_sample(rows: list[dict], categories: list[dict], f: Filters) -> dict:
     key, reverse = _sample_key(f.sort)
     hits.sort(key=key, reverse=reverse)
     page = hits[f.offset : f.offset + PAGE]
+    by_merchant: dict[str, list[int]] = {}
+    for r in hits:
+        if not r.get("transfer"):
+            m = by_merchant.setdefault(r["merchant"], [0, 0])
+            m[0] -= r["amount_cents"]
+            m[1] += 1
+    merchants = sorted(((m, c, n) for m, (c, n) in by_merchant.items() if c > 0), key=lambda x: (-x[1], x[0]))
     return {
         "transactions": page,
         "count": len(hits),
@@ -195,5 +218,6 @@ def search_sample(rows: list[dict], categories: list[dict], f: Filters) -> dict:
         "first": min((r["date"] for r in hits), default=None),
         "last": max((r["date"] for r in hits), default=None),
         "next_offset": f.offset + PAGE if f.offset + PAGE < len(hits) else None,
+        "merchants": [{"merchant": m, "cents": c, "count": n} for m, c, n in merchants[:MERCHANTS]],
         "accounts": [{"id": i, "name": n} for n, i in account_ids.items()],
     }

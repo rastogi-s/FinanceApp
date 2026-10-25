@@ -1,5 +1,17 @@
 [
   {
+    "version": "0.38.0",
+    "title": "What went into each category",
+    "features": [
+      {
+        "id": "budget-category-spending",
+        "title": "Tap a Budget category to see its transactions",
+        "body": "Each category on Budget now opens Spending with that category and this month already filtered, so you can see exactly what made up the number. The top shows the month's total, counted the same way Budget counts it (refunds taken off, transfers between your own accounts left out), and the merchants most of it went to. To change a limit, tap the pencil on the right of the row. Spending outside the budget and the categories heading over open the same way. Uncategorized spending also shows its real total on Spending now; before, it showed $0.",
+        "tryIt": "/budget"
+      }
+    ]
+  },
+  {
     "version": "0.37.0",
     "title": "Any moves today?",
     "features": [
