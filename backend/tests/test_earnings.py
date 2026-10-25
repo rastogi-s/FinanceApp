@@ -289,3 +289,16 @@ def test_year_to_date_pay_the_stubs_dont_name_is_other_pay_and_late_linked_years
     assert not rows[2025]["complete"] and not rows[2024]["complete"]
     assert rows[2026]["growth"] is None and rows[2026]["raise"] is None and rows[2025]["raise"] is None
     assert page["linked_from"] == "2024-12-20"
+
+
+def test_the_employers_hsa_seed_comes_once_a_year_and_the_match_every_paycheck():
+    stubs = [
+        stub(d, 778_000, match=23_000, this={"employer_hsa": 180_000, "employer_hsa_seed": 180_000} if i == 0 else {})
+        for i, d in enumerate(every_two_weeks(date(2026, 1, 2), date(2026, 10, 16)))
+    ]
+    stubs[-1].detail["ytd"] = {"gross": 778_000 * 21, "match": 23_000 * 21, "employer_hsa": 180_000}
+    row = by_year(earnings.assemble(stubs, [], date(2025, 1, 2), NO_PREFS, TODAY))[2026]
+    full = {s["key"]: s["full_cents"] for s in row["sources"]}
+    assert full["employer_hsa"] == 180_000 and full["match"] == 23_000 * 26
+    # A paycheck without a stub carries the match, not the seed.
+    assert earnings.Usual(stubs).hsa == 0 and earnings.Usual(stubs).seed == 180_000

@@ -187,6 +187,8 @@ def test_stub_whose_amounts_lose_their_punctuation():
         "Social Security Tax 10 918 20 NC State Income Tax -190 00 3 420 00",
         "401K Pln -245 00* 4 410 00 401K Roth -300 00 5 400 00",
         "Dental -15 00* 270 00 401K Er Match 4 000 00",
+        "Employer Health 1 263 63 26 536 23",
+        "Er Hsa Seed 1 800 00",
         "Net Pay $2 693 80",
         "Net Check $0 00",
         "JANE DOE xxxxxxxxx1234 xxxx xxxx $2 154 80",
@@ -198,6 +200,8 @@ def test_stub_whose_amounts_lose_their_punctuation():
     assert s.savings_cents == 490_00 + 200_00 + 245_00 + 300_00  # not Espp_1's year-to-date
     assert s.employer_match_cents == 0  # the match line is year to date only
     assert s.ytd["match"] == 4_000_00 and s.ytd["stock"] == 40_000_00  # ...which the yearly income page uses
+    assert s.ytd["employer_hsa"] == s.ytd["employer_hsa_seed"] == 1_800_00  # January's seed, kept apart
+    assert "employer_hsa" not in s.detail
     assert s.detail["espp"] == 490_00 and s.detail["roth"] == 300_00 and s.detail["hsa"] == 200_00
     assert s.ytd["gross"] == 128_380_00 and s.ytd["federal"] == 12_600_00
     assert s.frequency == "biweekly" and s.pay_date.isoformat() == "2026-10-16"

@@ -209,6 +209,7 @@ def from_pay_stubs(state: dict, include_match: bool) -> dict | None:
 
     The typical paycheck is the median of a person's recent stubs on their latest schedule, so one bonus or RSU
     stub doesn't move it. An average month on a two-weekly schedule is 26 / 12 paychecks, a little over two.
+    A once-a-year employer HSA seed adds a twelfth of itself to each month.
     """
     by_person: dict = {}
     for p in state["paychecks"]:  # newest first
@@ -225,11 +226,14 @@ def from_pay_stubs(state: dict, include_match: bool) -> dict | None:
         per_month = budget.PER_YEAR[stubs[0]["frequency"]] / 12
         typical_net = statistics.median(p["net_cents"] for p in stubs)
         typical_put = statistics.median(
-            p["savings_cents"] + ((p["employer_match_cents"] + p.get("employer_hsa_cents", 0)) if include_match else 0)
+            p["savings_cents"]
+            + ((p["employer_match_cents"] + p.get("employer_hsa_each_cents", 0)) if include_match else 0)
             for p in stubs
         )
+        # A yearly employer HSA seed is a twelfth of it a month, not part of every paycheck.
+        seed = stubs[0].get("employer_hsa_seed_ytd_cents", 0) if include_match else 0
         net += round(typical_net * per_month)
-        put_away += round(typical_put * per_month)
+        put_away += round(typical_put * per_month + seed / 12)
         paychecks.append(
             f"{dollars(round(typical_net))} a paycheck, paid {PAY_NAMES[stubs[0]['frequency']]} "
             f"({budget.PER_YEAR[stubs[0]['frequency']]} a year)"
