@@ -297,9 +297,15 @@ def parse_transactions(rows: list[list[str]], header_row: int, today: date, file
     c_debit = find_col(h, "debit", "withdrawal", "withdrawals")
     c_credit = find_col(h, "credit", "deposit", "deposits", exclude=("card",))
     c_category = find_col(h, "category")
+    c_type = find_col(h, "type", "transaction type", "details")
+    names = [norm(c) for c in h]
+    # Apple Card's export (Wallet -> Apple Card -> Export Transactions): purchases positive, payments negative, and a
+    # tidy Merchant column next to the raw Description.
+    apple = "clearing date" in names and "purchased by" in names
+    c_merchant = find_col(h, "merchant") if apple else None
     if c_date is None or c_desc is None or (c_amount is None and c_debit is None and c_credit is None):
         raise FileError("Couldn't find the date, description and amount columns in this file.")
-    raw: list[tuple[date, Decimal, str, str | None]] = []
+    raw: list[tuple[date, Decimal, str, str | None, str, str | None]] = []
     skipped = 0
     for row in rows[header_row + 1 :]:
         if not row or not any(c.strip() for c in row):
@@ -322,19 +328,27 @@ def parse_transactions(rows: list[list[str]], header_row: int, today: date, file
             skipped += 1
             continue
         cat = row[c_category].strip() if c_category is not None and len(row) > c_category else None
-        raw.append((d, amount, desc, cat))
+        kind = row[c_type].strip() if c_type is not None and len(row) > c_type else ""
+        shop = row[c_merchant].strip() if c_merchant is not None and len(row) > c_merchant else None
+        raw.append((d, amount, desc, cat, kind, shop or None))
         _ = split
     if not raw:
         raise FileError("No transactions found in this file.")
 
-    # One amount column: most banks write purchases as negative, most card exports as positive.
+    # One amount column: most banks write purchases as negative, most card exports as positive. A Type column
+    # ("Purchase", "Payment", "Sale", "ACH_DEBIT"...) says which way round the file is; without one, mostly positive
+    # amounts mean a card export.
     flipped = False
     if c_amount is not None and c_debit is None:
-        positive = sum(1 for _, a, _, _ in raw if a > 0)
-        flipped = positive / len(raw) > 0.7
+        votes = sum(direction_vote(kind, a) for _, a, _, _, kind, _ in raw)
+        if votes:
+            flipped = votes > 0
+        else:
+            positive = sum(1 for _, a, _, _, _, _ in raw if a > 0)
+            flipped = apple or positive / len(raw) > 0.7
     seen: Counter = Counter()
     txns = []
-    for d, amount, desc, cat in raw:
+    for d, amount, desc, cat, _kind, shop in raw:
         cents = to_cents(-amount if flipped else amount) or 0
         key = (d.isoformat(), cents, desc.lower())
         seen[key] += 1
@@ -344,7 +358,7 @@ def parse_transactions(rows: list[list[str]], header_row: int, today: date, file
                 external_id=stable_id(*key, seen[key]),
                 date=d,
                 amount_cents=cents,
-                merchant=clean_merchant(desc),
+                merchant=shop[:200] if shop else clean_merchant(desc),
                 description=desc[:300],
                 provider_category=cat[:80] if cat else None,
             )
@@ -352,12 +366,27 @@ def parse_transactions(rows: list[list[str]], header_row: int, today: date, file
     warnings = [f"{skipped} rows couldn't be read and were left out."] if skipped else []
     acct = FileAccount(
         mask=last4_from_name(filename),
-        name="",
-        institution="",
-        type="credit" if flipped else "depository",
+        name="Apple Card" if apple else "",
+        institution="Apple" if apple else "",
+        type="credit" if flipped or apple else "depository",
         transactions=txns,
     )
-    return ParsedFile("transactions", "Transactions CSV", [acct], today, warnings, flipped)
+    kind = "Apple Card CSV" if apple else "Transactions CSV"
+    return ParsedFile("transactions", kind, [acct], today, warnings, flipped)
+
+
+# Words in a Type column that say which way the money went.
+MONEY_OUT = re.compile(r"\b(purchase|sale|debit|fee|interest|installment|charge|withdrawal|atm)\b")
+MONEY_IN = re.compile(r"\b(payment|credit|refund|return|deposit|cashback|reward)\b")
+
+
+def direction_vote(kind: str, amount: Decimal) -> int:
+    """+1 when a row's Type and sign say "positive = money out", -1 when they say "positive = money in", else 0."""
+    kind = norm(kind)
+    out, came_in = bool(MONEY_OUT.search(kind)), bool(MONEY_IN.search(kind))
+    if out == came_in or not amount:
+        return 0
+    return (1 if out else -1) * (1 if amount > 0 else -1)
 
 
 def last4_from_name(filename: str) -> str | None:

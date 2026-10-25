@@ -41,7 +41,7 @@ def test_importing_files_builds_the_household(client, home):
 
     preview = upload(client, "fidelity_positions.csv")
     assert [a["holdings"] for a in preview["accounts"]] == [3, 1]
-    assert commit(client, preview) == {"holdings": 4, "transactions": 0, "accounts": 2}
+    assert commit(client, preview) == {"holdings": 4, "transactions": 0, "accounts": 2, "turned_around": 0}
 
     checking = upload(client, "chase_checking_4417.csv")
     assert checking["accounts"][0]["mask"] == "4417"
@@ -745,3 +745,99 @@ def test_demo_mode_serves_sample_settings_and_refuses_changes(tmp_path):
     assert c.get("/api/transactions", params={"q": "zzz"}).json()["count"] == 0
     assert c.post("/api/sync").status_code == 403
     assert c.post("/api/auth/login", json={"email": "a@b.c", "password": "x"}).status_code in (403, 503)
+
+
+# ---- money in and out the wrong way round
+
+
+def _upload_into(client, account_id: int | None) -> dict:
+    data = (FIXTURES / "apple_card.csv").read_bytes()
+    query = f"?account_id={account_id}" if account_id else ""
+    r = client.post(f"/api/imports{query}", files={"file": ("apple_card.csv", data)}, headers=csrf(client))
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def _apple(client, flip: bool, account_id: int | None = None, **target) -> dict:
+    preview = _upload_into(client, account_id)
+    targets = [{"index": 0, "account_id": preview["accounts"][0]["suggested_account_id"], **target}]
+    body = {"targets": targets, "flip": flip}
+    r = client.post(f"/api/imports/{preview['id']}/commit", json=body, headers=csrf(client))
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def _count(client) -> int:
+    with db_of(client).session() as db:
+        return len(db.scalars(select(Transaction)).all())
+
+
+def _amounts(client) -> dict[str, int]:
+    with db_of(client).session() as db:
+        return {t.merchant: t.amount_cents for t in db.scalars(select(Transaction))}
+
+
+@needs_db
+def test_turning_an_account_around_fixes_signs_categories_and_reuploads(client, home):
+    home.setup()
+    # Saved backwards, as a cash account: purchases came in as money in.
+    _apple(client, flip=True, type="depository", name="Apple Card", institution="Apple")
+    assert _amounts(client)["Trader Joe's"] == 5420
+    with db_of(client).session() as db:
+        account = db.scalar(select(Account))
+        account_id = account.id
+    preview = client.get(f"/api/accounts/{account_id}/flip").json()
+    assert preview["transactions"] == 6 and preview["spent_cents"] == 37900 and preview["received_cents"] == 7619
+    assert len(preview["uploads"]) == 1 and preview["uploads"][0]["filename"] == "apple_card.csv"
+
+    r = client.post(f"/api/accounts/{account_id}/flip", json={"type": "credit"}, headers=csrf(client))
+    assert r.json() == {"flipped": 6, "removed": 0}
+    assert _amounts(client)["Trader Joe's"] == -5420
+    t = {x["merchant"]: x for x in client.get("/api/household").json()["transactions"]}
+    assert t["Trader Joe's"]["category"] == "Groceries" and not t["Trader Joe's"]["transfer"]
+    payment = next(x for m, x in t.items() if m.startswith("Ach Deposit"))
+    assert payment["transfer"]
+    with db_of(client).session() as db:
+        assert db.get_one(Account, account_id).type == "credit"
+
+    # The same file uploaded again, now read the right way round, adds nothing.
+    again = _upload_into(client, account_id)
+    assert again["accounts"][0]["duplicates"] == 6 and again["accounts"][0]["backwards"] == 0
+    assert _apple(client, flip=False, account_id=account_id)["transactions"] == 0
+    assert _count(client) == 6
+
+    # Turning it around twice puts it back.
+    client.post(f"/api/accounts/{account_id}/flip", json={}, headers=csrf(client))
+    client.post(f"/api/accounts/{account_id}/flip", json={}, headers=csrf(client))
+    assert _amounts(client)["Trader Joe's"] == -5420
+
+
+@needs_db
+def test_uploading_again_the_right_way_round_turns_old_rows_around(client, home):
+    home.setup()
+    _apple(client, flip=True, type="credit", name="Apple Card", institution="Apple")
+    with db_of(client).session() as db:
+        account_id = db.scalar(select(Account.id))
+    again = _upload_into(client, account_id)
+    assert again["accounts"][0]["duplicates"] == 0 and again["accounts"][0]["backwards"] == 6
+    r = _apple(client, flip=False, account_id=account_id)
+    assert r["transactions"] == 0 and r["turned_around"] == 6
+    amounts = _amounts(client)
+    assert _count(client) == 6 and amounts["Trader Joe's"] == -5420 and amounts["Netflix"] == -1549
+
+
+@needs_db
+def test_turning_one_upload_around_leaves_the_others(client, home):
+    home.setup()
+    _apple(client, flip=True, type="credit", name="Apple Card", institution="Apple")
+    commit(client, upload(client, "amex_1008.csv"), account_id=None)  # a second account, untouched
+    with db_of(client).session() as db:
+        apple = db.scalar(select(Account).where(Account.name == "Apple Card"))
+        upload_id = db.scalar(select(Transaction.import_id).where(Transaction.account_id == apple.id))
+        apple_id = apple.id
+    r = client.post(f"/api/accounts/{apple_id}/flip", json={"import_id": upload_id + 1000}, headers=csrf(client))
+    assert r.json() == {"flipped": 0, "removed": 0}
+    r = client.post(f"/api/accounts/{apple_id}/flip", json={"import_id": upload_id}, headers=csrf(client))
+    assert r.json()["flipped"] == 6
+    amounts = _amounts(client)
+    assert amounts["Trader Joe's"] == -5420 and amounts["Target"] == -6399

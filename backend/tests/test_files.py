@@ -102,3 +102,22 @@ def test_clean_merchant():
     assert clean_merchant("TRADER JOE'S #123 SAN FRANCISCO CA") == "Trader Joe's San Francisco"
     assert clean_merchant("SQ *BLUE BOTTLE COFFEE 1234") == "Blue Bottle Coffee"
     assert clean_merchant("Netflix.com") == "Netflix.com"
+
+
+def test_apple_card_export_reads_purchases_as_money_out():
+    # Half the rows are payments and returns, so "mostly positive" alone would have read it as a bank account.
+    p = load("apple_card.csv")
+    (a,) = p.accounts
+    assert p.format == "Apple Card CSV" and p.flipped
+    assert (a.institution, a.name, a.type) == ("Apple", "Apple Card", "credit")
+    assert [t.amount_cents for t in a.transactions] == [-5420, 20000, -650, 2900, 15000, -1549]
+    assert a.transactions[0].merchant == "Trader Joe's"
+
+
+def test_a_type_column_decides_which_way_round():
+    csv = b"Date,Description,Type,Amount\n10/01/2026,COFFEE,Sale,-5.00\n10/02/2026,REFUND,Return,7.00\n"
+    csv += b"10/03/2026,STORE,Sale,-3.00\n10/04/2026,PAYMENT THANK YOU,Payment,100.00\n"
+    p = parse(csv, "card.csv", TODAY)
+    assert not p.flipped  # negative purchases: already "negative = money out"
+    flipped = csv.replace(b",-", b",+").replace(b",7.00", b",-7.00").replace(b",100.00", b",-100.00")
+    assert parse(flipped, "card.csv", TODAY).flipped

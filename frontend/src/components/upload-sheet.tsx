@@ -25,6 +25,8 @@ type PreviewAccount = {
   holdings_cents: number;
   transactions: number;
   duplicates: number;
+  /** Already in the account the other way round (an earlier upload read backwards): saving turns them around. */
+  backwards: number;
   first_date: string | null;
   last_date: string | null;
   balance_cents: number | null;
@@ -114,7 +116,10 @@ export function UploadSheet({
       const file = await shrinkPicture(original);
       const form = new FormData();
       form.append("file", file);
-      const answer = await api<Answer>(`/api/imports${withAI ? "?read_with_ai=true" : ""}`, { form });
+      const query = new URLSearchParams();
+      if (withAI) query.set("read_with_ai", "true");
+      if (accountId !== undefined) query.set("account_id", String(accountId));
+      const answer = await api<Answer>(`/api/imports${query.size ? `?${query}` : ""}`, { form });
       if ("ai_offer" in answer) {
         setOffer({ file, offer: answer.ai_offer });
         return;
@@ -148,12 +153,14 @@ export function UploadSheet({
     if (!preview) return;
     setBusy(true);
     try {
-      const r = await api<{ holdings: number; transactions: number; accounts: number }>(`/api/imports/${preview.id}/commit`, {
-        body: { targets: targets.map((t, index) => ({ index, ...t })), flip },
-      });
+      const r = await api<{ holdings: number; transactions: number; accounts: number; turned_around: number }>(
+        `/api/imports/${preview.id}/commit`,
+        { body: { targets: targets.map((t, index) => ({ index, ...t })), flip } },
+      );
       const parts = [
         r.transactions ? `${r.transactions} new transaction${r.transactions === 1 ? "" : "s"}` : null,
         r.holdings ? `${r.holdings} holding${r.holdings === 1 ? "" : "s"}` : null,
+        r.turned_around ? `${r.turned_around} turned the right way round` : null,
       ].filter(Boolean);
       toast(parts.length ? `Saved ${parts.join(" and ")}.` : "Saved. Nothing new in that file.");
       setPreview(null);
@@ -326,7 +333,10 @@ function AccountPreview({
   onChange: (p: Partial<Target>) => void;
   flip: boolean;
 }) {
-  const fresh = a.transactions - a.duplicates;
+  // Turning the file around swaps which saved rows match it the same way round and which the other way.
+  const duplicates = flip ? a.backwards : a.duplicates;
+  const backwards = flip ? a.duplicates : a.backwards;
+  const fresh = a.transactions - duplicates - backwards;
   const totalOk = a.file_total_cents === null || Math.abs(a.file_total_cents - a.holdings_cents) <= 100;
   const spent = flip ? a.received_cents : a.spent_cents;
   const received = flip ? a.spent_cents : a.received_cents;
@@ -347,7 +357,7 @@ function AccountPreview({
             {a.transactions > 0 && (
               <>
                 {fresh} new transaction{fresh === 1 ? "" : "s"}
-                {a.duplicates > 0 && `, ${a.duplicates} already here`}
+                {duplicates > 0 && `, ${duplicates} already here`}
                 {a.first_date && a.last_date && ` · ${day.format(new Date(a.first_date))} to ${day.format(new Date(a.last_date))}`}
               </>
             )}
@@ -377,6 +387,14 @@ function AccountPreview({
             </span>
           )}
         </div>
+      )}
+
+      {backwards > 0 && !target.skip && (
+        <p className="flex items-start gap-2 rounded-xl bg-accent/60 p-3 text-xs">
+          <ArrowLeftRight className="mt-0.5 size-3.5 shrink-0 text-primary" aria-hidden />
+          {backwards} of these are already saved with money in and out the other way round. Saving turns them around to
+          match this file.
+        </p>
       )}
 
       {a.synced_twin && (
