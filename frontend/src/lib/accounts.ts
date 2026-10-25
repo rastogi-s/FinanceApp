@@ -14,7 +14,57 @@ export type Account = {
   statement_cents: number | null;
   statement_date: string | null;
   statement_diff_percent: number | null;
+  /** Uploaded and typed-in accounts only: when the next statement should be uploaded. */
+  reminder: Reminder | null;
 };
+export type Every = "monthly" | "quarterly" | "weekly" | "off";
+export type Reminder = {
+  every: Every;
+  day: number | null; // the statement's closing day; null: the end of the month
+  newest: string; // the newest transaction or balance date
+  statement: string | null;
+  due: string | null;
+  is_due: boolean;
+  days_late: number;
+  snoozed_until: string | null;
+};
+/** An upload that's due, as Home shows it. */
+export type UploadDue = {
+  account_id: number;
+  name: string;
+  provider: "file" | "manual";
+  every: Every;
+  newest: string;
+  statement: string | null;
+  days_late: number;
+};
+
+const monthOnly = new Intl.DateTimeFormat("en-US", {
+  month: "long",
+  timeZone: "UTC",
+});
+const dayMonth = new Intl.DateTimeFormat("en-US", {
+  month: "short",
+  day: "numeric",
+  timeZone: "UTC",
+});
+
+/** "October statement" (or "This week's transactions"), for the account that's due. */
+export function dueLabel(u: {
+  provider: string;
+  every: Every;
+  statement: string | null;
+}): string {
+  if (u.every === "weekly") return "This week's transactions";
+  if (u.provider === "manual") return "A new balance";
+  return u.statement
+    ? `${monthOnly.format(new Date(u.statement))} statement`
+    : "A new statement";
+}
+
+export function shortDate(iso: string): string {
+  return dayMonth.format(new Date(iso));
+}
 export type Connection = {
   id: number;
   provider: "plaid" | "snaptrade" | "file" | "manual";
@@ -29,7 +79,12 @@ export type ConnectionsData = {
   revoked: Connection[];
   providers: { plaid: boolean; snaptrade: boolean };
   people: { id: number; name: string }[];
-  sync: { last_at: string | null; last_ok: boolean | null; clean_days: number; running: boolean };
+  sync: {
+    last_at: string | null;
+    last_ok: boolean | null;
+    clean_days: number;
+    running: boolean;
+  };
 };
 
 export function parseDollars(text: string): number | null {
