@@ -62,18 +62,19 @@ def test_summary_splits_taxable_gains_by_term():
     rows = [
         {"taxable": True, "term": "long", "gain_cents": 500, "long_term_on": None, "quantity": 1.0},
         {"taxable": True, "term": "short", "gain_cents": -200, "long_term_on": "2026-12-01", "quantity": 2.0},
-        {"taxable": True, "term": "short", "gain_cents": 300, "long_term_on": "2027-01-10", "quantity": 3.0},
+        {"taxable": True, "term": "short", "gain_cents": 30, "long_term_on": "2026-12-20", "quantity": 0.01},
+        {"taxable": True, "term": "short", "gain_cents": 6_000, "long_term_on": "2027-01-10", "quantity": 3.0},
         {"taxable": False, "term": "short", "gain_cents": 9_000, "long_term_on": "2026-11-01", "quantity": 4.0},
     ]
     s = lots.summary(rows, date(2026, 11, 1))
-    assert s["long_gain_cents"] == 500 and s["short_gain_cents"] == 100
-    # The next one worth waiting for: in a taxable account and with a gain.
-    assert s["next_long_term"] == {"on": "2027-01-10", "days": 70, "quantity": 3.0, "gain_cents": 300}
+    assert s["long_gain_cents"] == 500 and s["short_gain_cents"] == 5_830
+    # The next one worth waiting for: in a taxable account and with a gain of $50 or more.
+    assert s["next_long_term"] == {"on": "2027-01-10", "days": 70, "quantity": 3.0, "gain_cents": 6_000}
 
 
 @needs_db
-def test_holding_detail_shows_lots(client, home, monkeypatch):
-    home.setup()
+def seed_lots(client, activity: list[tuple[int, int, int]]) -> None:
+    """One E*TRADE brokerage holding 10 AAPL at $300 ($2,000 cost basis), and its buys: (days ago, shares, dollars)."""
     with db_of(client).session() as db:
         c = Connection(provider="plaid", institution="E*TRADE", state={}, created_at=datetime.now(UTC))
         db.add(c)
@@ -85,24 +86,41 @@ def test_holding_detail_shows_lots(client, home, monkeypatch):
         db.add(HoldingSnapshot(date=TODAY, account_id=a.id, symbol="AAPL", name="Apple", asset_class="Stocks",
                                quantity=Decimal(10), price=Decimal(300), value_cents=300_000,
                                cost_basis_cents=200_000))  # fmt: skip
-        for i, (days, q, amount) in enumerate([(400, 4, -800), (30, 2, -560)]):
+        for i, (days, q, amount) in enumerate(activity):
             db.add(InvestmentTransaction(account_id=a.id, external_id=f"t{i}", date=TODAY - timedelta(days=days),
                                          type="buy", subtype="buy", symbol="AAPL", name="Apple",
                                          quantity=Decimal(q), price=None, amount_cents=amount * 100,
                                          source="plaid"))  # fmt: skip
         db.flush()
 
+
+@needs_db
+def test_holding_detail_shows_lots(client, home, monkeypatch):
+    home.setup()
+    seed_lots(client, [(400, 4, -800), (30, 2, -460)])
     monkeypatch.setattr(security, "chart", lambda symbol, range_: None)
     d = client.get("/api/securities/AAPL").json()
     got = d["position"]["lots"]
     rows = got["rows"]
     assert [(r["acquired"] is None, r["quantity"], r["cost_cents"], r["term"]) for r in rows] == [
-        (True, 4.0, 64_000, "long"),  # held before the two years of activity
+        (True, 4.0, 74_000, "long"),  # held before the first activity, over a year ago
         (False, 4.0, 80_000, "long"),
-        (False, 2.0, 56_000, "short"),
+        (False, 2.0, 46_000, "short"),
     ]
-    assert rows[0]["estimated"] and rows[0]["acquired_before"]
+    assert rows[0]["estimated"] and rows[0]["acquired_before"] == (TODAY - timedelta(days=400)).isoformat()
     assert rows[2]["long_term_on"] == lots.long_term_on(TODAY - timedelta(days=30)).isoformat()
-    assert got["short_gain_cents"] == 60_000 - 56_000
-    assert got["long_gain_cents"] == (120_000 - 64_000) + (120_000 - 80_000)
+    assert got["short_gain_cents"] == 60_000 - 46_000
+    assert got["long_gain_cents"] == (120_000 - 74_000) + (120_000 - 80_000)
     assert got["next_long_term"]["days"] == (lots.long_term_on(TODAY - timedelta(days=30)) - TODAY).days
+
+
+@needs_db
+def test_a_short_history_leaves_earlier_shares_term_unknown(client, home, monkeypatch):
+    """Fidelity sent a month of activity: shares older than that may be only weeks older, so not surely long-term."""
+    home.setup()
+    seed_lots(client, [(30, 2, -560)])
+    monkeypatch.setattr(security, "chart", lambda symbol, range_: None)
+    earlier = client.get("/api/securities/AAPL").json()["position"]["lots"]["rows"][0]
+    assert earlier["acquired"] is None and earlier["acquired_before"] == (TODAY - timedelta(days=30)).isoformat()
+    assert earlier["term"] is None
+    assert earlier["long_term_on"] == lots.long_term_on(TODAY - timedelta(days=31)).isoformat()

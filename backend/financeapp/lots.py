@@ -6,9 +6,10 @@ first (first in, first out, the brokerages' default), and a split scales the ope
 with the holding as the brokerage reports it today:
 
 - Shares the activity doesn't explain were there before the history starts: one "earlier" lot, costing whatever is
-  left of the brokerage's cost basis. Outside a stock plan they're held since before the history window, so more
-  than a year: long-term, marked estimated. Stock plan vests often aren't in the activity, so there the term is
-  left unknown.
+  left of the brokerage's cost basis. Brokerages send anywhere from a few weeks to two years of activity, so the
+  history starts at the account's first activity on file. When that was more than a year ago the earlier shares are
+  long-term (marked estimated); until then the term is unknown, and they're surely long-term a year after it. Stock
+  plan vests often aren't in the activity, so there the term is always left unknown.
 - More shares in the lots than are held (a sale the activity missed): the oldest lots are trimmed.
 
 A gain held more than one year is long-term: a lot bought on March 3 turns long-term on March 4 a year later.
@@ -19,14 +20,14 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session as DbSession
 
 from financeapp import household, income
-from financeapp.models import Account, Connection, InvestmentTransaction
+from financeapp.models import Account, InvestmentTransaction
 from financeapp.portfolio import Position
 
-HISTORY_DAYS = 730  # how far back Plaid's investment activity goes on the first sync
+WORTH_WAITING = 50_00  # a gain this size or more makes "wait until it's long-term" worth saying
 TINY = Decimal("0.0001")  # shares: rounding left by fractional buys
 SPLIT = ("split", "stock split", "reverse split")
 
@@ -90,11 +91,9 @@ def replay(activity: list[InvestmentTransaction]) -> tuple[list[Lot], bool]:
 
 
 def history_start(db: DbSession, account: Account) -> date | None:
-    """The first day the brokerage's activity covers: two years before the account was first linked."""
-    connection = db.get(Connection, account.connection_id)
-    if connection is None or connection.provider != "plaid":
-        return None
-    return connection.created_at.date() - timedelta(days=HISTORY_DAYS)
+    """The account's first activity on file. Plaid asks for two years, but each brokerage decides how much it sends
+    (Fidelity sent a month), so shares the activity doesn't explain are only known to be older than this."""
+    return db.scalar(select(func.min(InvestmentTransaction.date)).where(InvestmentTransaction.account_id == account.id))
 
 
 def reconcile(open_lots: list[Lot], p: Position) -> tuple[list[Lot], bool]:
@@ -149,10 +148,10 @@ def of(db: DbSession, accounts: list[Account], positions: list[Position], symbol
                 term = "long" if today >= turns else "short"
                 estimated = trimmed
             else:
-                turns = None
-                # Shares from before a full two-year history are more than a year old, unless they came from a
+                # Bought by the day before the history starts at the latest, so long-term a year after that. Not in a
                 # stock plan, whose vests the activity often leaves out.
-                term = "long" if start is not None and not stock_plan and (today - start).days > 366 else None
+                turns = long_term_on(start - timedelta(days=1)) if start is not None and not stock_plan else None
+                term = "long" if turns is not None and today >= turns else None
                 estimated = True
             out.append(
                 {
@@ -167,7 +166,7 @@ def of(db: DbSession, accounts: list[Account], positions: list[Position], symbol
                     "value_cents": value,
                     "gain_cents": value - lot.cost_cents if lot.cost_cents is not None else None,
                     "term": term,
-                    "long_term_on": turns.isoformat() if turns and term == "short" else None,
+                    "long_term_on": turns.isoformat() if turns and term != "long" else None,
                     "estimated": estimated,
                 }
             )
@@ -179,7 +178,7 @@ def summary(rows: list[dict], today: date | None = None) -> dict:
     today = today or date.today()
     taxable = [r for r in rows if r["taxable"] and r["gain_cents"] is not None]
     upcoming = sorted(
-        (r for r in taxable if r["term"] == "short" and r["long_term_on"] and r["gain_cents"] > 0),
+        (r for r in taxable if r["term"] == "short" and r["long_term_on"] and r["gain_cents"] >= WORTH_WAITING),
         key=lambda r: r["long_term_on"],
     )
     nxt = upcoming[0] if upcoming else None
