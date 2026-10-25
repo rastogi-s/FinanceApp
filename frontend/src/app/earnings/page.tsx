@@ -345,7 +345,7 @@ function OlderYears({ e, onAdd }: { e: EarningsState; onAdd: () => void }) {
       <CardContent className="grid grid-cols-1 gap-3">
         <p className="text-sm text-muted-foreground">
           {e.linked_from
-            ? `Your linked accounts reach back to ${day.format(new Date(e.linked_from))}. `
+            ? `Your paychecks in the linked accounts reach back to ${day.format(new Date(e.linked_from))}. `
             : "Linked accounts usually reach back about two years. "}
           Add years before that from a W-2 or the year&apos;s last pay stub, or type them in, to see growth over your whole career.
         </p>

@@ -3,7 +3,7 @@
 import type { AIOffer } from "@/components/ai-offer";
 
 export type SourceKey = "base" | "bonus" | "rsu" | "other" | "match" | "employer_hsa";
-export type How = "" | "ytd" | "stubs" | "estimated" | "take_home" | "typed" | "w2" | "stub";
+export type How = "" | "ytd" | "stubs" | "estimated" | "take_home" | "typed" | "w2" | "stub" | "unsplit";
 
 export type EarningsSource = { key: SourceKey; label: string; cents: number; full_cents: number; how: How };
 
@@ -121,6 +121,7 @@ export const HOW: Record<How, string> = {
   typed: "typed in",
   w2: "from a W-2",
   stub: "from a pay stub",
+  unsplit: "in the stubs' year to date but not on a line the app could read, likely a stock vest or bonus",
 };
 
 export function pct(v: number, signed = true) {
