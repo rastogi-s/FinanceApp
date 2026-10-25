@@ -14,6 +14,7 @@ import { parseDollars } from "@/lib/accounts";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { type BudgetLine, type BudgetState, type Frequency, linesWith } from "@/lib/budget";
+import { monthOf } from "@/lib/search";
 import { cn } from "@/lib/utils";
 
 type Change = (path: string, method: string, body?: unknown) => Promise<BudgetState>;
@@ -93,7 +94,7 @@ function LineEditor({ line, budget, change, onClose }: LineProps & { line: Budge
       >
         {line.forecast && line.forecast.status !== "over" && <MonthEnd line={line} month={budget.month} />}
         <Link
-          href={`/spending?category=${line.category_id}&range=month`}
+          href={monthOf(line.category_id)}
           className="-my-1 flex items-center justify-between rounded-2xl bg-muted/60 px-4 py-3 text-sm font-medium transition-colors hover:bg-muted"
         >
           See this month&apos;s {line.category.toLowerCase()} transactions

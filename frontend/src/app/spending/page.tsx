@@ -5,7 +5,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeftRight, Search, SlidersHorizontal, Sparkles, X } from "lucide-react";
 import { CategorySheet } from "@/components/category-sheet";
 import { Money } from "@/components/money";
-import { HouseholdPage } from "@/components/page";
+import { BackLink, HouseholdPage } from "@/components/page";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -22,6 +22,7 @@ import {
   type Results,
   SORTS,
   byDate,
+  categoryMonth,
   cents,
   dates,
   fromParams,
@@ -46,13 +47,25 @@ function byDay(transactions: Transaction[]) {
 export default function SpendingPage() {
   return (
     <Suspense>
+      <SpendingWithBack />
+    </Suspense>
+  );
+}
+
+/** Opened from a Budget row (from=budget), the page has a way back to Budget: a home-screen app has no back button. */
+function SpendingWithBack() {
+  const params = useSearchParams();
+  const [fromBudget] = useState(() => params.get("from") === "budget");
+  return (
+    <>
+      {fromBudget && <BackLink href="/budget">Budget</BackLink>}
       <HouseholdPage
         title="Spending"
         subtitle="Transfers between your own accounts are left out of every total. Tap one to change its category."
       >
-        {(h) => <Spending h={h} />}
+        {(h) => <Spending h={h} fromBudget={fromBudget} />}
       </HouseholdPage>
-    </Suspense>
+    </>
   );
 }
 
@@ -114,7 +127,7 @@ function useResults(f: Filters) {
   };
 }
 
-function Spending({ h }: { h: LinkedHousehold }) {
+function Spending({ h, fromBudget }: { h: LinkedHousehold; fromBudget: boolean }) {
   const params = useSearchParams();
   const router = useRouter();
   const path = usePathname();
@@ -125,7 +138,9 @@ function Spending({ h }: { h: LinkedHousehold }) {
   const { results, stale, error, more, loadMore, reload } = useResults(f);
 
   // Keep the address in step, so going back, reloading or sharing a link keeps the filters.
-  const wanted = toParams(f).toString();
+  const p = toParams(f);
+  if (fromBudget) p.set("from", "budget");
+  const wanted = p.toString();
   useEffect(() => {
     const t = setTimeout(() => {
       if (wanted !== new URLSearchParams(window.location.search).toString()) {
@@ -147,7 +162,13 @@ function Spending({ h }: { h: LinkedHousehold }) {
       </div>
 
       <div className="grid grid-cols-1 gap-4">
-        {filtered ? <Summary f={f} r={results} /> : <ThisMonth h={h} />}
+        {!filtered ? (
+          <ThisMonth h={h} />
+        ) : categoryMonth(f) ? (
+          <CategoryMonth f={f} r={results} name={categoryName(categoryMonth(f)!, categories)} />
+        ) : (
+          <Summary f={f} r={results} />
+        )}
 
         {error && <p className="px-1 text-sm text-negative">{error}</p>}
         {!results && !error && <Skeleton className="h-64 rounded-xl" />}
@@ -313,7 +334,7 @@ function ActiveChips({
     chips.push({ key: "kind", label: KINDS.find((k) => k.id === f.kind)!.label, off: () => set({ kind: "" }) });
   }
   for (const c of f.categories) {
-    const name = c === "none" ? "Uncategorized" : (categories?.find((x) => String(x.id) === c)?.name ?? "Category");
+    const name = categoryName(c, categories);
     chips.push({ key: `c${c}`, label: name, off: () => set({ categories: f.categories.filter((x) => x !== c) }) });
   }
   for (const a of f.accounts) {
@@ -381,6 +402,68 @@ function ThisMonth({ h }: { h: LinkedHousehold }) {
 }
 
 /** Totals for everything that matches, not just the rows loaded so far. */
+const categoryName = (id: string, categories: Category[] | null) =>
+  id === "none" ? "Uncategorized" : (categories?.find((x) => String(x.id) === id)?.name ?? "Category");
+
+const monthLong = new Intl.DateTimeFormat("en-US", { month: "long", year: "numeric" });
+
+/**
+ * One category for a month: the total the way Budget counts it (refunds taken off, transfers between your own
+ * accounts left out, so the two always agree), and the merchants it mostly went to.
+ */
+function CategoryMonth({ f, r, name }: { f: Filters; r: Results | null; name: string }) {
+  if (!r) return <Skeleton className="h-40 rounded-xl" />;
+  const net = r.out_cents - r.in_cents;
+  const start = dates(f).start!;
+  const month = monthLong.format(new Date(`${start}T12:00:00`));
+  const top = r.merchants.filter((m) => m.cents > 0);
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>{name}</CardTitle>
+        <span className="text-xs text-muted-foreground">{month}</span>
+      </CardHeader>
+      <CardContent className="grid grid-cols-1 gap-4">
+        <div>
+          <p className="text-3xl font-semibold tracking-tight" aria-live="polite">
+            <Money cents={net} style="exact" />
+          </p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {net < 0 ? "more came back than went out" : "spent"} across {r.count.toLocaleString("en-US")}{" "}
+            {r.count === 1 ? "transaction" : "transactions"}
+            {r.in_cents > 0 && (
+              <>
+                , after <Money cents={r.in_cents} style="exact" /> in refunds
+              </>
+            )}
+          </p>
+        </div>
+        {top.length > 1 && net > 0 && (
+          <div>
+            <p className="mb-2 text-xs font-medium tracking-wide text-muted-foreground uppercase">Most of it went to</p>
+            <ul className="grid grid-cols-1 gap-2.5">
+              {top.map((m) => (
+                <li key={m.merchant} className="grid grid-cols-1 gap-1 text-sm">
+                  <div className="flex items-baseline justify-between gap-3">
+                    <span className="min-w-0 truncate font-medium">
+                      {m.merchant}
+                      {m.count > 1 && <span className="font-normal text-muted-foreground"> · {m.count}</span>}
+                    </span>
+                    <Money cents={m.cents} style="exact" />
+                  </div>
+                  <div className="h-1.5 overflow-hidden rounded-full bg-muted" aria-hidden>
+                    <div className="h-full rounded-full bg-primary/70" style={{ width: `${Math.min((m.cents / net) * 100, 100)}%` }} />
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 function Summary({ f, r }: { f: Filters; r: Results | null }) {
   if (!r) return <Skeleton className="h-32 rounded-xl" />;
   const span = r.first && r.last && (r.first === r.last ? short.format(new Date(r.first)) : `${short.format(new Date(r.first))} – ${short.format(new Date(r.last))}`);

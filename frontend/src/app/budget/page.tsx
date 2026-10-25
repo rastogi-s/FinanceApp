@@ -9,6 +9,7 @@ import {
   FileText,
   History,
   Minus,
+  Pencil,
   PiggyBank,
   Plus,
   ShieldCheck,
@@ -34,6 +35,7 @@ import { useAuth } from "@/lib/auth";
 import { useApi } from "@/lib/household";
 import type { ReviewState } from "@/lib/review";
 import { type BudgetLine, type BudgetState, type Forecast, type SavingsMonth, monthName, useBudget } from "@/lib/budget";
+import { monthOf } from "@/lib/search";
 import { cn } from "@/lib/utils";
 
 const short = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
@@ -41,7 +43,7 @@ const stamp = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric",
 
 export default function BudgetPage() {
   return (
-    <HouseholdPage title="Budget" subtitle="Every category's monthly limit, drafted from your own spending. Tap one to change it.">
+    <HouseholdPage title="Budget" subtitle="Every category's monthly limit, drafted from your own spending. Tap one to see what went into it this month.">
       {() => <Budget />}
     </HouseholdPage>
   );
@@ -209,7 +211,7 @@ function Budget() {
 
       <CategoryCheck />
 
-      {data.forecast && <MonthEnd data={data} onPick={setEditing} />}
+      {data.forecast && <MonthEnd data={data} />}
 
       {data.lines.length > 3 && (
         <div className="-mb-1 flex items-center justify-between gap-3 px-1">
@@ -261,29 +263,24 @@ function Budget() {
             </p>
             <ul className="divide-y">
               {data.unbudgeted.map((u) => (
-                <li key={u.category}>
+                <li key={u.category} className="flex items-center gap-3 py-1 text-sm">
+                  <Link
+                    href={monthOf(u.category_id ?? "none")}
+                    className="-ml-2 flex min-w-0 flex-1 items-center gap-3 rounded-lg px-2 py-2 transition-colors hover:bg-muted/50"
+                    aria-label={`${u.category}: see this month's transactions`}
+                  >
+                    <span className="min-w-0 flex-1 truncate font-medium">{u.category}</span>
+                    <Money cents={u.spent_cents} />
+                  </Link>
                   {u.category_id && data.categories.some((c) => c.id === u.category_id) ? (
-                    <button
-                      type="button"
-                      onClick={() => pick(u.category_id!)}
-                      className="flex w-full items-center gap-3 py-3 text-left text-sm"
-                    >
-                      <span className="flex-1 font-medium">{u.category}</span>
-                      <Money cents={u.spent_cents} />
-                      <span className="text-xs font-medium text-primary">Set a limit</span>
+                    <button type="button" onClick={() => pick(u.category_id!)} className="py-2 text-xs font-medium text-primary">
+                      Set a limit
                     </button>
                   ) : u.category === "Uncategorized" ? (
-                    <Link href="/review" className="flex w-full items-center gap-3 py-3 text-sm">
-                      <span className="flex-1 font-medium">{u.category}</span>
-                      <Money cents={u.spent_cents} />
-                      <span className="text-xs font-medium text-primary">Sort them</span>
+                    <Link href="/review" className="py-2 text-xs font-medium text-primary">
+                      Sort them
                     </Link>
-                  ) : (
-                    <div className="flex items-center gap-3 py-3 text-sm">
-                      <span className="flex-1 font-medium">{u.category}</span>
-                      <Money cents={u.spent_cents} />
-                    </div>
-                  )}
+                  ) : null}
                 </li>
               ))}
             </ul>
@@ -408,38 +405,46 @@ function Group({ title, lines, month, onPick }: { title: string; lines: BudgetLi
         {lines.map((b) => {
           const left = b.limit_cents - b.spent_cents;
           return (
-            <button
-              key={b.category_id}
-              type="button"
-              onClick={() => onPick(b)}
-              className="rounded-xl px-3 py-2.5 text-left transition-colors hover:bg-muted/50"
-              aria-label={`${b.category}: ${b.limit_cents ? Math.round((b.spent_cents / b.limit_cents) * 100) : 0}% used.${b.forecast ? ` ${outlookText(b, b.forecast)}` : ""} Change limit`}
-            >
-              <div className="mb-1.5 flex items-baseline justify-between gap-3 text-sm">
-                <span className="font-medium">{b.category}</span>
-                <span className={left < 0 ? "text-negative" : "text-muted-foreground"}>
-                  {left > 0 ? (
-                    <>
-                      <Money cents={left} /> left
-                    </>
-                  ) : left === 0 ? (
-                    "Paid"
-                  ) : (
-                    <>
-                      <Money cents={-left} /> over
-                    </>
-                  )}
-                </span>
-              </div>
-              <Progress
-                value={b.spent_cents}
-                max={b.limit_cents}
-                label={`${b.category} budget used`}
-                tone={b.kind === "fixed" ? "bill" : "budget"}
-                projected={b.forecast && b.forecast.status !== "over" ? b.forecast.projected_cents : undefined}
-              />
-              {b.forecast && <Outlook line={b} f={b.forecast} month={month} />}
-            </button>
+            <div key={b.category_id} className="relative">
+              <Link
+                href={monthOf(b.category_id)}
+                className="block rounded-xl py-2.5 pr-12 pl-3 transition-colors hover:bg-muted/50"
+                aria-label={`${b.category}: ${b.limit_cents ? Math.round((b.spent_cents / b.limit_cents) * 100) : 0}% used.${b.forecast ? ` ${outlookText(b, b.forecast)}` : ""} See this month's transactions`}
+              >
+                <div className="mb-1.5 flex items-baseline justify-between gap-3 text-sm">
+                  <span className="font-medium">{b.category}</span>
+                  <span className={left < 0 ? "text-negative" : "text-muted-foreground"}>
+                    {left > 0 ? (
+                      <>
+                        <Money cents={left} /> left
+                      </>
+                    ) : left === 0 ? (
+                      "Paid"
+                    ) : (
+                      <>
+                        <Money cents={-left} /> over
+                      </>
+                    )}
+                  </span>
+                </div>
+                <Progress
+                  value={b.spent_cents}
+                  max={b.limit_cents}
+                  label={`${b.category} budget used`}
+                  tone={b.kind === "fixed" ? "bill" : "budget"}
+                  projected={b.forecast && b.forecast.status !== "over" ? b.forecast.projected_cents : undefined}
+                />
+                {b.forecast && <Outlook line={b} f={b.forecast} month={month} />}
+              </Link>
+              <button
+                type="button"
+                onClick={() => onPick(b)}
+                className="absolute top-1/2 right-1 grid size-10 -translate-y-1/2 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                aria-label={`Change the ${b.category} limit`}
+              >
+                <Pencil className="size-4" aria-hidden />
+              </button>
+            </div>
           );
         })}
       </CardContent>
@@ -498,7 +503,7 @@ function dayOf(month: string, day: number): string {
 }
 
 /** Where the month is heading: the categories on pace to go over, or a calm "on track". */
-function MonthEnd({ data, onPick }: { data: BudgetState; onPick: (l: BudgetLine) => void }) {
+function MonthEnd({ data }: { data: BudgetState }) {
   const f = data.forecast!;
   const over = data.lines.filter((l) => f.heading_over.includes(l.category_id));
   const days = `${f.days_left} day${f.days_left === 1 ? "" : "s"}`;
@@ -520,9 +525,8 @@ function MonthEnd({ data, onPick }: { data: BudgetState; onPick: (l: BudgetLine)
             <ul className="grid grid-cols-1 gap-1">
               {over.map((l) => (
                 <li key={l.category_id}>
-                  <button
-                    type="button"
-                    onClick={() => onPick(l)}
+                  <Link
+                    href={monthOf(l.category_id)}
                     className="flex w-full items-center gap-3 rounded-xl bg-warning/10 px-3 py-2.5 text-left text-sm transition-colors hover:bg-warning/15"
                   >
                     <TrendingUp className="size-4 shrink-0 text-warning" aria-hidden />
@@ -533,7 +537,7 @@ function MonthEnd({ data, onPick }: { data: BudgetState; onPick: (l: BudgetLine)
                     <span className="font-medium text-warning">
                       <Money cents={l.forecast!.over_cents} signed />
                     </span>
-                  </button>
+                  </Link>
                 </li>
               ))}
             </ul>
