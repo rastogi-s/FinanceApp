@@ -831,6 +831,41 @@ def _sample_trends() -> dict:
     return out
 
 
+# Each sample holding's lots: (days ago, share of the shares, price paid as a share of today's price).
+SAMPLE_LOTS = [(1480, 0.34, 0.52), (930, 0.22, 0.71), (338, 0.18, 0.88), (190, 0.16, 1.07), (24, 0.10, 0.98)]
+
+
+def _sample_lots(symbol: str, held: list, price: float, today: date) -> dict | None:
+    from financeapp import income, lots
+
+    rows = []
+    for i, h in enumerate(held):
+        quantity = h[4] / price
+        for days, share, paid in SAMPLE_LOTS[i % 2 :]:  # the second account has fewer, newer lots
+            acquired = today - timedelta(days=days)
+            turns = lots.long_term_on(acquired)
+            q = round(quantity * share, 4)
+            cost, value = _cents(q * price * paid), _cents(q * price)
+            rows.append(
+                {
+                    "symbol": symbol,
+                    "account_id": i + 1,
+                    "account": h[3],
+                    "taxable": not income.TAX_ADVANTAGED.search(h[3].lower()),
+                    "acquired": acquired.isoformat(),
+                    "acquired_before": None,
+                    "quantity": q,
+                    "cost_cents": cost,
+                    "value_cents": value,
+                    "gain_cents": value - cost,
+                    "term": "long" if today >= turns else "short",
+                    "long_term_on": turns.isoformat() if today < turns else None,
+                    "estimated": False,
+                }
+            )
+    return {"rows": rows, **lots.summary(rows, today)} if rows else None
+
+
 def security(symbol: str, range_: str, today: date | None = None) -> dict:
     """A holding's detail page with a made-up but steady price history."""
     today = today or datetime.now(UTC).date()
@@ -890,6 +925,7 @@ def security(symbol: str, range_: str, today: date | None = None) -> dict:
                 {"account": h[3], "quantity": round(h[4] / price, 3), "value_cents": _cents(h[4])} for h in held
             ],
             "as_of": today.isoformat(),
+            "lots": _sample_lots(symbol, held, price, today),
         }
         if held
         else None,

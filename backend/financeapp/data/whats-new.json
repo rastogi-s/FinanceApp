@@ -1,5 +1,17 @@
 [
   {
+    "version": "0.36.0",
+    "title": "Your tax lots",
+    "features": [
+      {
+        "id": "tax-lots",
+        "title": "Every holding shows its tax lots",
+        "body": "Open a holding on Portfolio to see its shares by the day you bought them: shares, cost a share, value, gain, and whether a sale would be short-term or long-term. In a taxable account the page adds up your long-term and short-term gains, and tells you when the next lot with a gain turns long-term, so you can wait a few weeks for the lower rate. Lots are built from your brokerage's buys and sells over the last two years, oldest sold first; shares older than that show as one earlier lot. Retirement and HSA lots are shown too, marked as not taxed.",
+        "tryIt": "/portfolio"
+      }
+    ]
+  },
+  {
     "version": "0.35.0",
     "title": "Never miss a statement",
     "features": [
