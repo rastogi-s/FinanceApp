@@ -80,46 +80,80 @@ class Plaid:
 
     # -- linking
 
-    def start_link(self, user_ref: str, return_url: str, kind: str) -> LinkStart:
-        products, optional = (
-            (["investments"], ["transactions"])
-            if kind == "investments"
-            else (["transactions"], ["liabilities", "investments"])
-        )
-        data = self._post(
-            "/link/token/create",
-            {
-                "client_name": "Finance",
-                "language": "en",
-                "country_codes": ["US"],
-                "user": {"client_user_id": user_ref},
-                "products": products,
-                "optional_products": optional,
-                "transactions": {"days_requested": 730},
-                "hosted_link": {"completion_redirect_uri": return_url},
-            },
-        )
+    def start_link(self, user_ref: str, return_url: str, kind: str, token: str | None = None) -> LinkStart:
+        """A new link, or with `token` Plaid's update mode: the person signs in again on the same Item, so a
+        reconnect keeps its accounts and history and never uses up another Item."""
+        body: dict = {
+            "client_name": "Finance",
+            "language": "en",
+            "country_codes": ["US"],
+            "user": {"client_user_id": user_ref},
+            "hosted_link": {"completion_redirect_uri": return_url},
+        }
+        if token:
+            body["access_token"] = token
+        else:
+            products, optional = (
+                (["investments"], ["transactions"])
+                if kind == "investments"
+                else (["transactions"], ["liabilities", "investments"])
+            )
+            body |= {"products": products, "optional_products": optional, "transactions": {"days_requested": 730}}
+        data = self._post("/link/token/create", body)
         url = data.get("hosted_link_url")
         if not url:
             raise ConnectorError(
                 "Plaid didn't return a link page. Is Hosted Link enabled for your Plaid account?", "NO_HOSTED_LINK"
             )
-        return LinkStart(url=url, pending={"link_token": data["link_token"]})
+        return LinkStart(url=url, pending={"link_token": data["link_token"], **({"update": True} if token else {})})
 
-    def finish_link(self, pending: dict) -> Linked:
+    def link_result(self, pending: dict) -> dict:
+        """What the person linked, before anything is exchanged: the public token, the institution and the accounts
+        (names and last 4 digits), so a login that's already linked can be spotted."""
         data = self._post("/link/token/get", {"link_token": pending["link_token"]})
-        public_token = institution = None
+        found: dict = {}
         for session in data.get("link_sessions") or []:
             results = session.get("results") or {}
             for item in results.get("item_add_results") or []:
-                public_token = item.get("public_token")
-                institution = (item.get("institution") or {}).get("name")
-        if not public_token:
+                institution = item.get("institution") or {}
+                found = {
+                    "public_token": item.get("public_token"),
+                    "institution": institution.get("name"),
+                    "institution_id": institution.get("institution_id"),
+                    "accounts": [
+                        {
+                            "name": a.get("name"),
+                            "type": TYPES.get(a.get("type", ""), "other"),
+                            "mask": last4(a.get("mask")),
+                        }
+                        for a in item.get("accounts") or []
+                    ],
+                }
+        if not found.get("public_token"):
             raise ConnectorError("Linking wasn't finished at Plaid. Try again.", "LINK_NOT_FINISHED")
-        exchanged = self._post("/item/public_token/exchange", {"public_token": public_token})
+        return found
+
+    def exchange(self, found: dict) -> Linked:
+        exchanged = self._post("/item/public_token/exchange", {"public_token": found["public_token"]})
         return Linked(
-            token=exchanged["access_token"], external_id=exchanged["item_id"], institution=institution or "Bank"
+            token=exchanged["access_token"],
+            external_id=exchanged["item_id"],
+            institution=found.get("institution") or "Bank",
         )
+
+    def finish_link(self, pending: dict) -> Linked:
+        return self.exchange(self.link_result(pending))
+
+    def finish_update(self, pending: dict) -> None:
+        """Update mode keeps the same access token; this only checks the person got all the way through."""
+        data = self._post("/link/token/get", {"link_token": pending["link_token"]})
+        for session in data.get("link_sessions") or []:
+            results = session.get("results") or {}
+            if results.get("item_add_results") or session.get("on_success"):
+                return
+            if session.get("finished_at") and not session.get("exit"):
+                return
+        raise ConnectorError("Reconnecting wasn't finished at Plaid. Try again.", "LINK_NOT_FINISHED")
 
     # -- data
 

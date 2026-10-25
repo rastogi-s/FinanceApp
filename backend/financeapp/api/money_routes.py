@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session as DbSession
 
-from financeapp import auth, crypto, demo, household, notify, paystub, reminders, review, search, sync
+from financeapp import auth, crypto, dedupe, demo, household, notify, paystub, reminders, review, search, sync
 from financeapp.ai import documents, extract, reading
 from financeapp.ai.providers import ProviderError
 from financeapp.ai.service import AIUnavailable
@@ -153,6 +153,7 @@ def sync_status(db: DbSession) -> dict:
 
 class StartLinkIn(BaseModel):
     kind: str = Field(default="banking", pattern="^(banking|investments)$")
+    connection_id: int | None = None  # reconnecting this one: sign in again on the same link, nothing new is added
 
 
 @router.post("/connections/{provider}/start")
@@ -175,7 +176,14 @@ def start_link(provider: str, body: StartLinkIn, request: Request, who: Signed =
             token = crypto.decrypt(existing.token_enc, "connection:snaptrade") if existing else None
             start = connector.start_link(f"household-{who.user.id}", return_url, body.kind, token=token)  # type: ignore[call-arg]
         else:
-            start = connector.start_link(f"household-{who.user.id}", return_url, body.kind)
+            existing = db.get(Connection, body.connection_id) if body.connection_id else None
+            if existing is not None and (existing.provider != provider or not existing.token_enc):
+                existing = None  # revoked (or another provider's): a fresh link is the only way back
+            token = crypto.decrypt(existing.token_enc, f"connection:{provider}") if existing else None
+            if token:
+                start = connector.start_link(f"household-{who.user.id}", return_url, body.kind, token=token)  # type: ignore[call-arg]
+            else:
+                start = connector.start_link(f"household-{who.user.id}", return_url, body.kind)
     except ConnectorError as e:
         raise HTTPException(502, str(e)) from None
     token = auth_challenge(db, who, provider, start.pending, existing.id if existing else None)
@@ -213,33 +221,72 @@ def finish_link(body: FinishLinkIn, request: Request, who: Signed = Depends(sign
     if connector is None:
         raise HTTPException(400, f"{provider} isn't set up on the server.")
     pending = json.loads(crypto.decrypt(c.data["pending"], f"link:{provider}"))
+    conn = db.get(Connection, c.data["connection_id"]) if c.data.get("connection_id") else None
+    already = False
+    linked = None
     try:
-        linked = connector.finish_link(pending)
+        if pending.get("update") and conn is not None:
+            # Plaid update mode: same Item, same token, same accounts. Only the sign-in at the bank was renewed.
+            connector.finish_update(pending)  # type: ignore[attr-defined]
+        elif provider == "plaid":
+            found = connector.link_result(pending)  # type: ignore[attr-defined]
+            same = dedupe.matches_login(
+                db, found.get("institution") or "", found.get("institution_id"), found["accounts"]
+            )
+            if same is not None and dedupe.healthy(same):
+                # This login is already linked and working: keep that link and don't take on a second Item.
+                conn, already = same, True
+            else:
+                linked = connector.exchange(found)  # type: ignore[attr-defined]
+                # A stale link of the same login is folded into this one by the sync (dedupe.merge_duplicates).
+                conn = db.scalar(
+                    select(Connection).where(
+                        Connection.provider == provider, Connection.external_id == linked.external_id
+                    )
+                )
+                if found.get("institution_id"):
+                    pending["institution_id"] = found["institution_id"]
+        else:
+            linked = connector.finish_link(pending)
     except ConnectorError as e:
         raise HTTPException(502, str(e)) from None
     db.delete(c)
-    conn = db.get(Connection, c.data["connection_id"]) if c.data.get("connection_id") else None
+    if linked is not None:
+        if conn is None:
+            conn = Connection(provider=provider, institution=linked.institution, created_by=who.user.id, state={})
+            db.add(conn)
+        conn.institution = linked.institution[:120]
+        conn.external_id = linked.external_id
+        conn.token_enc = crypto.encrypt(linked.token, f"connection:{provider}")
+        conn.state = {**(conn.state or {}), "institution": linked.institution}
+        if pending.get("institution_id"):
+            conn.state["institution_id"] = pending["institution_id"]
     if conn is None:
-        conn = db.scalar(
-            select(Connection).where(Connection.provider == provider, Connection.external_id == linked.external_id)
-        )
-    if conn is None:
-        conn = Connection(provider=provider, institution=linked.institution, created_by=who.user.id, state={})
-        db.add(conn)
-    conn.institution = linked.institution[:120]
-    conn.external_id = linked.external_id
-    conn.token_enc = crypto.encrypt(linked.token, f"connection:{provider}")
-    conn.status = "active"
-    conn.failure_count = 0
-    conn.last_error = None
-    conn.state = {**(conn.state or {}), "institution": linked.institution}
+        raise HTTPException(410, "That connection is gone. Start adding the account again.")
+    if not already:
+        conn.status = "active"
+        conn.failure_count = 0
+        conn.last_error = None
     db.flush()
-    audit(db, request, "connection_added", who.user.id, provider=provider, institution=linked.institution)
+    action = (
+        "connection_already_linked" if already else "connection_reconnected" if linked is None else "connection_added"
+    )
+    audit(db, request, action, who.user.id, provider=provider, institution=conn.institution)
     db.commit()
+    conn_id, institution = conn.id, conn.institution
     # First sync straight away, so the accounts show up.
-    run = sync.run(request.app.state.db, settings, "manual", only=[conn.id])
-    db.refresh(conn)
-    return {"connection": connection_json(db, conn), "synced": bool(run and run.ok)}
+    run = sync.run(request.app.state.db, settings, "manual", only=[conn_id])
+    db.expire_all()
+    conn = db.scalar(select(Connection).where(Connection.id == conn_id))
+    if conn is None:  # folded into the older link of the same login
+        conn = db.scalars(
+            select(Connection)
+            .where(
+                Connection.provider == provider, Connection.institution == institution, Connection.status != "revoked"
+            )
+            .order_by(Connection.id)
+        ).first()
+    return {"connection": connection_json(db, conn), "synced": bool(run and run.ok), "already_linked": already}
 
 
 class AccountPatch(BaseModel):

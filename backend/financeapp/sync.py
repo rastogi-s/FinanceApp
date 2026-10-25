@@ -14,7 +14,7 @@ from sqlalchemy import delete, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session as DbSession
 
-from financeapp import crypto, notify
+from financeapp import crypto, dedupe, notify
 from financeapp.categorize import categorize
 from financeapp.config import Settings
 from financeapp.connectors.base import (
@@ -145,12 +145,19 @@ def save_transactions(
         by_account[account.id] = {
             t.external_id: t for t in db.scalars(select(Transaction).where(Transaction.account_id == account.id))
         }
+    # After two links of one login were merged: history the other Item already brought in gets its new id.
+    orphans = dedupe.orphans_of(db, Transaction, by_account)
     added = []
     for data in txns:
         account = accounts.get(data.account_external_id)
         if account is None:
             continue
         t = by_account[account.id].get(data.external_id)
+        if t is None and orphans.get(account.id):
+            t = dedupe.claim(orphans[account.id], data, lambda o, d: o.amount_cents == d.amount_cents)
+            if t is not None:
+                t.external_id = data.external_id
+                by_account[account.id][data.external_id] = t
         if t is None:
             t = Transaction(
                 account_id=account.id,
@@ -186,12 +193,22 @@ def save_investment_transactions(
         (t.account_id, t.external_id): t
         for t in db.scalars(select(InvestmentTransaction).where(InvestmentTransaction.account_id.in_(ids)))
     }
+    orphans = dedupe.orphans_of(db, InvestmentTransaction, ids)
     added = 0
     for data in txns:
         account = accounts.get(data.account_external_id)
         if account is None:
             continue
         t = existing.get((account.id, data.external_id))
+        if t is None and orphans.get(account.id):
+            t = dedupe.claim(
+                orphans[account.id],
+                data,
+                lambda o, d: (o.amount_cents, o.type, o.symbol) == (d.amount_cents, d.type, d.symbol),
+            )
+            if t is not None:
+                t.external_id = data.external_id
+                existing[(account.id, data.external_id)] = t
         if t is None:
             t = InvestmentTransaction(account_id=account.id, external_id=data.external_id, source=source)
             db.add(t)
@@ -308,6 +325,21 @@ def _run(database: Database, settings: Settings, trigger: str, only: list[int] |
                         "a file from the bank instead.",
                         tags="warning",
                     )
+
+    dropped: list[tuple[str, str]] = []
+    try:
+        with database.session() as db:
+            merged = dedupe.merge_duplicates(db)
+        dropped = merged
+    except Exception:  # never fails the sync; the duplicate stays until the next one
+        log.exception("merging duplicate connections failed")
+    for token, item in dropped:  # only once the merge is saved: the Item no longer used stops syncing at Plaid
+        try:
+            connector = connector_for("plaid", settings)
+            if connector is not None:
+                connector.revoke(token, item)
+        except Exception:
+            log.warning("couldn't remove a duplicate Item at Plaid")
 
     with database.session() as db:
         pairs = match_transfers(db, on - timedelta(days=TRANSFER_DAYS))
