@@ -7,10 +7,14 @@ from typing import Literal
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
 
 from financeapp import demo, household, lookthrough, portfolio, quotes, security
+from financeapp.ai import moves
+from financeapp.ai.providers import ProviderError
+from financeapp.ai.service import AIUnavailable
 from financeapp.api.alert_routes import rule_json
 from financeapp.api.deps import Signed, audit, settings_of, signed_in
 from financeapp.models import AlertRule, Category, Fund, Preference, Quote, now
@@ -128,6 +132,45 @@ def refresh(request: Request, who: Signed = Depends(signed_in)) -> dict:
 
     threading.Thread(target=funds, name="lookthrough-refresh", daemon=True).start()
     return {"quotes": count or 0}
+
+
+@router.get("/portfolio/moves")
+def moves_offer(request: Request, who: Signed = Depends(signed_in)) -> dict:
+    """What "Any moves today?" would send, to whom and at most what cost, and the last answer. Nothing is sent."""
+    if who.demo:
+        return demo.moves_offer()
+    return moves.offer(db_of(request), settings_of(request), who.user.id)
+
+
+@router.get("/portfolio/moves/last")
+def moves_last(request: Request, who: Signed = Depends(signed_in)) -> dict:
+    """Only the last answer, for the Portfolio page's card (the offer looks up the market, this doesn't)."""
+    if who.demo:
+        return {"last": demo.moves_offer()["last"]}
+    return {"last": moves.last(db_of(request))}
+
+
+class MovesIn(BaseModel):
+    question: str = Field("", max_length=moves.MAX_QUESTION)
+
+
+@router.post("/portfolio/moves")
+def moves_review(body: MovesIn, request: Request, who: Signed = Depends(signed_in)) -> dict:
+    """A second opinion from AI on buying, selling or holding. Ideas only: nothing is traded."""
+    if who.demo:
+        raise HTTPException(403, "Not available with sample data.")
+    db = db_of(request)
+    try:
+        result = moves.review(request.app.state.db, db, settings_of(request), who.user.id, body.question)
+    except AIUnavailable as e:
+        raise HTTPException(409, str(e)) from None
+    except ProviderError as e:
+        raise HTTPException(502, e.message) from None
+    except moves.NothingToReview as e:
+        raise HTTPException(422, e.message) from None
+    count = len(result["answer"]["moves"])
+    audit(db, request, "portfolio_ai_reviewed", who.user.id, model=result["model"], moves=count)
+    return result
 
 
 @router.get("/securities/{symbol}")

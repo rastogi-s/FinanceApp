@@ -16,6 +16,7 @@ import {
   Minus,
   RefreshCw,
   Search,
+  Sparkles,
   Table2,
   X,
 } from "lucide-react";
@@ -34,6 +35,7 @@ import { useAuth } from "@/lib/auth";
 import { type Group, combine, dayCents, gain, gainCents, priceOf } from "@/lib/holdings";
 import { type Holding, type LinkedHousehold, resetHousehold, useApi } from "@/lib/household";
 import { type Income, dayLabel } from "@/lib/income";
+import { type MovesResult, VERDICT_TEXT, checkedAt } from "@/lib/moves";
 import { useRemembered } from "@/lib/nav";
 import {
   type Company,
@@ -114,6 +116,7 @@ function Body({ h }: { h: LinkedHousehold }) {
         </CardContent>
       </Card>
 
+      {h.holdings.length > 0 && <MovesLink />}
       <IncomeLink />
       <Allocation h={h} />
       {p ? <Largest p={p} /> : <ListSkeleton title="Largest positions" rows={6} />}
@@ -175,6 +178,35 @@ function WhenNear({ children, placeholder }: { children: ReactNode; placeholder:
 
 
 /** The way to Dividends & interest, with what they paid in the last year. */
+/** Any moves today?: the last AI review in a line, or the invitation to ask for one. */
+function MovesLink() {
+  const { data } = useApi<{ last: MovesResult | null }>("/api/portfolio/moves/last");
+  const last = data?.last;
+  return (
+    <Link
+      href="/portfolio/moves"
+      className="group flex items-center gap-4 rounded-xl border bg-card px-5 py-4 shadow-[0_1px_2px_rgb(0_0_0/0.04)] hover:bg-muted/40 md:col-span-2"
+    >
+      <span className="grid size-10 shrink-0 place-items-center rounded-full bg-accent text-primary">
+        <Sparkles className="size-5" aria-hidden />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block font-medium">Any moves today?</span>
+        <span className="line-clamp-2 block text-sm text-muted-foreground">
+          {last ? (
+            <>
+              {VERDICT_TEXT[last.answer.verdict]}: {last.answer.headline} Checked {checkedAt(last.at)}.
+            </>
+          ) : (
+            "Ask AI whether to buy, sell or hold, from your holdings, taxes, goals and today's market"
+          )}
+        </span>
+      </span>
+      <ChevronRight className="size-5 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5" aria-hidden />
+    </Link>
+  );
+}
+
 function IncomeLink() {
   const { data } = useApi<Income>("/api/income");
   const total = data ? data.dividends.received_12m_cents + data.interest.received_12m_cents : null;

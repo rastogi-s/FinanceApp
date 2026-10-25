@@ -1,5 +1,17 @@
 [
   {
+    "version": "0.35.0",
+    "title": "Any moves today?",
+    "features": [
+      {
+        "id": "portfolio-moves",
+        "title": "Ask AI whether to buy, sell or hold",
+        "body": "Portfolio has a new Any moves today? card. It asks the AI you set up for a careful second opinion from your holdings, gains against cost, which accounts are taxable, your mix and overlap through funds, cash and emergency fund, goals, tax bracket, and today's market with recent headlines on your largest holdings. You get a verdict, a few ideas with the reasoning, tax impact and what could go wrong, and a word on every holding. Type a question too, like where a bonus should go. You see exactly what's sent first (no account numbers or names), nothing is ever traded, and the last answer stays on the page. Turn it on in Settings, AI under Reviewing your portfolio. Ideas to consider, not financial advice.",
+        "tryIt": "/portfolio/moves"
+      }
+    ]
+  },
+  {
     "version": "0.34.0",
     "title": "One paycheck, however many accounts",
     "features": [
