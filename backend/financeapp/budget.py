@@ -708,6 +708,11 @@ def where_it_went(ledger: Ledger, moves: Moves, m: date, saved: int, put_away: i
     return lines, {"unlinked_cards": cards, "other_transfers": other_out}
 
 
+def employer_put_in(p: Paycheck) -> int:
+    """What the employer put in on top of the paycheck: the 401(k) match and its HSA contribution."""
+    return p.employer_match_cents + ((p.detail or {}).get("this") or {}).get("employer_hsa", 0)
+
+
 class UsualStub:
     """The household's usual pay stub, as shares of its take-home: what a paycheck that landed without its stub
     added most likely was before taxes, and what came off it. From recent stubs, leaving out bonus ones."""
@@ -726,7 +731,7 @@ class UsualStub:
         self.taxes = sum(p.taxes_cents for p in usual) / net
         self.savings = sum(p.savings_cents for p in usual) / net
         self.deductions = sum(p.gross_cents - p.taxes_cents - p.savings_cents - p.net_cents for p in usual) / net
-        self.match = sum(p.employer_match_cents for p in usual) / net
+        self.match = sum(employer_put_in(p) for p in usual) / net
 
 
 def savings_for(
@@ -762,7 +767,7 @@ def savings_for(
         est = {k: round(f["pay"] * getattr(usual, k)) for k in est}
     take_home = 0 if estimate else f["pay"]
     gross = sum(p.gross_cents for p in month_stubs)
-    match = (sum(p.employer_match_cents for p in month_stubs) + est["match"]) if include_match else 0
+    match = (sum(employer_put_in(p) for p in month_stubs) + est["match"]) if include_match else 0
     income = gross + est["gross"] + take_home + f["bonus"] + sum(f["other"].values()) + match
     if income <= 0:
         return None
@@ -798,7 +803,7 @@ def savings_for(
             if v["count"]
         ]
     if match:
-        money_in.append(item("Your employer's 401(k) match", match))
+        money_in.append(item("Your employer's 401(k) match and HSA money", match))
     if f["bonus"]:
         money_in.append(
             item(
@@ -987,6 +992,7 @@ def build(db: DbSession) -> dict:
                 "savings_cents": p.savings_cents,
                 "net_cents": p.net_cents,
                 "employer_match_cents": p.employer_match_cents,
+                "employer_hsa_cents": ((p.detail or {}).get("this") or {}).get("employer_hsa", 0),
                 "frequency": p.frequency,
                 "deposits": (p.detail or {}).get("deposits", []),
                 "deposit": {"date": matched[p.id].date.isoformat(), "merchant": matched[p.id].merchant}

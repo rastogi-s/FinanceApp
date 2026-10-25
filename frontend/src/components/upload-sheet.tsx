@@ -477,7 +477,8 @@ function StubPreview({ stub, cost, onCancel, onSaved }: { stub: Stub; cost?: num
     ["Taxes", stub.taxes_cents],
     ["401(k), HSA, ESPP", stub.savings_cents],
     ["Take-home", stub.net_cents],
-    ["Employer match", stub.employer_match_cents],
+    ["Employer 401(k) match", stub.employer_match_cents],
+    ...(stub.detail?.this?.employer_hsa ? ([["Employer HSA money", stub.detail.this.employer_hsa]] as [string, number][]) : []),
   ];
   const save = async () => {
     setBusy(true);

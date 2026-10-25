@@ -169,6 +169,9 @@ class StubAmounts(BaseModel):
     espp: int | None = Field(default=None, ge=0, le=MAX_CENTS)
     benefits: int | None = Field(default=None, ge=0, le=MAX_CENTS)
     stock: int | None = Field(default=None, ge=0, le=MAX_CENTS)
+    bonus: int | None = Field(default=None, ge=0, le=MAX_CENTS)
+    match: int | None = Field(default=None, ge=0, le=MAX_CENTS)  # the employer's, on top of pay
+    employer_hsa: int | None = Field(default=None, ge=0, le=MAX_CENTS)
 
 
 class StubDeposit(BaseModel):

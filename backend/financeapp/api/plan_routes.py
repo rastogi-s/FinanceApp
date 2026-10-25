@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session as DbSession
 
-from financeapp import budget, demo, guide, household, plan, sync, transfers
+from financeapp import budget, demo, guide, household, plan, sync, taxes, transfers
 from financeapp.api.deps import Signed, audit, settings_of, signed_in
 from financeapp.categorize import normalize_merchant
 from financeapp.models import Preference
@@ -34,7 +34,7 @@ def thin(points: list[dict]) -> list[dict]:
     return points[::-1][::7][::-1]
 
 
-def build(db: DbSession) -> dict:
+def build(db: DbSession, viewer_id: int | None = None) -> dict:
     h, inputs = household.build_with_plan(db)
     if inputs is None:
         return {"demo": False, "linked": False}
@@ -49,7 +49,7 @@ def build(db: DbSession) -> dict:
         "history": thin(history),
         "inputs": inputs,
         "projection": h["projection"],
-        "ideas": plan.ideas(db, on),
+        "ideas": plan.ideas(db, on) | {"hsa": taxes.hsa_for(db, viewer_id, on)},
     }
 
 
@@ -57,7 +57,7 @@ def build(db: DbSession) -> dict:
 def get_plan(request: Request, who: Signed = Depends(signed_in)) -> dict:
     if who.demo:
         return demo.plan_page()
-    return build(db_of(request))
+    return build(db_of(request), who.user.id)
 
 
 class SpendingIn(BaseModel):
@@ -89,7 +89,7 @@ def plan_settings(body: PlanIn, request: Request, who: Signed = Depends(signed_i
         changes["spending"] = {k: getattr(body.spending, k) for k in body.spending.model_fields_set}
     plan.set_preferences(db, changes)
     audit(db, request, "plan_changed", who.user.id, fields=sorted(changes))
-    return build(db)
+    return build(db, who.user.id)
 
 
 class MoneyInIn(BaseModel):
@@ -125,7 +125,7 @@ def money_in(body: MoneyInIn, request: Request, who: Signed = Depends(signed_in)
     if was_own or body.counts_as == "me":
         transfers.recheck_own(db, today() - timedelta(days=sync.TRANSFER_DAYS))
     audit(db, request, "money_in_changed", who.user.id, counts_as=body.counts_as)
-    return build(db)
+    return build(db, who.user.id)
 
 
 # ---- setup guide

@@ -64,6 +64,7 @@ def test_reads_an_adp_style_stub():
                 "retirement": 45_000,
                 "hsa": 15_000,
                 "benefits": 12_000,  # medical, taken before tax
+                "match": 22_500,
             },
             "ytd": {
                 "gross": 8_550_000,
@@ -75,6 +76,7 @@ def test_reads_an_adp_style_stub():
                 "retirement": 855_000,
                 "hsa": 285_000,
                 "benefits": 228_000,
+                "match": 427_500,
             },
             "deposits": [],
         },
@@ -195,6 +197,7 @@ def test_stub_whose_amounts_lose_their_punctuation():
     assert s.taxes_cents == 700_00 + 71_20 + 190_00  # Social Security is maxed out: year to date only
     assert s.savings_cents == 490_00 + 200_00 + 245_00 + 300_00  # not Espp_1's year-to-date
     assert s.employer_match_cents == 0  # the match line is year to date only
+    assert s.ytd["match"] == 4_000_00 and s.ytd["stock"] == 40_000_00  # ...which the yearly income page uses
     assert s.detail["espp"] == 490_00 and s.detail["roth"] == 300_00 and s.detail["hsa"] == 200_00
     assert s.ytd["gross"] == 128_380_00 and s.ytd["federal"] == 12_600_00
     assert s.frequency == "biweekly" and s.pay_date.isoformat() == "2026-10-16"
@@ -203,3 +206,17 @@ def test_stub_whose_amounts_lose_their_punctuation():
     assert (
         paystub.restore_amounts("MORRISVILLE NC 27560-5299 3060 OLSEN DR") == "MORRISVILLE NC 27560-5299 3060 OLSEN DR"
     )
+
+
+def test_employer_hsa_is_kept_apart_from_the_match_and_bonus_pay_is_read():
+    rows = [
+        *ADP[:7],
+        [(50, "Annual Bonus"), (300, "6,000.00"), (450, "6,000.00")],
+        *ADP[7:],
+        [(50, "Employer HSA Contribution"), (300, "38.46"), (450, "730.74")],
+    ]
+    stub = paystub.read(pdf(rows))
+    assert stub.employer_match_cents == 22_500  # the 401(k) match only
+    assert stub.detail["employer_hsa"] == 3_846 and stub.ytd["employer_hsa"] == 73_074
+    assert stub.detail["bonus"] == 600_000 and stub.ytd["bonus"] == 600_000
+    assert stub.savings_cents == 60_000  # the employer's HSA money isn't taken out of pay

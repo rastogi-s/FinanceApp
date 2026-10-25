@@ -71,6 +71,7 @@ export type Paycheck = {
   savings_cents: number;
   net_cents: number;
   employer_match_cents: number;
+  employer_hsa_cents?: number;
   frequency: Frequency | null;
   deposit: { date: string; merchant: string } | null;
 };

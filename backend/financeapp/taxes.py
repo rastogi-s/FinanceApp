@@ -69,6 +69,7 @@ DEFAULTS: dict[str, Any] = {
     "children": 0,  # under 17 at the end of the year
     "other_dependents": 0,
     "qualified_share": 90,  # % of dividends that are qualified, until a 1099-DIV says
+    "hsa_coverage": None,  # self | family | none: which yearly HSA limit applies (self until answered)
     "amounts": {},  # typed numbers by item key, in cents
 }
 
@@ -88,6 +89,7 @@ ITEMS: dict[str, tuple[str, bool]] = {
     "lt_gains": ("Long-term gains (held over a year)", True),
     "other_income": ("Other income", True),
     "adjustments": ("Adjustments (IRA deduction, student loan interest)", False),
+    "hsa_outside": ("HSA money you put in yourself, outside payroll", False),
     "itemized": ("Itemized deductions", False),
     "state_itemized": ("State itemized deductions", False),
     "other_credits": ("Other credits", False),
@@ -102,7 +104,10 @@ ITEMS: dict[str, tuple[str, bool]] = {
     "last_year_tax": ("Last year's total federal tax", False),
 }
 SPOUSE_ITEMS = ("spouse_wages", "spouse_pretax", "spouse_federal_withheld", "spouse_state_withheld")
-KINDS = ("gross", "federal", "state", "social_security", "medicare", "retirement", "hsa_benefits", "stock")
+KINDS = (
+    "gross", "federal", "state", "social_security", "medicare", "retirement", "hsa_benefits", "stock",
+    "hsa", "employer_hsa",  # your own HSA money taken from pay (inside hsa_benefits) and your employer's on top
+)  # fmt: skip
 
 
 # ---- tables
@@ -196,6 +201,8 @@ def split(p: Paycheck, state_rate: float, state_allowance: int) -> tuple[dict[st
         "retirement": retirement,
         "hsa_benefits": hsa_benefits,
         "stock": d.get("stock", 0),
+        "hsa": d.get("hsa", 0),
+        "employer_hsa": d.get("employer_hsa", 0),
         **{k: v or 0 for k, v in taxes.items()},
     }
     return out, estimated
@@ -377,9 +384,7 @@ def facts(db: DbSession, viewer_id: int, today: date) -> dict:
     from financeapp import plan
 
     people = {u.id: u.name for u in db.scalars(select(User))}
-    stubs: dict[int | None, list[Paycheck]] = {}
-    for p in db.scalars(select(Paycheck).order_by(Paycheck.date.desc(), Paycheck.id.desc())):
-        stubs.setdefault(p.user_id, []).append(p)
+    stubs = stubs_by_person(db)
     return {
         "viewer_id": viewer_id,
         "people": people,
@@ -413,26 +418,26 @@ def lookup(rows: list, amount: int) -> int:
     return 0
 
 
-def estimate(t: dict, prof: dict, f: dict, today: date) -> dict:
-    fed = t["federal"]
-    year = today.year
-    status = prof["filing_status"] or "single"
-    joint = status == "mfj"
+def state_rates(t: dict, prof: dict, status: str) -> tuple[float, float, float]:
+    """The state's rate, standard deduction (dollars) and supplemental withholding rate."""
     state_code = prof["state"]
     state_table = t["states"].get(state_code)
     if state_table:
-        state_rate = state_table["rate"]
-        state_std = state_table["standard_deduction"][status]
-        supplemental = state_table.get("supplemental_withholding_rate", state_rate)
-    else:
-        state_rate = 0.0 if state_code in NO_WAGE_TAX else (prof["state_rate"] or 0) / 100
-        state_std = 0
-        supplemental = state_rate
-    typed = prof["amounts"]
+        rate = state_table["rate"]
+        return rate, state_table["standard_deduction"][status], state_table.get("supplemental_withholding_rate", rate)
+    rate = 0.0 if state_code in NO_WAGE_TAX else (prof["state_rate"] or 0) / 100
+    return rate, 0, rate
 
-    # Whose pay counts: everyone's on a joint return, otherwise the person looking (or the only person with stubs).
+
+def people_pay(t: dict, prof: dict, f: dict, year: int) -> tuple[dict, int | None]:
+    """Each counted person's pay for the year (project_pay), and whose pay stock still to vest goes with. Everyone's
+    counts on a joint return, otherwise the person looking (or the only person with stubs)."""
+    fed = t["federal"]
+    status = prof["filing_status"] or "single"
+    state_rate, state_std, supplemental = state_rates(t, prof, status)
+    typed = prof["amounts"]
     with_stubs = [uid for uid, s in f["stubs"].items() if s]
-    if joint:
+    if status == "mfj":
         counted = with_stubs
     elif f["viewer_id"] in with_stubs or len(with_stubs) != 1:
         counted = [f["viewer_id"]] if f["viewer_id"] in with_stubs else []
@@ -458,7 +463,69 @@ def estimate(t: dict, prof: dict, f: dict, today: date) -> dict:
             },
             "paychecks_left": 0,
         }
+    return pay, primary
+
+
+def hsa_check(t: dict, prof: dict, birth_year: int | None, year: int, full: dict, outside: int, left: int) -> dict:
+    """Your HSA money and your employer's share one yearly limit (self-only or family coverage, plus $1,000 from 55).
+    Both come from the stubs for the whole year; money put in outside payroll is typed in."""
+    limits = t["federal"]["limits"]
+    coverage = prof.get("hsa_coverage")
+    limit = dollars(limits["hsa_family" if coverage == "family" else "hsa_self"])
+    catch_up = bool(birth_year and year - birth_year >= 55)
+    if catch_up:
+        limit += dollars(limits.get("hsa_catch_up", 1000))
+    own, employer = full.get("hsa", 0), full.get("employer_hsa", 0)
+    total = own + employer + outside
+    room = limit - total
+    return {
+        "coverage": coverage,
+        "has_hsa": total > 0 or coverage in ("self", "family"),
+        "limit_cents": limit,
+        "self_cents": dollars(limits["hsa_self"]),
+        "family_cents": dollars(limits["hsa_family"]),
+        "catch_up": catch_up,
+        "own_cents": own,
+        "employer_cents": employer,
+        "outside_cents": outside,
+        "total_cents": total,
+        "room_cents": max(room, 0),
+        "over_cents": max(-room, 0),
+        "paychecks_left": left,
+        "per_paycheck_cents": math.floor(room / left) if room > 0 and left else 0,
+        "year": year,
+    }
+
+
+def estimate(t: dict, prof: dict, f: dict, today: date) -> dict:
+    fed = t["federal"]
+    year = today.year
+    status = prof["filing_status"] or "single"
+    joint = status == "mfj"
+    state_code = prof["state"]
+    state_table = t["states"].get(state_code)
+    state_rate = state_rates(t, prof, status)[0]
+    typed = prof["amounts"]
+    stock_to_come = typed.get("stock_to_come", 0)
+    pay, primary = people_pay(t, prof, f, year)
     full = {k: sum(p["full"][k] for p in pay.values()) for k in KINDS}
+    hsa = hsa_check(
+        t,
+        prof,
+        f.get("birth_year"),
+        year,
+        full,
+        typed.get("hsa_outside", 0),
+        pay[primary]["paychecks_left"] if primary in pay else 0,
+    )
+    # Over the shared limit: the outside money stops being deductible first, then your own payroll HSA money is
+    # taxed again, then your employer's extra is taxed as pay.
+    payroll_over = max(hsa["own_cents"] + hsa["employer_cents"] - hsa["limit_cents"], 0)
+    own_over = min(payroll_over, hsa["own_cents"])
+    employer_over = payroll_over - own_over
+    outside_deductible = min(
+        hsa["outside_cents"], max(hsa["limit_cents"] - hsa["own_cents"] - hsa["employer_cents"], 0)
+    )
 
     # 401(k) deferrals stop at the yearly limit (plus the catch-up from 50).
     limit = dollars(fed["limits"]["401k"])
@@ -475,7 +542,7 @@ def estimate(t: dict, prof: dict, f: dict, today: date) -> dict:
     derived = {
         "wages": full["gross"],
         "retirement": retirement,
-        "hsa_benefits": full["hsa_benefits"],
+        "hsa_benefits": full["hsa_benefits"] - own_over,
         "interest": inv["interest_cents"],
         "dividends": inv["dividends_cents"],
         "qualified_dividends": round(dividends * qualified_ratio),
@@ -503,11 +570,13 @@ def estimate(t: dict, prof: dict, f: dict, today: date) -> dict:
         gains_ordinary, gains_preferred = 0, lt + st
     else:
         gains_ordinary, gains_preferred = st + lt, 0
-    wages_taxed = v("wages") - v("retirement") - v("hsa_benefits") + v("spouse_wages") - v("spouse_pretax")
+    wages_taxed = (
+        v("wages") - v("retirement") - v("hsa_benefits") + v("spouse_wages") - v("spouse_pretax") + employer_over
+    )
     interest, dividends = v("interest"), v("dividends")
     qualified = min(v("qualified_dividends"), dividends)
     income = wages_taxed + interest + dividends + gains_ordinary + gains_preferred + v("other_income")
-    agi = max(income - v("adjustments"), 0)
+    agi = max(income - v("adjustments") - min(v("hsa_outside"), outside_deductible), 0)
     standard = dollars(fed["standard_deduction"][status])
     itemizing = prof["deduction"] == "itemized"
     deduction = v("itemized") if itemizing else standard
@@ -684,6 +753,11 @@ def estimate(t: dict, prof: dict, f: dict, today: date) -> dict:
     )
     notes["hsa_benefits"] = (
         "From the stubs: HSA and health, dental and vision premiums taken before tax. Lowers every tax."
+        + (f" Less {money(own_over)} of HSA money over the yearly limit, which is taxed." if own_over else "")
+    )
+    notes["hsa_outside"] = (
+        "Money you put into your HSA yourself, not through payroll. Deductible up to what's left of the yearly limit "
+        "after your payroll HSA money and your employer's."
     )
     notes["stock_to_come"] = (
         "RSU vests or ESPP sales the rest of the year. Withheld at the 22% federal supplemental rate"
@@ -854,6 +928,7 @@ def estimate(t: dict, prof: dict, f: dict, today: date) -> dict:
             "balance_cents": federal_balance + fica_balance + state["balance_cents"],
         },
         "hints": hints,
+        "hsa": hsa | {"taxed_cents": own_over + employer_over},
         "sources": fed["sources"],
         "assumptions": assumptions(t, year, status, prof, split_estimated),
     }
@@ -891,3 +966,27 @@ def short(iso: str) -> str:
 
 def build(db: DbSession, viewer_id: int, today: date) -> dict:
     return estimate(table_for(today.year), profile(db), facts(db, viewer_id, today), today)
+
+
+def stubs_by_person(db: DbSession) -> dict[int | None, list[Paycheck]]:
+    stubs: dict[int | None, list[Paycheck]] = {}
+    for p in db.scalars(select(Paycheck).order_by(Paycheck.date.desc(), Paycheck.id.desc())):
+        stubs.setdefault(p.user_id, []).append(p)
+    return stubs
+
+
+def hsa_for(db: DbSession, viewer_id: int | None, today: date) -> dict | None:
+    """The HSA check on its own (for Plan), without the rest of the estimate."""
+    from financeapp import plan
+
+    stubs = stubs_by_person(db)
+    if not any(stubs.values()):
+        return None
+    t = table_for(today.year)
+    prof = profile(db)
+    f = {"viewer_id": viewer_id, "stubs": stubs}
+    pay, primary = people_pay(t, prof, f, today.year)
+    full = {k: sum(p["full"][k] for p in pay.values()) for k in KINDS}
+    left = pay[primary]["paychecks_left"] if primary in pay else 0
+    birth = plan.preferences(db).get("birth_year")
+    return hsa_check(t, prof, birth, today.year, full, prof["amounts"].get("hsa_outside", 0), left)
