@@ -68,7 +68,18 @@ const day = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", t
  * app can't read by itself (a PDF statement, a screenshot, a spreadsheet in another layout) comes back as an offer
  * to read it with AI, showing what would be sent; it's only sent if the person says yes.
  */
-export function UploadSheet({ open, onOpenChange, onSaved }: { open: boolean; onOpenChange: (o: boolean) => void; onSaved: () => void }) {
+export function UploadSheet({
+  open,
+  onOpenChange,
+  onSaved,
+  accountId,
+}: {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  onSaved: () => void;
+  /** The account this upload is for (from an upload reminder): a one-account file goes into it unless changed. */
+  accountId?: number;
+}) {
   const [preview, setPreview] = useState<Preview | null>(null);
   const [offer, setOffer] = useState<{ file: File; offer: AIOffer } | null>(null);
   const [stub, setStub] = useState<{ stub: Stub; cost?: number } | null>(null);
@@ -117,7 +128,9 @@ export function UploadSheet({ open, onOpenChange, onSaved }: { open: boolean; on
       setPreview(p);
       setTargets(
         p.accounts.map((a) => ({
-          account_id: a.suggested_account_id,
+          account_id:
+            a.suggested_account_id ??
+            (accountId !== undefined && p.accounts.length === 1 && p.targets.some((t) => t.id === accountId) ? accountId : null),
           name: a.name,
           institution: a.institution,
           type: a.type,

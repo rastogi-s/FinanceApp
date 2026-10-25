@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session as DbSession
 
-from financeapp import auth, crypto, dedupe, demo, household, notify, paystub, review, search, sync
+from financeapp import auth, crypto, dedupe, demo, household, notify, paystub, reminders, review, search, sync
 from financeapp.ai import documents, extract, reading
 from financeapp.ai.providers import ProviderError
 from financeapp.ai.service import AIUnavailable
@@ -60,6 +60,10 @@ def get_household(request: Request, who: Signed = Depends(signed_in)) -> dict:
 
 def connection_json(db: DbSession, c: Connection) -> dict:
     accounts = []
+    due = {}
+    if c.provider in reminders.PROVIDERS:
+        rows = reminders.status(db, reminders.local_today(db))
+        due = {r["account_id"]: r for r in rows if r["connection_id"] == c.id}
     for a in db.scalars(select(Account).where(Account.connection_id == c.id).order_by(Account.type, Account.name)):
         b = db.scalar(select(Balance).where(Balance.account_id == a.id).order_by(Balance.date.desc()).limit(1))
         match = None
@@ -81,6 +85,7 @@ def connection_json(db: DbSession, c: Connection) -> dict:
                 "statement_cents": a.statement_cents,
                 "statement_date": a.statement_date.isoformat() if a.statement_date else None,
                 "statement_diff_percent": match,
+                "reminder": reminder_json(due[a.id]) if a.id in due else None,
             }
         )
     return {
@@ -93,6 +98,11 @@ def connection_json(db: DbSession, c: Connection) -> dict:
         "created_at": c.created_at.isoformat(),
         "accounts": accounts,
     }
+
+
+def reminder_json(r: dict) -> dict:
+    keys = ("every", "day", "newest", "statement", "due", "is_due", "days_late", "snoozed_until")
+    return {k: r[k] for k in keys}
 
 
 @router.get("/connections")
@@ -355,7 +365,43 @@ def set_balance(account_id: int, body: BalanceIn, request: Request, who: Signed 
     if a is None or conn is None or conn.provider not in ("manual", "file"):
         raise HTTPException(400, "Only manual and uploaded accounts take a typed-in balance.")
     sync.save_balance(db, a.id, sync.today(), body.balance_cents)
+    conn.last_synced_at = now()
+    reminders.uploaded(db, [a.id])
     return connection_json(db, conn)
+
+
+class ReminderIn(BaseModel):
+    every: str = Field(pattern="^(monthly|quarterly|weekly|off)$")
+    day: int | None = Field(default=None, ge=1, le=31)  # the statement's closing day; None: the end of the month
+
+
+@router.put("/accounts/{account_id}/reminder")
+def set_reminder(account_id: int, body: ReminderIn, request: Request, who: Signed = Depends(signed_in)) -> dict:
+    """How often to be reminded to upload a statement for an account that only gets new data by hand."""
+    no_demo(who)
+    db = db_of(request)
+    a = db.get(Account, account_id)
+    conn = db.get(Connection, a.connection_id) if a else None
+    if a is None or conn is None or conn.provider not in reminders.PROVIDERS:
+        raise HTTPException(400, "Only uploaded and typed-in accounts need upload reminders.")
+    reminders.save_pref(db, a.id, every=body.every, day=body.day, snoozed_until=None)
+    return connection_json(db, conn)
+
+
+class SnoozeIn(BaseModel):
+    days: int = Field(ge=1, le=7)
+
+
+@router.post("/accounts/{account_id}/reminder/snooze")
+def snooze_reminder(account_id: int, body: SnoozeIn, request: Request, who: Signed = Depends(signed_in)) -> dict:
+    no_demo(who)
+    db = db_of(request)
+    a = db.get(Account, account_id)
+    conn = db.get(Connection, a.connection_id) if a else None
+    if a is None or conn is None or conn.provider not in reminders.PROVIDERS:
+        raise HTTPException(404, "No such account.")
+    reminders.snooze(db, a.id, body.days, reminders.local_today(db))
+    return {"ok": True}
 
 
 def revoke_connection(settings, c: Connection) -> str | None:
@@ -644,6 +690,7 @@ def commit_import(import_id: int, body: CommitIn, request: Request, who: Signed 
     as_of = date.fromisoformat(imp.parsed["as_of"])
     totals = {"holdings": 0, "transactions": 0, "accounts": 0}
     new_connections: dict[str, Connection] = {}
+    saved_into: list[int] = []
     for target in body.targets:
         if target.skip or not 0 <= target.index < len(imp.parsed["accounts"]):
             continue
@@ -697,8 +744,10 @@ def commit_import(import_id: int, body: CommitIn, request: Request, who: Signed 
         if fa["balance_cents"] is not None:
             sync.save_balance(db, account.id, as_of, fa["balance_cents"])
         conn.last_synced_at = now()
+        saved_into.append(account.id)
         totals["accounts"] += 1
     imp.status = "committed"
+    reminders.uploaded(db, saved_into)
     db.flush()
     match_transfers(db, as_of - timedelta(days=400))
     categorize(db)

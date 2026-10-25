@@ -9,7 +9,7 @@ import statistics
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
-from financeapp import forecast, goals, plan
+from financeapp import forecast, goals, plan, reminders
 from financeapp.models import Goal, GoalFunding
 
 SEED = 20261019
@@ -193,7 +193,7 @@ def household(today: date | None = None) -> dict:
                 for i, (n, v) in enumerate(DEBTS)
             ],
         },
-        "health": {"stale": [], "last_sync_ok": True},
+        "health": {"stale": [], "last_sync_ok": True, "uploads": [_upload_due()]},
         "holdings": [
             {
                 "symbol": s,
@@ -243,6 +243,24 @@ def categories() -> list[dict]:
     return [{"id": i, "name": n, "kind": k} for i, (n, k) in enumerate(CATEGORY_NAMES, 1)]
 
 
+def _upload_reminder() -> dict:
+    """The sample HSA comes from uploaded statements, and last month's is waiting to be uploaded."""
+    today = datetime.now(UTC).date()
+    newest = reminders.statement_on(*reminders.add_months(today.year, today.month, -2), None)
+    if reminders.due_on("monthly", None, newest) > today:  # early in the month: the one before is the late one
+        newest = reminders.statement_on(*reminders.add_months(today.year, today.month, -3), None)
+    statement = reminders.next_statement("monthly", None, newest)
+    due = reminders.due_on("monthly", None, newest)
+    return {"every": "monthly", "day": None, "newest": newest.isoformat(), "statement": statement.isoformat(),
+            "due": due.isoformat(), "is_due": True, "days_late": (today - due).days, "snoozed_until": None}  # fmt: skip
+
+
+def _upload_due() -> dict:
+    r = _upload_reminder()
+    return {"account_id": 8, "name": "HealthEquity HSA ••0456", "provider": "file", "every": r["every"],
+            "newest": r["newest"], "statement": r["statement"], "days_late": r["days_late"]}  # fmt: skip
+
+
 def connections() -> dict:
     """The Settings → Accounts page in demo mode."""
     today = datetime.now(UTC)
@@ -264,6 +282,7 @@ def connections() -> dict:
             "statement_cents": None,
             "statement_date": None,
             "statement_diff_percent": None,
+            "reminder": None,
         }
 
     def connection(i: int, provider: str, institution: str, accounts: list[dict], status: str = "active") -> dict:
@@ -311,7 +330,12 @@ def connections() -> dict:
                 6,
                 "file",
                 "HealthEquity",
-                [account(8, "HealthEquity HSA", "investment", _cents(by_account["HealthEquity HSA"]), "0456")],
+                [
+                    {
+                        **account(8, "HealthEquity HSA", "investment", _cents(by_account["HealthEquity HSA"]), "0456"),
+                        "reminder": _upload_reminder(),
+                    }
+                ],
             ),
         ],
         "revoked": [],
