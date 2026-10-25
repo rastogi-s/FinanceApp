@@ -83,9 +83,15 @@ function Accounts() {
     router.replace("/settings/accounts");
     if (!token) return;
     setFinishing(true);
-    api<{ connection: Connection; synced: boolean }>("/api/connections/finish", { body: { token } })
+    api<{ connection: Connection; synced: boolean; already_linked?: boolean }>("/api/connections/finish", {
+      body: { token },
+    })
       .then((r) => {
-        toast(`${r.connection.institution} is linked${r.synced ? " and synced" : ". Its first sync is on the way"}.`);
+        toast(
+          r.already_linked
+            ? `${r.connection.institution} was already linked, so nothing was added twice.`
+            : `${r.connection.institution} is linked${r.synced ? " and synced" : ". Its first sync is on the way"}.`,
+        );
         changed();
       })
       .catch((e: Error) => toast(e.message, "error"))
@@ -106,9 +112,16 @@ function Accounts() {
     }
   };
 
-  const link = async (provider: "plaid" | "snaptrade", kind: "banking" | "investments" = "banking") => {
+  // With a connection: reconnect it (sign in again on the same link), so nothing new is added and nothing counts twice.
+  const link = async (
+    provider: "plaid" | "snaptrade",
+    kind: "banking" | "investments" = "banking",
+    connectionId?: number,
+  ) => {
     try {
-      const r = await api<{ url: string; token: string }>(`/api/connections/${provider}/start`, { body: { kind } });
+      const r = await api<{ url: string; token: string }>(`/api/connections/${provider}/start`, {
+        body: { kind, connection_id: connectionId ?? null },
+      });
       try {
         sessionStorage.setItem(LINK_KEY, r.token);
       } catch {}
@@ -173,7 +186,7 @@ function Accounts() {
               key={c.id}
               connection={c}
               onEdit={(account) => setEditing({ account, connection: c })}
-              onRelink={() => (c.provider === "plaid" || c.provider === "snaptrade") && link(c.provider)}
+              onRelink={() => (c.provider === "plaid" || c.provider === "snaptrade") && link(c.provider, "banking", c.id)}
               onUpload={() => setUploading(true)}
             />
           ))}
