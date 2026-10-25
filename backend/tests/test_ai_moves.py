@@ -161,6 +161,13 @@ def test_news_feed_parsing():
     ]
 
 
+def test_question_is_scrubbed():
+    q = moves.scrub_question("Ask  Shubham Rastogi at me@example.com about acct 1234 5678 9012", ["Shubham Rastogi"],
+                             ["me@example.com"])  # fmt: skip
+    assert q == "Ask [name] at [email] about acct [number]"
+    assert moves.scrub_question(" " * 10_000 + "x", [], []) == "x"
+
+
 def test_demo_has_a_sample_answer(tmp_path):
     from financeapp import demo
 

@@ -18,6 +18,7 @@ The answer is ideas to consider, not advice: the page says so, nothing is traded
 import contextlib
 import json
 import logging
+import re
 import threading
 from collections import defaultdict
 from datetime import UTC, date, datetime
@@ -337,7 +338,7 @@ def facts(db: DbSession, settings: Settings, viewer_id: int, question: str = "")
     held_by_size = [r["symbol"] for r in shown if security.valid(r["symbol"])]
     news = {s: h for s in held_by_size[:NEWS_SYMBOLS] if (h := headlines(settings, s))}
     as_of = portfolio.prices_as_of(ps)
-    q = redact(" ".join(question.split())[:MAX_QUESTION], names, emails).text if question.strip() else ""
+    q = scrub_question(question, names, emails)
     return {
         "today": on.isoformat(),
         "market_open": quotes.market_open(now()),
@@ -381,6 +382,21 @@ def facts(db: DbSession, settings: Settings, viewer_id: int, question: str = "")
         "question": q,
         "_accounts": sorted({label[p.account_id] for p in ps if p.account_id in by_id}),
     }
+
+
+DIGITS = re.compile(r"\d(?:[ -]?\d){7,}")
+
+
+def scrub_question(question: str, names: list[str], emails: list[str]) -> str:
+    """The household's own words, minus their names, emails and anything like an account number. Literal matches and
+    one simple pattern only (redact's statement patterns aren't for text typed straight into a request)."""
+    q = " ".join(question.split())[:MAX_QUESTION]
+    q = DIGITS.sub("[number]", q)
+    pieces = {e for e in emails if e} | {n.strip() for n in names if n and len(n.strip()) >= 2}
+    pieces |= {p for n in names if n for p in n.split() if len(p) >= 3}
+    for piece in sorted(pieces, key=len, reverse=True):
+        q = re.compile(rf"(?<!\w){re.escape(piece)}(?!\w)", re.I).sub("[name]" if "@" not in piece else "[email]", q)
+    return q
 
 
 def sendable(f: dict) -> dict:
