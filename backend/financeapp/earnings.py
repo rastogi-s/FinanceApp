@@ -49,7 +49,8 @@ LABELS = {
 }
 HISTORY_YEARS = 4  # how far back linked transactions are looked through
 COVERED_DAYS = 3  # a deposit this close after the last stub's date is that stub's paycheck
-START_DAYS = 10  # data starting this far into January still counts the whole year
+START_DAYS = 10  # slack, in days, past a pay period for the first and last paychecks of a whole year
+UNSPLIT_SLACK = 1.03  # year-to-date base this far over the regular paychecks so far is other pay
 EVEN = 0.25  # a raise within this many points of inflation kept up
 MAX_NOTE = 200
 MAX_LETTERS = 40
@@ -251,7 +252,41 @@ def pay_rate(stubs: list[Paycheck], letters: list[dict], end: date) -> tuple[int
     return rate, how
 
 
-def year_row(year: int, stubs: list[Paycheck], days: list[Payday], usual: Usual, start: date | None) -> dict:
+def max_regular(splits: list[dict]) -> int | None:
+    """The largest base pay on a regular stub (no bonus, not a stock-only stub)."""
+    regular = [
+        s["base"] for s in splits if not s["bonus"] and s["base"] > 0 and not (s["rsu"] and s["base"] < s["rsu"])
+    ]
+    return max(regular, default=None)
+
+
+def paychecks_through(last: date, frequency: str | None) -> int | None:
+    """Paydays from January 1 through `last`, a payday, on the pay schedule."""
+    jan1 = date(last.year, 1, 1)
+    if frequency in ("weekly", "biweekly"):
+        return (last - jan1).days // (7 if frequency == "weekly" else 14) + 1
+    if frequency == "semimonthly":
+        return (last.month - 1) * 2 + (2 if last.day >= 28 else 1 if last.day >= 13 else 0)
+    if frequency == "monthly":
+        return last.month
+    return None
+
+
+def whole_year(
+    year: int, ys: list[Paycheck], yd: list[Payday], covered_until: date | None, frequency: str | None
+) -> bool:
+    """Whether the year's pay is all here: a year-to-date stub counts from January; otherwise the first paycheck
+    seen has to land within one pay period of January 1 (accounts linked later only show part of the year), and a
+    past year's last one within a pay period of December 31."""
+    gap = {"weekly": 7, "biweekly": 14, "semimonthly": 16, "monthly": 31}.get(frequency or "", 31) + START_DAYS
+    seen = [p.date for p in ys] + [d.day for d in yd]
+    if not seen:
+        return False
+    starts = covered_until is not None or min(seen) <= date(year, 1, 1) + timedelta(days=gap)
+    return starts and max(seen) >= date(year, 12, 31) - timedelta(days=gap)
+
+
+def year_row(year: int, stubs: list[Paycheck], days: list[Payday], usual: Usual) -> dict:
     """One year from its stubs and paydays, before anything typed in."""
     ys = [p for p in stubs if p.date.year == year]
     yd = [d for d in days if d.day.year == year]
@@ -274,14 +309,31 @@ def year_row(year: int, stubs: list[Paycheck], days: list[Payday], usual: Usual,
         gross_sum = sum(p.gross_cents for p in ys)
         if ytd.get("gross") and ytd["gross"] >= gross_sum - 100:
             scale = ytd["gross"] / gross_sum if gross_sum else 1
-            rsu = ytd.get("stock", sums["rsu"])
-            bonus = ytd.get("bonus", sums["bonus"])
+
+            # A stub only prints a year-to-date stock or bonus line when that kind of pay is on it, so the year's
+            # newest figure can be on an earlier stub. Year-to-date only grows, so the largest seen is the latest.
+            def latest(kind: str, fallback: int) -> int:
+                return max((ytd_of(p)[kind] for p in ys if kind in ytd_of(p)), default=fallback)
+
+            rsu = latest("stock", sums["rsu"])
+            bonus = latest("bonus", sums["bonus"])
+            base = ytd["gross"] - rsu - bonus
+            # More than the regular paychecks so far could have paid is pay the stubs didn't say the kind of
+            # (often a stock vest or bonus on a stub that wasn't uploaded): it's other pay, not base.
+            most = max_regular(splits)
+            periods = paychecks_through(last.date, frequency_of(ys) or frequency_of(stubs))
+            other = 0
+            if most and periods and base > most * periods * UNSPLIT_SLACK:
+                other = base - round(most * periods)
+                base -= other
+                how["other"] = "unsplit"
             out |= {
                 "rsu": rsu,
                 "bonus": bonus,
-                "base": ytd["gross"] - rsu - bonus,
-                "match": ytd.get("match", round(sums["match"] * scale)),
-                "employer_hsa": ytd.get("employer_hsa", round(sums["employer_hsa"] * scale)),
+                "base": base,
+                "other": other,
+                "match": latest("match", round(sums["match"] * scale)),
+                "employer_hsa": latest("employer_hsa", round(sums["employer_hsa"] * scale)),
             }
             how |= dict.fromkeys(("base", "bonus", "rsu", "match", "employer_hsa"), "ytd")
             covered_until = last.date
@@ -309,7 +361,7 @@ def year_row(year: int, stubs: list[Paycheck], days: list[Payday], usual: Usual,
             out["bonus" if d.bonus else "base"] += d.cents
             how["bonus" if d.bonus else "base"] = "take_home"
 
-    whole_from_start = covered_until is not None or (start is not None and start <= date(year, 1, START_DAYS))
+    whole_from_start = whole_year(year, ys, yd, covered_until, frequency_of(stubs))
     return {
         "year": year,
         "amounts": out,
@@ -390,7 +442,7 @@ def assemble(stubs: list[Paycheck], days: list[Payday], start: date | None, pref
     first = min(first_years, default=today.year)
     rows = []
     for year in range(first, today.year + 1):
-        row = year_row(year, stubs, days, usual, start)
+        row = year_row(year, stubs, days, usual)
         typed = typed_years.get(year, {})
         for k in FIELDS:
             if k in typed:
@@ -483,7 +535,8 @@ def assemble(stubs: list[Paycheck], days: list[Payday], start: date | None, pref
         "now": now,
         "letters": letters,
         "has_stubs": bool(stubs),
-        "linked_from": start.isoformat() if start else None,
+        # The first paycheck the linked accounts show (an account linked later can start well after the others).
+        "linked_from": (days[0].day if days else start).isoformat() if days or start else None,
         "labels": LABELS,
         "inflation": {"sources": inflation()["sources"], "note": inflation()["note"]},
         "demo": False,

@@ -266,3 +266,26 @@ def test_a_raise_letter_is_read_with_ai_after_a_yes(client, home, fixed_today, f
     assert len(fake.sent) == sent_before + 1 and "Shubham" not in json.dumps(body)
     schema = body["output_config"]["format"]["schema"]
     assert set(schema["required"]) == set(schema["properties"])  # nothing optional for Claude's limits
+
+
+def test_year_to_date_pay_the_stubs_dont_name_is_other_pay_and_late_linked_years_are_partial():
+    # Regular $7,780 paychecks; the last stub's year to date also has a $70,000 vest whose stub wasn't uploaded, and
+    # that last stub prints no stock line. The paycheck account was linked in November 2025, so 2025 and 2024 are
+    # only part of the year, even though another account reaches back further.
+    stubs = [stub(d, 778_000) for d in every_two_weeks(date(2026, 9, 4), date(2026, 10, 16))]
+    stubs[-1].detail["ytd"] = {"gross": 778_000 * 21 + 7_000_000}
+    days = [earnings.Payday(d, 545_000, False) for d in every_two_weeks(date(2025, 11, 7), date(2025, 12, 19))]
+    page = earnings.assemble(
+        stubs, [earnings.Payday(date(2024, 12, 20), 200_000, False), *days], date(2024, 1, 2), NO_PREFS, TODAY
+    )
+    rows = by_year(page)
+
+    now = amounts(rows[2026])
+    assert now["base"] == 778_000 * 21 and now["other"] == 7_000_000
+    assert next(s["how"] for s in rows[2026]["sources"] if s["key"] == "other") == "unsplit"
+    assert rows[2026]["projected"]["paychecks_left"] == 5
+    assert rows[2026]["full_pay_cents"] == 778_000 * 26 + 7_000_000
+
+    assert not rows[2025]["complete"] and not rows[2024]["complete"]
+    assert rows[2026]["growth"] is None and rows[2026]["raise"] is None and rows[2025]["raise"] is None
+    assert page["linked_from"] == "2024-12-20"
