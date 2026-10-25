@@ -68,7 +68,8 @@ function Accounts() {
   const params = useSearchParams();
   const router = useRouter();
   const [adding, setAdding] = useState(false);
-  const [uploading, setUploading] = useState(false);
+  // false, or open: into one account (accountId) or wherever the file says.
+  const [uploading, setUploading] = useState<false | { accountId?: number }>(false);
   const [manual, setManual] = useState(false);
   const [editing, setEditing] = useState<{ account: Account; connection: Connection } | null>(null);
   const [syncing, setSyncing] = useState(false);
@@ -203,7 +204,7 @@ function Accounts() {
               connection={c}
               onEdit={(account) => setEditing({ account, connection: c })}
               onRelink={() => (c.provider === "plaid" || c.provider === "snaptrade") && link(c.provider, "banking", c.id)}
-              onUpload={() => setUploading(true)}
+              onUpload={(accountId) => (demo ? toast("Uploads are off while the app shows sample data.") : setUploading({ accountId }))}
             />
           ))}
 
@@ -218,13 +219,18 @@ function Accounts() {
         disabled={demo}
         onPick={(choice) => {
           setAdding(false);
-          if (choice === "upload") setUploading(true);
+          if (choice === "upload") setUploading({});
           else if (choice === "manual") setManual(true);
           else if (choice === "investments") link("plaid", "investments");
           else link(choice);
         }}
       />
-      <UploadSheet open={uploading} onOpenChange={setUploading} onSaved={changed} />
+      <UploadSheet
+        open={uploading !== false}
+        onOpenChange={(o) => !o && setUploading(false)}
+        onSaved={changed}
+        accountId={uploading ? uploading.accountId : undefined}
+      />
       <ManualSheet open={manual} onOpenChange={setManual} onSaved={changed} />
       {sheet && data && (
         <AccountSheet
@@ -236,6 +242,11 @@ function Accounts() {
           onClose={() => {
             setEditing(null);
             setFromLink(null);
+          }}
+          onUpload={() => {
+            setEditing(null);
+            setFromLink(null);
+            setUploading({ accountId: sheet.account.id });
           }}
           onSaved={changed}
         />
@@ -380,8 +391,11 @@ function ConnectionCard({
   connection: Connection;
   onEdit: (a: Account) => void;
   onRelink: () => void;
-  onUpload: () => void;
+  /** With an account id, the file goes into that account unless changed. */
+  onUpload: (accountId?: number) => void;
 }) {
+  // Uploaded and typed-in accounts only get new data by hand, so the upload sits right on the card.
+  const byHand = c.provider === "file" || c.provider === "manual";
   return (
     <Card>
       <CardHeader className="items-center">
@@ -400,7 +414,19 @@ function ConnectionCard({
             </p>
           </div>
         </div>
-        {c.status === "stale" ? <Badge variant="warning">Stopped syncing</Badge> : null}
+        {c.status === "stale" ? (
+          <Badge variant="warning">Stopped syncing</Badge>
+        ) : byHand ? (
+          <Button
+            size="sm"
+            variant="outline"
+            className="shrink-0"
+            onClick={() => onUpload(c.accounts.length === 1 ? c.accounts[0]?.id : undefined)}
+            aria-label={`Upload transactions or a statement for ${c.institution}`}
+          >
+            <FileUp /> Upload
+          </Button>
+        ) : null}
       </CardHeader>
       {c.status === "stale" && (
         <div className="mx-5 mt-3 rounded-xl bg-warning/10 p-3.5 text-sm">
@@ -412,7 +438,7 @@ function ConnectionCard({
             <Button size="sm" onClick={onRelink}>
               Reconnect
             </Button>
-            <Button size="sm" variant="outline" onClick={onUpload}>
+            <Button size="sm" variant="outline" onClick={() => onUpload()}>
               <FileUp /> Upload a file instead
             </Button>
           </div>
@@ -611,6 +637,7 @@ function AccountSheet({
   people,
   disabled,
   onClose,
+  onUpload,
   onSaved,
 }: {
   account: Account;
@@ -618,6 +645,8 @@ function AccountSheet({
   people: Data["people"];
   disabled: boolean;
   onClose: () => void;
+  /** Close this sheet and open the upload sheet with this account picked. */
+  onUpload: () => void;
   onSaved: () => void;
 }) {
   const [name, setName] = useState(a.name);
@@ -692,6 +721,17 @@ function AccountSheet({
             {current.balance_cents === null ? "—" : <Money cents={current.balance_cents} style="exact" />}
           </p>
         </div>
+
+        {typed && (
+          <div className="grid grid-cols-1 gap-2">
+            <Button size="lg" onClick={onUpload} disabled={disabled}>
+              <FileUp /> Upload transactions or statement
+            </Button>
+            <p className="text-center text-xs text-muted-foreground">
+              A CSV or OFX download works best; a PDF statement or screenshot can be read with AI. {current.display_name} is picked for you, and you check everything before it&apos;s saved.
+            </p>
+          </div>
+        )}
 
         <fieldset disabled={disabled} className="grid grid-cols-1 gap-4">
           <Field id="a-name" label="Name">
