@@ -182,6 +182,7 @@ class Usual:
     def __init__(self, stubs: list[Paycheck]) -> None:
         recent = stubs[-12:]
         self.ok = False
+        self.seed = 0
         if not recent:
             return
         regular = [p.gross_cents - this_of(p).get("stock", 0) - this_of(p).get("bonus", 0) for p in recent]
@@ -194,7 +195,9 @@ class Usual:
         self.gross = sum(p.gross_cents for p in usual) / net
         self.taxes = sum(p.taxes_cents for p in usual) / sum(p.gross_cents for p in usual)
         self.match = sum(p.employer_match_cents for p in usual) / net
-        self.hsa = sum(this_of(p).get("employer_hsa", 0) for p in usual) / net
+        self.hsa = sum(budget.employer_hsa_split(p)[0] for p in usual) / net
+        # The yearly employer HSA seed, from the newest stub that shows one, for years seen only as paychecks.
+        self.seed = next((s for p in reversed(stubs) if (s := budget.employer_hsa_seed_ytd(p))), 0)
 
 
 def split_stub(p: Paycheck, typical: float | None) -> dict:
@@ -342,6 +345,7 @@ def year_row(year: int, stubs: list[Paycheck], days: list[Payday], usual: Usual)
             how |= dict.fromkeys(("base", "bonus", "rsu", "match", "employer_hsa"), "stubs")
         through = last.date
 
+    seeded = False
     for d in yd:
         if covered_until is not None:
             if d.day <= covered_until + timedelta(days=COVERED_DAYS):
@@ -355,6 +359,9 @@ def year_row(year: int, stubs: list[Paycheck], days: list[Payday], usual: Usual)
             out["bonus" if d.bonus else "base"] += gross
             out["match"] += round(d.cents * usual.match)
             out["employer_hsa"] += round(d.cents * usual.hsa)
+            if usual.seed and not ys and d.day.month == 1 and not seeded:
+                out["employer_hsa"] += usual.seed  # the yearly seed comes on January's first paycheck
+                seeded = True
             how["bonus" if d.bonus else "base"] = how["bonus" if d.bonus else "base"] or "estimated"
         else:
             take_home = True
@@ -397,7 +404,7 @@ def project(
     if not typical:
         return None
     match_share = sum(p.employer_match_cents for p in recent) / max(sum(p.gross_cents for p in recent), 1)
-    hsa_per = statistics.median([this_of(p).get("employer_hsa", 0) for p in recent]) if recent else 0
+    hsa_per = statistics.median([budget.employer_hsa_split(p)[0] for p in recent]) if recent else 0
     adds = dict.fromkeys(FIELDS, 0)
     left = 0
     raise_used = None

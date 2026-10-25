@@ -708,9 +708,34 @@ def where_it_went(ledger: Ledger, moves: Moves, m: date, saved: int, put_away: i
     return lines, {"unlinked_cards": cards, "other_transfers": other_out}
 
 
+HSA_SEED = 350_00  # employer HSA money this big on one stub is a once-a-year deposit, not every paycheck's
+
+
+def employer_hsa_split(p: Paycheck) -> tuple[int, int]:
+    """A stub's employer HSA money as (every paycheck's, once a year). Employers often put a lump in once a year
+    (a "seed", usually on January's first paycheck) on top of, or instead of, a little each paycheck: a line the
+    stub names a seed is that, as is an amount too big to be one paycheck's."""
+    this = (p.detail or {}).get("this") or {}
+    total = this.get("employer_hsa", 0)
+    seed = this.get("employer_hsa_seed", total if total >= HSA_SEED else 0)
+    return total - seed, seed
+
+
 def employer_put_in(p: Paycheck) -> int:
-    """What the employer put in on top of the paycheck: the 401(k) match and its HSA contribution."""
-    return p.employer_match_cents + ((p.detail or {}).get("this") or {}).get("employer_hsa", 0)
+    """What the employer puts in on top of each paycheck: the 401(k) match and its HSA money (not a yearly seed)."""
+    return p.employer_match_cents + employer_hsa_split(p)[0]
+
+
+def employer_hsa_seed_ytd(p: Paycheck) -> int:
+    """The yearly employer HSA seed so far this year, from a stub: its year-to-date seed line, or this paycheck's
+    seed, or with no HSA money each paycheck, all the employer's year-to-date HSA money."""
+    ytd = (p.detail or {}).get("ytd") or {}
+    each, seed = employer_hsa_split(p)
+    if "employer_hsa_seed" in ytd:
+        return ytd["employer_hsa_seed"]
+    if not each and ytd.get("employer_hsa"):
+        return ytd["employer_hsa"]
+    return seed
 
 
 class UsualStub:
@@ -993,6 +1018,8 @@ def build(db: DbSession) -> dict:
                 "net_cents": p.net_cents,
                 "employer_match_cents": p.employer_match_cents,
                 "employer_hsa_cents": ((p.detail or {}).get("this") or {}).get("employer_hsa", 0),
+                "employer_hsa_each_cents": employer_hsa_split(p)[0],
+                "employer_hsa_seed_ytd_cents": employer_hsa_seed_ytd(p),
                 "frequency": p.frequency,
                 "deposits": (p.detail or {}).get("deposits", []),
                 "deposit": {"date": matched[p.id].date.isoformat(), "merchant": matched[p.id].merchant}

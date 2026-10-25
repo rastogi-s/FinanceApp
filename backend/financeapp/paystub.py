@@ -57,6 +57,7 @@ STOCK = re.compile(
     re.I,
 )
 BONUS = re.compile(r"\b(bonus|incentive(\s+pay)?|commissions?|sign[- ]on|spot\s+award)\b", re.I)
+SEED = re.compile(r"\b(seed|front[- ]?load(ed)?|lump|annual)\b", re.I)  # a yearly employer HSA deposit
 YTD_ONLY = re.compile(r"\b(year\s+to\s+date|ytd)\b", re.I)
 
 PAY_DATE = re.compile(r"\b(pay|check|payment|advice|deposit)\s*date\b", re.I)
@@ -336,12 +337,16 @@ def parse(lines: list[str]) -> Stub:
                 ytd_only("stock", line, m)
         elif m := EMPLOYER.search(line):
             kind = "employer_hsa" if re.search(r"\bhsa\b|\bhealth\s+savings\b", line, re.I) else "match"
+            # "Er Hsa Seed" is also kept on its own, so the yearly seed isn't taken for every paycheck's.
+            kinds = [kind, "employer_hsa_seed"] if kind == "employer_hsa" and SEED.search(line) else [kind]
             if (value := this_period(line, m, earnings=True)) is not None:
                 if kind == "match":
                     match += value
-                add(kind, line, m, value)
+                for k in kinds:
+                    add(k, line, m, value)
             else:
-                ytd_only(kind, line, m)
+                for k in kinds:
+                    ytd_only(k, line, m)
         elif (m := BONUS.search(line)) and not re.search(r"\btax\b", line, re.I):
             if value := this_period(line, m, earnings=True):
                 add("bonus", line, m, value)

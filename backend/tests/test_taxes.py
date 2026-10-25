@@ -303,3 +303,15 @@ def test_dividends_and_interest_from_the_payments():
     # Without last year's history, this year so far is scaled to a whole year.
     inv = taxes.from_payments(pays, {}, date(2026, 1, 1), TODAY)
     assert inv["basis"] == "scaled" and inv["dividends_cents"] == round(400_00 * 365 / 294)
+
+
+def test_a_yearly_employer_hsa_seed_counts_once_not_every_paycheck():
+    # January's first paycheck: the employer's $1,800 seed, and $150 of your own. Only the $150 repeats.
+    detail = {"federal": 600, "social_security": 270, "medicare": 63, "state": 150, "hsa": 150, "employer_hsa": 1_800}
+    s = stub("2026-01-02", 4_500, detail, ytd={"gross": 4_500, "hsa": 150, "employer_hsa": 1_800})
+    h = taxes.estimate(T, profile(), facts({1: [s]}), date(2026, 1, 5))["hsa"]
+    assert h["employer_cents"] == 1_800_00 and h["own_cents"] == 150_00 * 26
+    # Named a seed on the stub, any size is yearly.
+    small = stub("2026-01-02", 4_500, {**detail, "employer_hsa": 250, "employer_hsa_seed": 250},
+                 ytd={"gross": 4_500, "employer_hsa": 250})  # fmt: skip
+    assert taxes.estimate(T, profile(), facts({1: [small]}), date(2026, 1, 5))["hsa"]["employer_cents"] == 250_00

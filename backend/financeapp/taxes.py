@@ -24,6 +24,7 @@ typed in, deduction phase-outs, loss carryovers, local taxes and a Social Securi
 import json
 import math
 import re
+import statistics
 from datetime import date, timedelta
 from functools import cache
 from typing import Any
@@ -31,7 +32,7 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session as DbSession
 
-from financeapp.budget import PER_YEAR, add_months, month_start, next_payday
+from financeapp.budget import PER_YEAR, add_months, employer_hsa_split, month_start, next_payday
 from financeapp.config import PACKAGE_DIR
 from financeapp.models import Account, HoldingSnapshot, Paycheck, Preference, User
 
@@ -230,9 +231,11 @@ def project_pay(
     ranked = sorted(splits.values(), key=lambda sp: sp[0]["gross"] - sp[0]["stock"])
     typical = dict(ranked[len(ranked) // 2][0])
     estimated_split = any(sp[1] for sp in splits.values())
-    # A typical paycheck is regular pay: stock income comes in lumps (typed in as "still to vest").
+    # A typical paycheck is regular pay: stock income comes in lumps (typed in as "still to vest"), and so does a
+    # yearly employer HSA seed (already in the year to date).
     typical["gross"] -= typical["stock"]
     typical["stock"] = 0
+    typical["employer_hsa"] = round(statistics.median(employer_hsa_split(s)[0] for s in recent))
 
     ytd = dict.fromkeys(KINDS, 0)
     ytd_source = "none"
