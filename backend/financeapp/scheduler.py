@@ -2,7 +2,8 @@
 prices every QUOTE_INTERVAL_MINUTES while markets are open (each followed by a check of the price, dip and
 concentration alerts; after the close, a year of daily prices for the dip alerts' trends), funds' holdings for
 look-through once a week, each holding's dividend history once a day, the morning brief at the time the owner
-picked, and whether a newer version is out every few hours.
+picked, whether a newer version is out every few hours, and once an hour whether an uploaded or typed-in account is
+due a new statement (reminders.py).
 
 It checks every minute whether each is due, from what's saved in the database, so restarts and updates don't cause
 extra runs, and the sync's own database lock means two copies of the app never sync at once. It also clears out
@@ -15,7 +16,7 @@ from datetime import datetime, timedelta
 
 from sqlalchemy import delete, select
 
-from financeapp import alerts, brief, income, lookthrough, quotes, sync, updates
+from financeapp import alerts, brief, income, lookthrough, quotes, reminders, sync, updates
 from financeapp.config import Settings
 from financeapp.db import Database
 from financeapp.models import Challenge, Connection, Session, SyncRun, now
@@ -23,6 +24,7 @@ from financeapp.models import Challenge, Connection, Session, SyncRun, now
 log = logging.getLogger("financeapp")
 CHECK_SECONDS = 60
 FUNDS_CHECK = timedelta(hours=6)
+REMINDERS_CHECK = timedelta(hours=1)
 
 
 class Scheduler:
@@ -32,6 +34,7 @@ class Scheduler:
         self.stop = threading.Event()
         self.thread = threading.Thread(target=self._loop, name="sync-scheduler", daemon=True)
         self.funds_checked: datetime | None = None
+        self.reminders_checked: datetime | None = None
 
     def start(self) -> None:
         self.thread.start()
@@ -69,6 +72,11 @@ class Scheduler:
             if lookthrough.refresh(self.database, self.settings):
                 alerts.check(self.database, self.settings, {"concentration"})
             income.refresh_history(self.database, self.settings)  # each held symbol's dividends, once a day
+        if self.reminders_checked is None or now() - self.reminders_checked > REMINDERS_CHECK:
+            self.reminders_checked = now()
+            with self.database.session() as db:
+                if reminders.queue(db, reminders.local_today(db)):
+                    alerts.send_pending(db, self.settings)
         brief.run(self.database, self.settings)
 
     def _loop(self) -> None:

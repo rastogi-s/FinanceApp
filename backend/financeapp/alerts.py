@@ -34,6 +34,8 @@ back; low arrives without a sound or banner. Several alerts at once go at the lo
 that what was held over quiet hours goes out no louder than default, so the morning roundup doesn't break through
 a Sleep Focus.
 
+Upload reminders (reminders.py) come through the same queue without a rule, at default priority.
+
 Lock screens. Messages name a market price, a share of the budget or of the portfolio, never balances or dollar
 amounts of the household's own money.
 """
@@ -340,7 +342,9 @@ def evaluate(db: DbSession, kinds: set[str], companies: list[dict] | None = None
 # ---- sending
 
 
-def priority_of(rule: AlertRule | None) -> str:
+def priority_of(rule: AlertRule | None, kind: str | None = None) -> str:
+    if rule is None and kind == "upload":
+        return "default"  # an upload reminder (reminders.py) is a to-do, not news: a Focus mode can hold it
     p = (rule.params or {}).get("priority") if rule is not None else None
     return p if p in PRIORITIES else DEFAULT_PRIORITY
 
@@ -348,7 +352,7 @@ def priority_of(rule: AlertRule | None) -> str:
 def loudest(db: DbSession, events: list[AlertEvent]) -> str:
     ids = {e.rule_id for e in events if e.rule_id is not None}
     rules = {r.id: r for r in db.scalars(select(AlertRule).where(AlertRule.id.in_(ids)))} if ids else {}
-    p = max((priority_of(rules.get(e.rule_id)) for e in events), key=PRIORITIES.index)
+    p = max((priority_of(rules.get(e.rule_id), e.kind) for e in events), key=PRIORITIES.index)
     if any(e.status == "held" for e in events):
         p = min(p, "default", key=PRIORITIES.index)
     return p
