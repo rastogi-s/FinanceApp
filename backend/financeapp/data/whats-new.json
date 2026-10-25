@@ -1,5 +1,17 @@
 [
   {
+    "version": "0.35.0",
+    "title": "Never miss a statement",
+    "features": [
+      {
+        "id": "upload-reminders",
+        "title": "Reminders to upload",
+        "body": "Accounts with no automatic connection only change when you upload a statement or type in a balance, so the app now keeps track for you. A few days after each statement closes, you get a push (and a card on Home) naming the account and the month it's for, with Upload right there. Not yet? Tap Later for three days. If it's still missing a week on, one more push, then it waits quietly on Home. Each account sets its own rhythm in Settings → Accounts: monthly after the statement (pick the day it closes), every three months, weekly, or never. A house or car you typed in starts at never.",
+        "tryIt": "/settings/accounts"
+      }
+    ]
+  },
+  {
     "version": "0.34.0",
     "title": "One paycheck, however many accounts",
     "features": [

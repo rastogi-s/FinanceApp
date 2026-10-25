@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
+import type { UploadDue } from "@/lib/accounts";
 import { forgetPortfolio } from "@/lib/portfolio";
 
 export type Budget = { category: string; category_id?: number; kind: "fixed" | "flexible"; limit_cents: number; spent_cents: number };
@@ -32,11 +33,11 @@ export type Holding = {
   live?: boolean;
 };
 /** The dot beside an alert, by what kind of rule sent it. */
-export const KIND_DOT = { price: "bg-chart-2", dip: "bg-chart-3", budget: "bg-warning", concentration: "bg-chart-4", goal: "bg-positive" } as const;
+export const KIND_DOT = { price: "bg-chart-2", dip: "bg-chart-3", budget: "bg-warning", concentration: "bg-chart-4", goal: "bg-positive", upload: "bg-primary" } as const;
 
 export type Alert = {
   id: string;
-  kind: "budget" | "price" | "dip" | "concentration" | "goal";
+  kind: "budget" | "price" | "dip" | "concentration" | "goal" | "upload";
   title: string;
   body: string;
   at: string;
@@ -64,7 +65,11 @@ export type LinkedHousehold = {
   prices_as_of?: string | null;
   allocation: { asset_class: string; cents: number }[];
   projection: { monthly_savings_cents: number; bands: { year: number; low: number; mid: number; high: number }[] } | null;
-  health?: { stale: { id: number; institution: string; error: string | null }[]; last_sync_ok: boolean | null };
+  health?: {
+    stale: { id: number; institution: string; error: string | null }[];
+    last_sync_ok: boolean | null;
+    uploads?: UploadDue[];
+  };
 };
 
 export type Household = LinkedHousehold | { demo: false; linked: false };

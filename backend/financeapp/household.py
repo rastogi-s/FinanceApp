@@ -12,7 +12,7 @@ from datetime import UTC, date, datetime, timedelta
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
 
-from financeapp import alerts, budget, plan, portfolio, review
+from financeapp import alerts, budget, plan, portfolio, reminders, review
 from financeapp.models import Account, AlertEvent, Balance, Category, Connection, SyncRun, Transaction, now
 from financeapp.sync import today
 
@@ -229,5 +229,10 @@ def build_with_plan(db: DbSession) -> tuple[dict, dict | None]:
                 if c.status == "stale"
             ],
             "last_sync_ok": last_run.ok if last_run else None,
+            # Uploaded or typed-in accounts whose next statement should be out (reminders.py).
+            "uploads": [
+                {k: r[k] for k in ("account_id", "name", "provider", "every", "newest", "statement", "days_late")}
+                for r in reminders.due(db, reminders.local_today(db))
+            ],
         },
     }, plan_inputs
