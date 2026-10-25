@@ -1,6 +1,6 @@
 [
   {
-    "version": "0.35.0",
+    "version": "0.36.0",
     "title": "Your tax lots",
     "features": [
       {
@@ -8,6 +8,18 @@
         "title": "Every holding shows its tax lots",
         "body": "Open a holding on Portfolio to see its shares by the day you bought them: shares, cost a share, value, gain, and whether a sale would be short-term or long-term. In a taxable account the page adds up your long-term and short-term gains, and tells you when the next lot with a gain turns long-term, so you can wait a few weeks for the lower rate. Lots are built from your brokerage's buys and sells over the last two years, oldest sold first; shares older than that show as one earlier lot. Retirement and HSA lots are shown too, marked as not taxed.",
         "tryIt": "/portfolio"
+      }
+    ]
+  },
+  {
+    "version": "0.35.0",
+    "title": "Never miss a statement",
+    "features": [
+      {
+        "id": "upload-reminders",
+        "title": "Reminders to upload",
+        "body": "Accounts with no automatic connection only change when you upload a statement or type in a balance, so the app now keeps track for you. A few days after each statement closes, you get a push (and a card on Home) naming the account and the month it's for, with Upload right there. Not yet? Tap Later for three days. If it's still missing a week on, one more push, then it waits quietly on Home. Each account sets its own rhythm in Settings → Accounts: monthly after the statement (pick the day it closes), every three months, weekly, or never. A house or car you typed in starts at never.",
+        "tryIt": "/settings/accounts"
       }
     ]
   },

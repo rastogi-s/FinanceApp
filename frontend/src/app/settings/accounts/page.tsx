@@ -4,6 +4,7 @@ import { Suspense, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   AlertTriangle,
+  BellRing,
   Building2,
   CheckCircle2,
   ChevronRight,
@@ -26,7 +27,16 @@ import { Sheet } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { toast } from "@/components/ui/toast";
-import { type Account, type Connection, type ConnectionsData as Data, parseDollars } from "@/lib/accounts";
+import {
+  type Account,
+  type Connection,
+  type ConnectionsData as Data,
+  type Every,
+  type Reminder,
+  dueLabel,
+  parseDollars,
+  shortDate,
+} from "@/lib/accounts";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { resetHousehold, useApi } from "@/lib/household";
@@ -118,6 +128,12 @@ function Accounts() {
     }
   };
 
+  // From an upload reminder on Home (?account=8): that account opens, once.
+  const [fromLink, setFromLink] = useState(() => Number(params.get("account")) || null);
+  const linkedTo = data?.connections.find((x) => x.accounts.some((a) => a.id === fromLink));
+  const linkedAccount = linkedTo?.accounts.find((a) => a.id === fromLink);
+  const sheet = editing ?? (linkedTo && linkedAccount ? { account: linkedAccount, connection: linkedTo } : null);
+
   const linkedCount = data?.connections.reduce((n, c) => n + c.accounts.length, 0) ?? 0;
 
   return (
@@ -197,14 +213,17 @@ function Accounts() {
       />
       <UploadSheet open={uploading} onOpenChange={setUploading} onSaved={changed} />
       <ManualSheet open={manual} onOpenChange={setManual} onSaved={changed} />
-      {editing && data && (
+      {sheet && data && (
         <AccountSheet
-          key={editing.account.id}
-          account={editing.account}
-          connection={editing.connection}
+          key={sheet.account.id}
+          account={sheet.account}
+          connection={sheet.connection}
           people={data.people}
           disabled={demo}
-          onClose={() => setEditing(null)}
+          onClose={() => {
+            setEditing(null);
+            setFromLink(null);
+          }}
           onSaved={changed}
         />
       )}
@@ -402,6 +421,7 @@ function ConnectionCard({
                 <p className="text-xs text-muted-foreground">
                   {TYPE_LABEL[a.type] ?? a.type}
                   {!a.is_authoritative && " · not counted"}
+                  <ReminderNote account={a} manual={c.provider === "manual"} />
                   {a.statement_diff_percent !== null && (
                     <span className={a.statement_diff_percent <= 1 ? "text-positive" : "text-warning"}>
                       {" "}
@@ -621,6 +641,18 @@ function AccountSheet({
     }
   };
 
+  const saveReminder = async (body: { every: Every; day: number | null }) => {
+    try {
+      const r = await api<Connection>(`/api/accounts/${a.id}/reminder`, { method: "PUT", body });
+      const updated = r.accounts.find((x) => x.id === a.id);
+      if (updated) setCurrent(updated);
+      toast(body.every === "off" ? "No more upload reminders for this account." : "Reminder saved.");
+      onSaved();
+    } catch (e) {
+      toast((e as Error).message, "error");
+    }
+  };
+
   const remove = async (deleteData: boolean) => {
     try {
       const r = await api<{ problem: string | null }>(`/api/connections/${c.id}?delete_data=${deleteData}`, { method: "DELETE" });
@@ -697,6 +729,10 @@ function AccountSheet({
           </div>
         )}
 
+        {current.reminder && (
+          <ReminderCard reminder={current.reminder} manual={c.provider === "manual"} disabled={disabled} onChange={saveReminder} />
+        )}
+
         <div className="grid grid-cols-1 gap-2 rounded-2xl border p-4">
           <p className="text-sm font-medium">Check against your statement</p>
           <p className="text-xs text-muted-foreground">Type the latest statement balance; the app should be within 1% of it.</p>
@@ -757,5 +793,86 @@ function AccountSheet({
         )}
       </div>
     </Sheet>
+  );
+}
+
+/** "· upload due" or "· next upload Nov 3" under an uploaded or typed-in account. */
+function ReminderNote({ account: a, manual }: { account: Account; manual: boolean }) {
+  const r = a.reminder;
+  if (!r || r.every === "off") return null;
+  const what = manual ? "update" : "upload";
+  if (r.is_due && !r.snoozed_until) return <span className="text-warning"> · {what} due</span>;
+  return r.due ? <> · next {what} {shortDate(r.due)}</> : null;
+}
+
+const EVERY: { value: Every; label: string }[] = [
+  { value: "monthly", label: "Every month, after the statement" },
+  { value: "quarterly", label: "Every 3 months, after the statement" },
+  { value: "weekly", label: "Every week" },
+  { value: "off", label: "Never" },
+];
+const DAYS = Array.from({ length: 28 }, (_, i) => i + 1);
+const longDate = new Intl.DateTimeFormat("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" });
+
+function ordinal(n: number): string {
+  if (n % 100 >= 11 && n % 100 <= 13) return `${n}th`;
+  return `${n}${["th", "st", "nd", "rd"][n % 10] ?? "th"}`;
+}
+
+/** How often to be reminded to upload (or type in) the next statement, and when the next reminder comes. */
+function ReminderCard({
+  reminder: r,
+  manual,
+  disabled,
+  onChange,
+}: {
+  reminder: Reminder;
+  manual: boolean;
+  disabled: boolean;
+  onChange: (body: { every: Every; day: number | null }) => void;
+}) {
+  const statementBased = r.every === "monthly" || r.every === "quarterly";
+  const due = r.is_due && !r.snoozed_until;
+  let note = `Has data to ${shortDate(r.newest)}.`;
+  if (r.every === "off") note += " No reminders.";
+  else if (due) note = `${dueLabel({ provider: manual ? "manual" : "file", every: r.every, statement: r.statement })} is due. ${note}`;
+  else if (r.snoozed_until) note += ` Snoozed until ${longDate.format(new Date(r.snoozed_until))}.`;
+  else if (r.due) note += ` Next reminder ${longDate.format(new Date(r.due))}.`;
+  return (
+    <div className="grid grid-cols-1 gap-3 rounded-2xl border p-4">
+      <div className="flex items-start gap-2.5">
+        <BellRing className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden />
+        <div className="min-w-0">
+          <p className="text-sm font-medium">Upload reminders</p>
+          <p className="text-xs text-muted-foreground">
+            Nothing comes in for this account by itself. Get a push when it&apos;s time to {manual ? "update the balance" : "upload"}.
+          </p>
+        </div>
+      </div>
+      <fieldset disabled={disabled} className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <Field id="r-every" label="Remind me">
+          <Select value={r.every} onChange={(e) => onChange({ every: e.target.value as Every, day: r.day })}>
+            {EVERY.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        {statementBased && (
+          <Field id="r-day" label="Statement closes on">
+            <Select value={r.day ?? ""} onChange={(e) => onChange({ every: r.every, day: e.target.value ? Number(e.target.value) : null })}>
+              <option value="">The last day of the month</option>
+              {DAYS.map((d) => (
+                <option key={d} value={d}>
+                  The {ordinal(d)}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        )}
+      </fieldset>
+      <p className={cn("text-sm", due ? "font-medium text-warning" : "text-muted-foreground")}>{note}</p>
+    </div>
   );
 }

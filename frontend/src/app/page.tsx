@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { type Guide, GuideCard } from "@/components/guide";
-import { AlertTriangle, ArrowDownRight, ArrowUpRight, Bell, ChevronRight, Sparkles, TrendingUp } from "lucide-react";
+import { AlertTriangle, ArrowDownRight, ArrowUpRight, Bell, ChevronRight, FileUp, PencilLine, Sparkles, TrendingUp } from "lucide-react";
 import { BriefCard } from "@/components/brief";
 import { Sparkline } from "@/components/charts";
 import { Money, formatMoney } from "@/components/money";
@@ -12,7 +12,9 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
+import { UploadSheet } from "@/components/upload-sheet";
 import { toast } from "@/components/ui/toast";
+import { type UploadDue, dueLabel, shortDate } from "@/lib/accounts";
 import { api } from "@/lib/api";
 import { monthName } from "@/lib/budget";
 import { KIND_DOT, type LinkedHousehold, resetHousehold, useApi } from "@/lib/household";
@@ -60,6 +62,8 @@ export default function Home() {
                 <ChevronRight className="size-4 text-muted-foreground" aria-hidden />
               </Link>
             ))}
+
+            {(h.health?.uploads?.length ?? 0) > 0 && <Uploads rows={h.health?.uploads ?? []} demo={h.demo} />}
 
             {!h.demo && <BriefCard />}
 
@@ -237,6 +241,75 @@ function Accounts({ h }: { h: LinkedHousehold }) {
           </div>
         ))}
       </CardContent>
+    </Card>
+  );
+}
+
+/** Accounts that only get new data by hand, whose next statement should be out (Settings → Accounts sets how often). */
+function Uploads({ rows, demo }: { rows: UploadDue[]; demo: boolean }) {
+  const [uploading, setUploading] = useState<number | null>(null);
+  const [later, setLater] = useState<number[]>([]);
+  const shown = rows.filter((u) => !later.includes(u.account_id));
+  if (shown.length === 0) return null;
+  const snooze = async (u: UploadDue) => {
+    if (demo) return toast("Reminders stay put while the app shows sample data.");
+    try {
+      await api(`/api/accounts/${u.account_id}/reminder/snooze`, { body: { days: 3 } });
+      setLater((l) => [...l, u.account_id]);
+      toast(`Okay. ${u.name} again in 3 days.`);
+    } catch (e) {
+      toast((e as Error).message, "error");
+    }
+  };
+  const upload = (u: UploadDue) => (demo ? toast("Uploads are off while the app shows sample data.") : setUploading(u.account_id));
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Time to upload</CardTitle>
+        <FileUp className="size-4 text-primary" aria-hidden />
+      </CardHeader>
+      <CardContent className="pt-1">
+        <ul className="divide-y">
+          {shown.map((u) => (
+            <li key={u.account_id} className="flex items-start gap-3 py-3">
+              <span
+                className="grid size-9 shrink-0 place-items-center rounded-full bg-accent text-accent-foreground [&_svg]:size-4"
+                aria-hidden
+              >
+                {u.provider === "manual" ? <PencilLine /> : <FileUp />}
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium wrap-anywhere">{u.name}</p>
+                <p className="text-xs text-muted-foreground">
+                  {dueLabel(u)} · has data to {shortDate(u.newest)}
+                </p>
+                <div className="mt-2.5 flex flex-wrap gap-2">
+                  {u.provider === "file" ? (
+                    <Button size="sm" onClick={() => upload(u)}>
+                      <FileUp /> Upload
+                    </Button>
+                  ) : (
+                    <Button size="sm" asChild>
+                      <Link href={`/settings/accounts?account=${u.account_id}`}>
+                        <PencilLine /> Update balance
+                      </Link>
+                    </Button>
+                  )}
+                  <Button size="sm" variant="ghost" onClick={() => snooze(u)} aria-label={`Remind me about ${u.name} later`}>
+                    Later
+                  </Button>
+                </div>
+              </div>
+            </li>
+          ))}
+        </ul>
+      </CardContent>
+      <UploadSheet
+        open={uploading !== null}
+        onOpenChange={(o) => !o && setUploading(null)}
+        onSaved={() => resetHousehold()}
+        accountId={uploading ?? undefined}
+      />
     </Card>
   );
 }
