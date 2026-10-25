@@ -4,12 +4,13 @@ needs, so a stub is uploaded and checked instead of typed.
 Stubs put the amount for this paycheck first on a line and the year-to-date total after it ("Gross Pay 4,500.00
 81,000.00"), so each line's first amount is the one taken. Taxes are the stub's own total when it prints one, or
 else the sum of the federal, state, Social Security and Medicare lines. Savings are 401(k)/403(b)/457, HSA and ESPP
-lines; employer contributions go to the match instead. How often you're paid comes from the stub's own words
-("Biweekly") or the length of the pay period.
+lines; the employer's 401(k) match goes to the match instead, and its HSA money to the detail (employer_hsa). How
+often you're paid comes from the stub's own words ("Biweekly") or the length of the pay period.
 
 For the Taxes page each line is also sorted into a detail (federal, state, Social Security, Medicare, pre-tax 401(k),
-Roth, HSA, ESPP, pre-tax health benefits, stock pay), with the year-to-date column when the stub prints one: the last
-amount on a line, when there are two or more.
+Roth, HSA, ESPP, pre-tax health benefits, stock pay, bonus pay, and the employer's 401(k) match and HSA money), with
+the year-to-date column when the stub prints one: the last amount on a line, when there are two or more. An employer
+HSA contribution is kept apart from the 401(k) match: it counts toward the yearly HSA limit with your own.
 
 Only PDFs with text in them can be read here; a scanned or photographed stub has none, and is read with AI
 (ai/extract.py) if the household has set it up. Nothing is stored: the file is read in memory and the numbers go
@@ -51,10 +52,11 @@ BENEFITS = re.compile(
     r"\b(medical|dental|vision|health\s+ins(urance)?|fsa|flexible\s+spending|dependent\s+care|section\s+125)\b", re.I
 )
 STOCK = re.compile(
-    r"\brsus?\b|\brestricted\s+stock|\bstock\s+(award|vest(ing)?|units?|comp(ensation)?)|\bespp\s+(gain|income|disq)|"
+    r"\brsus?\b|\brestrict(ed)?\s+stock|\bstock\s+(award|vest(ing)?|units?|comp(ensation)?)|\bespp\s+(gain|income|disq)|"
     r"\bdisqualifying\b|\bnso\b|\bstock\s+option",
     re.I,
 )
+BONUS = re.compile(r"\b(bonus|incentive(\s+pay)?|commissions?|sign[- ]on|spot\s+award)\b", re.I)
 YTD_ONLY = re.compile(r"\b(year\s+to\s+date|ytd)\b", re.I)
 
 PAY_DATE = re.compile(r"\b(pay|check|payment|advice|deposit)\s*date\b", re.I)
@@ -144,6 +146,8 @@ DETAIL = (
     "federal", "state", "local", "state_other", "social_security", "medicare",  # taxes
     "retirement", "roth", "hsa", "espp", "benefits",  # taken out before pay
     "stock",  # RSU and ESPP income, already inside gross pay
+    "bonus",  # bonus, incentive and commission pay, also inside gross pay
+    "match", "employer_hsa",  # what the employer puts in on top of pay: the 401(k) match, and into the HSA
 )  # fmt: skip
 
 
@@ -305,6 +309,13 @@ def parse(lines: list[str]) -> Stub:
         if (ytd := ytd_amount(line, m)) is not None:
             stub.ytd[kind] = stub.ytd.get(kind, 0) + ytd
 
+    def ytd_only(kind: str, line: str, m: re.Match) -> None:
+        """An earning with nothing this time ("Restrict Stock 40,000.00" on a stub that prints this period's
+        deductions negative): its one amount is the year to date, which the yearly income page still wants."""
+        found = signed(line, m)
+        if negatives and len(found) == 1 and found[0] > 0:
+            stub.ytd[kind] = stub.ytd.get(kind, 0) + found[0]
+
     for line in lines:
         if YTD_ONLY.match(line):
             continue
@@ -318,15 +329,24 @@ def parse(lines: list[str]) -> Stub:
             stub.taxes_cents = first_amount(line, m)
         elif TAXABLE.search(line):
             continue
-        elif (
-            (m := STOCK.search(line))
-            and not re.search(r"\b(offset|refund|tax)\b", line, re.I)
-            and (value := this_period(line, m, earnings=True))
-        ):
-            add("stock", line, m, value)
-        elif EMPLOYER.search(line) and (m := EMPLOYER.search(line)):
+        elif (m := STOCK.search(line)) and not re.search(r"\b(offset|refund|tax)\b", line, re.I):
+            if value := this_period(line, m, earnings=True):
+                add("stock", line, m, value)
+            else:
+                ytd_only("stock", line, m)
+        elif m := EMPLOYER.search(line):
+            kind = "employer_hsa" if re.search(r"\bhsa\b|\bhealth\s+savings\b", line, re.I) else "match"
             if (value := this_period(line, m, earnings=True)) is not None:
-                match += value
+                if kind == "match":
+                    match += value
+                add(kind, line, m, value)
+            else:
+                ytd_only(kind, line, m)
+        elif (m := BONUS.search(line)) and not re.search(r"\btax\b", line, re.I):
+            if value := this_period(line, m, earnings=True):
+                add("bonus", line, m, value)
+            else:
+                ytd_only("bonus", line, m)
         elif (m := SAVINGS.search(line)) and (value := this_period(line, m)) is not None:
             savings += value
             add(savings_kind(line), line, m, value)

@@ -325,7 +325,13 @@ def test_claude_gets_a_schema_without_unions(fake):  # noqa: F811
     assert count(sent, lambda s: "anyOf" in s or isinstance(s.get("type"), list)) == 0
     assert optional_fields(sent) == 9  # the numbers only; 21 optional fields was "Schema is too complex"
     assert "statement_balance" not in sent["required"] and "paystub" in sent["required"]
-    assert sent["properties"]["paystub"]["required"] == ["pay_date", "period_start", "period_end", "frequency"]
+    assert sent["properties"]["paystub"]["required"] == [
+        "pay_date",
+        "period_start",
+        "period_end",
+        "frequency",
+        "employer_hsa",
+    ]
     answer = extract.parse_answer(reply.text)
     assert answer.paystub.gross == 4500 and answer.paystub.net is None
     form = extract.to_paystub(answer, "claude-opus-5-5")

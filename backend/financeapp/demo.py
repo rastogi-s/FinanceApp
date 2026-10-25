@@ -646,6 +646,7 @@ def plan_page(today: date | None = None) -> dict:
         "inputs": _plan_inputs(today, net_worth),
         "projection": h["projection"],
         "ideas": {
+            "hsa": taxes_page(today)["hsa"],
             "subscriptions": subs,
             "subscriptions_yearly_cents": sum(s["yearly_cents"] for s in subs),
             "utilities": [
@@ -1086,6 +1087,7 @@ def taxes_page(today: date | None = None) -> dict:
             "medicare": _cents(63.29),
             "retirement": _cents(450),
             "hsa": _cents(135),
+            "employer_hsa": _cents(30),
         }
         ytd = {k: v * paid_so_far for k, v in this.items()} | {"gross": gross * paid_so_far}
         stubs.append(
@@ -1114,6 +1116,90 @@ def taxes_page(today: date | None = None) -> dict:
     }
     profile = {**taxes.DEFAULTS, "filing_status": "single", "amounts": {"lt_gains": _cents(3_200)}}
     return taxes.estimate(taxes.table_for(today.year), profile, facts, today) | {"demo": True}
+
+
+# ---- income over time
+
+
+def _sample_stubs(today: date) -> list:
+    """Two years of two-weekly stubs: a raise each March, a bonus in March, stock vesting each quarter, a 4% match
+    and $40 of HSA money from the employer each paycheck."""
+    from financeapp.models import Paycheck
+
+    stubs = []
+    d = date(today.year - 1, 1, 9)
+    ytd: dict[str, int] = {}
+    n = 0
+    while d < today:
+        if d.month == 1 and d.day <= 14:
+            ytd = {}
+        raised = d >= date(today.year, 3, 1)
+        base = _cents(122_200 / 26) if raised else _cents(4_500)
+        this = {"retirement": round(base * 0.08), "hsa": _cents(150), "employer_hsa": _cents(40)}
+        gross = base
+        if d.month == 3 and d.day <= 14:
+            this["bonus"] = _cents(11_200 if raised else 10_400)
+            gross += this["bonus"]
+        if d.month in (3, 6, 9, 12) and 15 <= d.day <= 28:
+            this["stock"] = _cents(6_000 if raised else 5_200)
+            gross += this["stock"]
+        this["match"] = round(base * 0.04)
+        for k, v in this.items():
+            ytd[k] = ytd.get(k, 0) + v
+        ytd["gross"] = ytd.get("gross", 0) + gross
+        taxes = round(gross * 0.27)
+        savings = this["retirement"] + this["hsa"]
+        n += 1
+        stubs.append(
+            Paycheck(
+                id=n,
+                user_id=0,
+                frequency="biweekly",
+                date=d,
+                gross_cents=gross,
+                taxes_cents=taxes,
+                savings_cents=savings,
+                net_cents=gross - taxes - savings - _cents(180),
+                employer_match_cents=this["match"],
+                detail={"this": dict(this), "ytd": dict(ytd)},
+            )
+        )
+        d += timedelta(days=14)
+    return stubs
+
+
+def earnings_page(today: date | None = None) -> dict:
+    """The Income over time page in demo mode: the real arithmetic on sample stubs, with three older years typed in."""
+    from financeapp import earnings
+
+    today = today or datetime.now(UTC).date()
+    y = today.year
+    older = [  # year, base, bonus, stock, match, HSA (dollars), where from, note
+        (y - 4, 96_000, 7_000, 0, 3_840, 0, "w2", "Joined as an engineer"),
+        (y - 3, 103_500, 8_200, 9_000, 4_140, 1_000, "w2", ""),
+        (y - 2, 110_000, 9_500, 18_400, 4_400, 1_040, "stub", "Promoted to senior engineer"),
+    ]
+    years = {}
+    for year, base, bonus, stock, match, hsa, source, note in older:
+        row = {"base": base, "bonus": bonus, "rsu": stock, "match": match, "employer_hsa": hsa}
+        years[str(year)] = {k: _cents(v) for k, v in row.items() if v} | {"source": source, "note": note}
+    prefs = {
+        "years": years,
+        "letters": [
+            {
+                "id": "sample1",
+                "kind": "raise",
+                "effective": date(y, 3, 1).isoformat(),
+                "title": "",
+                "base_cents": _cents(122_200),
+                "previous_base_cents": _cents(117_000),
+                "bonus_target_percent": 10.0,
+                "added": date(y, 2, 20).isoformat(),
+            }
+        ],
+    }
+    page = earnings.assemble(_sample_stubs(today), [], date(y - 1, 1, 2), prefs, today)
+    return page | {"demo": True}
 
 
 # ---- dividends and interest

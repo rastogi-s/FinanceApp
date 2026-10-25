@@ -16,6 +16,10 @@
         "url": "https://www.irs.gov/pub/irs-drop/n-25-67.pdf"
       },
       {
+        "title": "IRS Rev. Proc. 2025-19 (2026 HSA limits)",
+        "url": "https://www.irs.gov/pub/irs-drop/rp-25-19.pdf"
+      },
+      {
         "title": "IRS Form 8959 (Additional Medicare Tax) and Form 8960 (Net Investment Income Tax)",
         "url": "https://www.irs.gov/forms-pubs/about-form-8960"
       },
@@ -260,7 +264,8 @@
       "401k": 24500,
       "401k_catch_up": 8000,
       "hsa_self": 4400,
-      "hsa_family": 8750
+      "hsa_family": 8750,
+      "hsa_catch_up": 1000
     },
     "estimated_due_dates": [
       "2026-04-15",

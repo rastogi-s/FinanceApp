@@ -338,8 +338,9 @@ function PaycheckForm({
           savings: dollars(last.savings_cents),
           net: dollars(last.net_cents),
           match: last.employer_match_cents ? dollars(last.employer_match_cents) : "",
+          hsa: last.employer_hsa_cents ? dollars(last.employer_hsa_cents) : "",
         }
-      : { gross: "", taxes: "", savings: "", net: "", match: "" },
+      : { gross: "", taxes: "", savings: "", net: "", match: "", hsa: "" },
   );
   // For the Taxes page: the stub's taxes by kind (typed or read), and its year-to-date column when read.
   const [split, setSplit] = useState<Record<SplitKey, string>>(BLANK_SPLIT);
@@ -375,6 +376,7 @@ function PaycheckForm({
         savings: amount(r.savings_cents),
         net: amount(r.net_cents),
         match: r.employer_match_cents ? dollars(r.employer_match_cents) : "",
+        hsa: r.detail?.this.employer_hsa ? dollars(r.detail.this.employer_hsa) : "",
       });
       setReadDetail(r.detail ?? null);
       setSplit(
@@ -401,6 +403,7 @@ function PaycheckForm({
     savings: parseDollars(values.savings || "0"),
     net: parseDollars(values.net),
     match: parseDollars(values.match || "0"),
+    hsa: parseDollars(values.hsa || "0"),
   };
   const splitCents = Object.fromEntries(SPLIT.map(([k]) => [k, split[k].trim() ? parseDollars(split[k]) : undefined])) as Record<
     SplitKey,
@@ -409,6 +412,7 @@ function PaycheckForm({
   const splitBad = Object.values(splitCents).some((v) => v === null || (v !== undefined && v < 0));
   const complete = Object.values(cents).every((v) => v !== null && v >= 0) && (cents.gross ?? 0) > 0 && !splitBad;
   const other = complete ? cents.gross! - cents.taxes! - cents.savings! - cents.net! : null;
+  const employerHsa = cents.hsa ? { employer_hsa: cents.hsa } : {};
 
   const save = async () => {
     if (demo) return toast("Adding pay stubs is off while the app shows sample data.");
@@ -427,7 +431,12 @@ function PaycheckForm({
         net_cents: cents.net,
         employer_match_cents: cents.match,
         detail: {
-          this: { ...readDetail?.this, ...Object.fromEntries(Object.entries(splitCents).filter(([, v]) => v !== undefined)) },
+          this: {
+            ...readDetail?.this,
+            ...Object.fromEntries(Object.entries(splitCents).filter(([, v]) => v !== undefined)),
+            employer_hsa: undefined,
+            ...employerHsa,
+          },
           ytd: readDetail?.ytd ?? {},
           deposits: readDetail?.deposits ?? [],
         },
@@ -449,7 +458,7 @@ function PaycheckForm({
       error={
         values[key] && cents[key] === null
           ? "Type an amount, like 4,500.00."
-          : read && key !== "match" && !values[key]
+          : read && key !== "match" && key !== "hsa" && !values[key]
             ? "Not found on the stub. Type it in."
             : null
       }
@@ -553,7 +562,8 @@ function PaycheckForm({
       {field("taxes", "Taxes", "Federal, state, Social Security and Medicare together.")}
       {field("savings", "Saved before pay", "401(k), HSA and ESPP contributions.")}
       {field("net", "Take-home pay", "What landed in the bank.")}
-      {field("match", "Employer match (optional)", "Only counted if you turn it on under the savings rate.")}
+      {field("match", "Employer 401(k) match (optional)", "Only counted if you turn it on under the savings rate.")}
+      {field("hsa", "Employer HSA money (optional)", "What your employer puts in your HSA. It shares the yearly limit with yours.")}
       <div className="rounded-2xl border">
         <button
           type="button"

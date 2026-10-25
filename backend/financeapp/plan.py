@@ -31,7 +31,7 @@ from datetime import date, timedelta
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
 
-from financeapp import budget, transfers
+from financeapp import budget, earnings, transfers
 from financeapp.categorize import normalize_merchant
 from financeapp.models import Category, Fund, Preference, Transaction
 
@@ -225,7 +225,8 @@ def from_pay_stubs(state: dict, include_match: bool) -> dict | None:
         per_month = budget.PER_YEAR[stubs[0]["frequency"]] / 12
         typical_net = statistics.median(p["net_cents"] for p in stubs)
         typical_put = statistics.median(
-            p["savings_cents"] + (p["employer_match_cents"] if include_match else 0) for p in stubs
+            p["savings_cents"] + ((p["employer_match_cents"] + p.get("employer_hsa_cents", 0)) if include_match else 0)
+            for p in stubs
         )
         net += round(typical_net * per_month)
         put_away += round(typical_put * per_month)
@@ -489,6 +490,21 @@ def inputs(db: DbSession, state: dict, net_worth: int, on: date, holdings: list[
     rows = [month_row(ledger, m, payers, moved.get(m, 0)) for m in months]
     spending = Spending(ledger, months, on, rows)
     measured = derive_savings(state, ledger, spending, on, rows, set(payers.counts))  # employers paid
+    if measured["cents"] is not None and (ahead := earnings.raise_ahead(db, on)):
+        # A raise letter that starts after the newest stub: the history can't show it yet.
+        starts = date.fromisoformat(ahead["effective"])
+        when = f"{'from' if starts > on else 'since'} {starts:%b} {starts.day}"
+        measured = {
+            **measured,
+            "cents": measured["cents"] + ahead["cents"],
+            "note": measured["note"]
+            + f" Plus your raise to {dollars(ahead['base_cents'])} a year {when}: about {dollars(ahead['cents'])} "
+            "a month more after taxes, until a pay stub from after it is in.",
+            "breakdown": [
+                *measured["breakdown"],
+                line(f"Your raise to {dollars(ahead['base_cents'])} {when}, after taxes", ahead["cents"]),
+            ],
+        }
     returns = derive_returns(db, holdings, allocation)
     typed_return = prefs.get("return_mid")
     if typed_return is not None:

@@ -6,14 +6,14 @@ import { monthLabel } from "@/lib/income";
 import { cn } from "@/lib/utils";
 
 /** Round numbers for the gridlines: steps of 1, 2, 2.5 or 5 times a power of ten. */
-function niceStep(max: number) {
+export function niceStep(max: number) {
   const raw = max / 3;
   const p = 10 ** Math.floor(Math.log10(raw || 1));
   return [1, 2, 2.5, 5, 10].map((m) => m * p).find((s) => s >= raw) ?? raw;
 }
 
 /** Picking a point by dragging across, or with the arrow keys once focused (the same feel as the Plan chart). */
-function usePicker(count: number) {
+export function usePicker(count: number) {
   const ref = useRef<HTMLDivElement>(null);
   const [active, setActive] = useState<number | null>(null);
   const pick = (clientX: number) => {

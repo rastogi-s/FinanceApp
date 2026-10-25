@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { ChevronRight, Landmark, Pencil, RotateCcw, Scissors, Target, Telescope, TrendingUp } from "lucide-react";
+import { Briefcase, ChevronRight, Landmark, Pencil, RotateCcw, Scissors, Target, Telescope, TrendingUp } from "lucide-react";
+import { HsaCard } from "@/components/hsa-card";
 import { PlanChart } from "@/components/plan-chart";
 import { Money, formatMoney } from "@/components/money";
 import { Notice, PageTitle } from "@/components/page";
@@ -175,7 +176,9 @@ function PlanView({ p, onSaved }: { p: Linked; onSaved: (p: PlanState) => void }
           seen any pay yet.
         </Notice>
         <GoalsCard />
+        <IncomeLink />
         <TaxesLink />
+        {p.ideas.hsa && <HsaCard h={p.ideas.hsa} />}
         <Ideas p={p} s={s} />
         <About open={aboutOpen} onOpenChange={setAboutOpen} p={p} save={save} saving={saving} askSavings />
       </div>
@@ -411,7 +414,9 @@ function PlanView({ p, onSaved }: { p: Linked; onSaved: (p: PlanState) => void }
 
       <Ideas p={p} s={s} />
       <GoalsCard />
+      <IncomeLink />
       <TaxesLink />
+      {p.ideas.hsa && <HsaCard h={p.ideas.hsa} />}
       <About open={aboutOpen} onOpenChange={setAboutOpen} p={p} save={save} saving={saving} />
     </div>
   );
@@ -812,6 +817,25 @@ function GoalsCard() {
         )}
       </CardContent>
     </Card>
+  );
+}
+
+function IncomeLink() {
+  return (
+    <Link href="/earnings" className="block">
+      <Card className="transition-colors hover:bg-muted/40">
+        <CardHeader>
+          <CardTitle>Income over time</CardTitle>
+          <Briefcase className="size-4 text-muted-foreground" aria-hidden />
+        </CardHeader>
+        <CardContent className="flex items-center gap-3">
+          <p className="flex-1 text-sm">
+            Your pay each year by source, how it grew, and whether raises beat inflation. Add a raise letter to update your plan.
+          </p>
+          <ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+        </CardContent>
+      </Card>
+    </Link>
   );
 }
 

@@ -32,6 +32,7 @@ class TaxIn(BaseModel):
     children: int | None = Field(default=None, ge=0, le=20)
     other_dependents: int | None = Field(default=None, ge=0, le=20)
     qualified_share: int | None = Field(default=None, ge=0, le=100)
+    hsa_coverage: Literal["self", "family", "none"] | None = None
     amounts: dict[str, int | None] | None = None
 
     @field_validator("state")
@@ -66,6 +67,7 @@ def tax_settings(body: TaxIn, request: Request, who: Signed = Depends(signed_in)
         "children",
         "other_dependents",
         "qualified_share",
+        "hsa_coverage",
     ):
         if key in changes and changes[key] is None:
             del changes[key]  # these always have a value once answered

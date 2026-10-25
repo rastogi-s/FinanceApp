@@ -1,5 +1,29 @@
 [
   {
+    "version": "0.41.0",
+    "title": "Income over time",
+    "features": [
+      {
+        "id": "income-over-time",
+        "title": "Your pay, year by year",
+        "body": "Plan now has an Income over time page: each year's pay by where it came from (base, bonus, stock and other), plus your employer's 401(k) match and HSA money for total compensation, how much each year grew, and whether your raise beat inflation. This year shows what you're on track for. Tap a year to add a note like \"promoted\", or to type in numbers. Years before your linked accounts can be added from a W-2 or the year's last pay stub, or typed in.",
+        "tryIt": "/earnings"
+      },
+      {
+        "id": "raise-letter",
+        "title": "Add a raise or bonus letter",
+        "body": "Upload a raise, promotion, bonus or offer letter and AI reads the new base salary, bonus target and start date, after showing you exactly what would be sent with names taken out. Once saved, this year's on-track pay and Plan's monthly savings count the raise from its start date, until a pay stub from after it is in.",
+        "tryIt": "/earnings"
+      },
+      {
+        "id": "hsa-limit",
+        "title": "Your employer's HSA money counts toward the limit",
+        "body": "Pay stubs now keep your employer's HSA contribution apart from the 401(k) match. Taxes and Plan add it to your own HSA money and check the total against the yearly limit (self-only or family, which Taxes asks), with the room left per paycheck, or a warning if you're on track to go over.",
+        "tryIt": "/taxes"
+      }
+    ]
+  },
+  {
     "version": "0.40.0",
     "title": "Money in and out the right way round",
     "features": [

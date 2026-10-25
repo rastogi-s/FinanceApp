@@ -1,0 +1,47 @@
+{
+  "checked": "2026-10-25",
+  "sources": [
+    {
+      "title": "BLS: Consumer Price Index, September 2026 (all items CPI-U up 3.7% over 12 months)",
+      "url": "https://www.bls.gov/news.release/cpi.nr0.htm"
+    },
+    {
+      "title": "Federal Reserve Bank of Minneapolis: CPI-U annual averages since 1913",
+      "url": "https://www.minneapolisfed.org/about-us/monetary-policy/inflation-calculator/consumer-price-index-1913-"
+    }
+  ],
+  "note": "Prices for everything (CPI-U), change in the yearly average. The current year is the latest 12 months.",
+  "annual_average": {
+    "2000": 3.4,
+    "2001": 2.8,
+    "2002": 1.6,
+    "2003": 2.3,
+    "2004": 2.7,
+    "2005": 3.4,
+    "2006": 3.2,
+    "2007": 2.8,
+    "2008": 3.8,
+    "2009": -0.4,
+    "2010": 1.6,
+    "2011": 3.2,
+    "2012": 2.1,
+    "2013": 1.5,
+    "2014": 1.6,
+    "2015": 0.1,
+    "2016": 1.3,
+    "2017": 2.1,
+    "2018": 2.4,
+    "2019": 1.8,
+    "2020": 1.2,
+    "2021": 4.7,
+    "2022": 8.0,
+    "2023": 4.1,
+    "2024": 2.9,
+    "2025": 2.6
+  },
+  "latest": {
+    "year": 2026,
+    "through": "2026-09",
+    "percent": 3.7
+  }
+}

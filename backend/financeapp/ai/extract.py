@@ -40,7 +40,8 @@ money in (deposits, refunds, payments received by a card). description as printe
 - paystub: pay_date, period_start, period_end (YYYY-MM-DD), and the amounts for THIS paycheck (not year to date): \
 gross (total gross pay), taxes (all taxes withheld: federal, state, local, Social Security, Medicare), \
 pre_tax_savings (401(k), 403(b), 457, HSA and ESPP taken out of pay), net (net pay / take-home), employer_match \
-(employer 401(k) or HSA contributions, if shown). frequency: weekly, biweekly, semimonthly or monthly if stated.
+(the employer's 401(k) match, if shown), employer_hsa (the employer's own HSA contribution; not the employee's; \
+0 if not shown). frequency: weekly, biweekly, semimonthly or monthly if stated.
 - notes: one short sentence if something was unclear (cut-off pages, unreadable rows), else null.
 
 Parts of the text were replaced with labels like [name], [SSN] or [number ending 1234] before you got it; that's \
@@ -94,6 +95,9 @@ SCHEMA = _obj(
                         "pre_tax_savings": _nullable_num,
                         "net": _nullable_num,
                         "employer_match": _nullable_num,
+                        # A plain number (0 when not shown): Claude's schema limit leaves no room for one more
+                        # optional field (see providers._optional_not_null).
+                        "employer_hsa": {"type": "number"},
                     }
                 ),
                 {"type": "null"},
@@ -155,6 +159,7 @@ class _Stub(BaseModel):
     pre_tax_savings: float | None = None
     net: float | None = None
     employer_match: float | None = None
+    employer_hsa: float | None = None
 
 
 class Answer(BaseModel):
@@ -325,6 +330,8 @@ def to_paystub(a: Answer, model: str) -> dict:
         "employer_match_cents": amount(s.employer_match),
         "warnings": [f"Read by AI ({model}). Check every number against the stub before saving."],
     }
+    if hsa := amount(s.employer_hsa):
+        out["detail"] = {"this": {"employer_hsa": hsa}, "ytd": {}, "deposits": []}
     if out["gross_cents"] is None and out["net_cents"] is None:
         raise ProviderError("No gross or take-home pay could be read. Try a clearer picture, or type the numbers in.")
     g, t, sv, n = (out[k] or 0 for k in ("gross_cents", "taxes_cents", "savings_cents", "net_cents"))

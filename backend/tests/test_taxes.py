@@ -93,6 +93,33 @@ def test_pay_from_the_year_to_date_and_the_paychecks_left():
     assert r["state"]["tax_cents"] == round((f["agi_cents"] - 12_750_00) * 0.0399)
 
 
+def test_your_hsa_money_and_your_employers_share_the_yearly_limit():
+    # $150 of your own and $50 from your employer each paycheck: 21 paychecks so far, 5 to come.
+    detail = {"federal": 600, "social_security": 270, "medicare": 63, "state": 150, "hsa": 150, "employer_hsa": 50}
+    ytd = {"gross": 94_500, "hsa": 3_150, "employer_hsa": 1_050}
+    s = stub("2026-10-16", 4_500, detail, ytd=ytd)
+    r = taxes.estimate(T, profile(), facts({1: [s]}), TODAY)
+    h = r["hsa"]
+    assert (h["own_cents"], h["employer_cents"]) == (3_900_00, 1_300_00)
+    assert h["limit_cents"] == 4_400_00 and h["over_cents"] == 800_00 and h["room_cents"] == 0
+    # Over the self-only limit: $800 of your own payroll HSA money is taxed after all.
+    items = {i["key"]: i for i in r["items"]}
+    assert (
+        items["hsa_benefits"]["derived_cents"] == 3_900_00 - 800_00
+        and "over the yearly limit" in (items["hsa_benefits"]["note"])
+    )
+    assert h["taxed_cents"] == 800_00
+    # Family coverage has room left: per paycheck, for the 5 to come. From 55 there's $1,000 more.
+    fam = taxes.estimate(T, profile(hsa_coverage="family"), facts({1: [s]}, birth_year=1970), TODAY)["hsa"]
+    assert fam["limit_cents"] == 9_750_00 and fam["catch_up"]
+    assert fam["room_cents"] == 9_750_00 - 5_200_00 and fam["per_paycheck_cents"] == (9_750_00 - 5_200_00) // 5
+    # Money put in outside payroll is deductible only up to what's left of the limit.
+    outside = taxes.estimate(T, profile(hsa_coverage="family", amounts={"hsa_outside": 6_000}), facts({1: [s]}), TODAY)
+    no_outside = taxes.estimate(T, profile(hsa_coverage="family"), facts({1: [s]}), TODAY)
+    assert no_outside["federal"]["agi_cents"] - outside["federal"]["agi_cents"] == 8_750_00 - 5_200_00
+    assert outside["hsa"]["over_cents"] == 5_200_00 + 6_000_00 - 8_750_00
+
+
 def test_a_stub_with_only_total_taxes_is_split_by_the_rates():
     s = stub("2026-10-16", 4_000, taxes_total=1_000, savings=400)
     r = taxes.estimate(T, profile(), facts({1: [s]}), TODAY)

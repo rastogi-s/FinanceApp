@@ -1,6 +1,8 @@
 // The Plan page's numbers. The arithmetic is the same as backend/financeapp/plan.py, so the what-if sliders
 // answer instantly without asking the server, and agree with what Home and the morning brief say.
 
+import type { HsaCheck } from "@/components/hsa-card";
+
 export type Level = "lean" | "regular" | "fat";
 export type Band = { year: number; low: number; mid: number; high: number };
 export type Returns = { low: number; mid: number; high: number };
@@ -98,6 +100,7 @@ export type PlanState =
         subscriptions_yearly_cents: number;
         utilities?: Utility[];
         rising: Rising[];
+        hsa?: HsaCheck | null;
       };
     };
 

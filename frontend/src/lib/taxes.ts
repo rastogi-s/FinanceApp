@@ -1,3 +1,5 @@
+import type { HsaCheck } from "@/components/hsa-card";
+
 /** The Taxes page's numbers, as GET /api/taxes sends them (backend/financeapp/taxes.py works them out). */
 
 export type FilingStatus = "single" | "mfj" | "mfs" | "hoh";
@@ -24,6 +26,7 @@ export type TaxProfile = {
   children: number;
   other_dependents: number;
   qualified_share: number;
+  hsa_coverage: "self" | "family" | "none" | null;
 };
 
 export type Hint = { kind: "more" | "less"; per_check_cents: number; deductions_cents?: number } | null;
@@ -121,6 +124,7 @@ export type TaxState = {
       per_date_cents: number | null;
     } | null;
   };
+  hsa: HsaCheck;
   sources: Source[];
   assumptions: string[];
 };
@@ -141,7 +145,7 @@ export const INCOME = [
   "other_income",
   "adjustments",
 ];
-export const DEDUCTIONS = ["itemized", "state_itemized", "other_credits"];
+export const DEDUCTIONS = ["hsa_outside", "itemized", "state_itemized", "other_credits"];
 export const PAID = [
   "federal_withheld",
   "spouse_federal_withheld",

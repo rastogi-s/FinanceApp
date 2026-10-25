@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { CalendarClock, Check, ChevronRight, ExternalLink, FileText, Landmark, Pencil, ReceiptText, RotateCcw } from "lucide-react";
+import { HsaCard } from "@/components/hsa-card";
 import { Money, formatMoney } from "@/components/money";
 import { BackLink, Notice, PageTitle } from "@/components/page";
 import { Badge } from "@/components/ui/badge";
@@ -79,6 +80,7 @@ function TaxView({ t, onSaved }: { t: TaxState; onSaved: (t: TaxState) => void }
       {!t.answered && <FirstQuestions t={t} save={save} saving={saving} />}
       <Bottom t={t} />
       <Hints t={t} />
+      <HsaCard h={t.hsa} busy={saving} onCoverage={(c) => save({ hsa_coverage: c }, c === "none" ? "Noted: no HSA." : "Coverage saved.")} />
       <Answers t={t} onEdit={() => setAnswersOpen(true)} />
       <ItemCard title="Income" icon={<ReceiptText className="size-4 text-muted-foreground" aria-hidden />} items={pick(INCOME)} onEdit={setEditing}>
         {t.people.length === 0 && (
