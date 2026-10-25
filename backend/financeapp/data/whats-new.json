@@ -1,5 +1,17 @@
 [
   {
+    "version": "0.39.0",
+    "title": "Upload into an account you already have",
+    "features": [
+      {
+        "id": "account-upload",
+        "title": "Upload transactions or a statement from the account",
+        "body": "Uploaded and typed-in accounts now have an Upload button right on their card in Settings → Accounts, and tapping an account shows a big Upload transactions or statement button at the top. The file goes into that account (you can still change it on the check screen), and anything already there isn't added twice. You no longer have to wait for the Time to upload card on Home.",
+        "tryIt": "/settings/accounts"
+      }
+    ]
+  },
+  {
     "version": "0.38.0",
     "title": "What went into each category",
     "features": [
