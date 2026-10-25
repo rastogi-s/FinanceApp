@@ -6,7 +6,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from financeapp import demo, earnings, paystub
+from financeapp import demo, earnings, paystub, w2
 from financeapp.ai import documents, paydocs, reading
 from financeapp.ai.providers import ProviderError
 from financeapp.ai.service import AIUnavailable
@@ -162,8 +162,9 @@ async def read_document(
     who: Signed = Depends(signed_in),
 ) -> dict:
     """Reads a raise or bonus letter, or a year's W-2 or last pay stub, into the form. Nothing is saved and the file
-    isn't kept. A pay stub PDF with a year-to-date column is read here; everything else comes back first as an offer
-    to read it with AI (exactly what would be sent), and again with read_with_ai=true if the person agrees."""
+    isn't kept. A W-2 PDF, or a pay stub PDF with a year-to-date column, is read here; everything else comes back
+    first as an offer to read it with AI (exactly what would be sent), and again with read_with_ai=true if the person
+    agrees."""
     no_demo(who)
     db = request.state.db
     data = await file.read(MAX_BYTES + 1)
@@ -175,12 +176,15 @@ async def read_document(
     why = "Raise and bonus letters are read with AI." if kind == "letter" else "W-2s are read with AI."
     if kind == "year" and sniffed == "pdf" and not read_with_ai:
         try:
-            if found := from_stub(paystub.read(data)):
+            if form := w2.read(data):
+                if found := w2.to_year(form):
+                    return found
+            elif found := from_stub(paystub.read(data)):
                 return found
         except paystub.StubError as e:
             if "password" in str(e):
                 raise HTTPException(422, str(e)) from None
-        why = "This isn't a pay stub the app can read by itself, so it needs AI."
+        why = "This isn't a W-2 or pay stub the app can read by itself, so it needs AI."
     try:
         doc = documents.open_document(data)
     except documents.DocumentError as e:

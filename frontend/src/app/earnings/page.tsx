@@ -713,7 +713,7 @@ function YearForm({ year, e, onChange, onClose }: { year: number | null; e: Earn
         if (!bad) save();
       }}
     >
-      {reader.box("Have a W-2 or the year's last stub? Upload it", "A stub PDF is read here; a W-2 or a photo with AI, after you see what's sent.")}
+      {reader.box("Have a W-2 or the year's last stub? Upload it", "A W-2 or stub PDF is read here; a photo or other layout with AI, after you see what's sent.")}
       {!year && (
         <Field id="year-pick" label="Year">
           <Select value={pick} onChange={(ev) => setPick(Number(ev.target.value))}>

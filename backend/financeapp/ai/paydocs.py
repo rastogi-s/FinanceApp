@@ -66,13 +66,14 @@ for a number and "" for text the document doesn't show.
 
 - kind: "w2", "paystub" or "other".
 - tax_year: the year the pay is for, like 2024.
-- total_pay: all pay for the year before taxes and deductions. On a W-2 that's box 5 (Medicare wages and tips); \
-on a pay stub the year-to-date gross pay.
+- total_pay: all pay for the year before taxes and deductions. On a W-2 with an earnings summary beside it, its \
+Gross Pay; on a W-2 alone, box 5 (Medicare wages and tips); on a pay stub, the year-to-date gross pay.
 - bonus: bonus, incentive or commission pay for the year, if shown on its own.
 - stock_pay: stock pay for the year (RSU vests, ESPP income), if shown on its own (a W-2 may list it in box 14).
 - employer_match: the employer's 401(k) match for the year, if shown.
 - employer_hsa: the employer's own HSA contribution for the year, if shown on its own (W-2 box 12 code W adds the \
-employee's payroll HSA money in, so don't use it here).
+employee's payroll HSA money in: when the earnings summary shows the employee's own HSA deduction, like "Cafe 125 \
+HSA", use box 12 W less that; otherwise 0).
 - notes: one short sentence if something was unclear, else "".
 
 Parts of the text were replaced with labels like [name] or [SSN] before you got it; that's expected."""
@@ -189,7 +190,9 @@ def to_year(a: YearAnswer, names: list[str], emails: list[str], model: str, toda
         "warnings": [f"Read by AI ({model}). Check it against the document before saving."],
     }
     if a.kind == "w2":
-        out["warnings"].append("From box 5 (Medicare wages): all pay, before your 401(k) and HSA came out.")
+        out["warnings"].append(
+            "A W-2 doesn't split base pay from stock vests or bonuses unless it lists them. Check base pay."
+        )
     if year is None:
         out["warnings"].append("The year wasn't found. Pick it.")
     if a.notes:
