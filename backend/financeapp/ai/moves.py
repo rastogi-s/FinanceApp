@@ -30,7 +30,7 @@ from defusedxml import ElementTree
 from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy.orm import Session as DbSession
 
-from financeapp import goals, household, lookthrough, plan, portfolio, quotes, security, taxes
+from financeapp import goals, household, lookthrough, lots, plan, portfolio, quotes, security, taxes
 from financeapp.ai import service
 from financeapp.ai.providers import ProviderError, Request, parse_json
 from financeapp.ai.reading import household_identity
@@ -46,6 +46,7 @@ PREF_KEY = "moves"
 MAX_REPLY_TOKENS = 8000
 PREVIEW_CHARS = 6000
 MAX_QUESTION = 500
+MAX_LOTS = 20  # per holding and account, oldest first
 MAX_HOLDINGS = 60  # the largest; the rest are summed up as "smaller holdings"
 NEWS_SYMBOLS = 6  # headlines for this many of the largest holdings
 NEWS_PER_SYMBOL = 4
@@ -64,7 +65,9 @@ SYSTEM = """You are a careful, independent investment analyst giving a household
 today. You get JSON (amounts in dollars, percents as numbers) with:
 - holdings: each position by ticker, its value and share of the portfolio, today's move, gain against cost where known,
   where it trades against its 52-week range and 50/200-day averages, and the accounts it's in, each marked taxable or
-  tax_advantaged (selling inside a tax-advantaged account has no tax), plus unvested stock plan shares if any,
+  tax_advantaged (selling inside a tax-advantaged account has no tax), plus unvested stock plan shares if any. In
+  taxable accounts, tax_lots: each lot's purchase date, shares, cost, gain, term (short, long or unknown) and, for
+  short-term lots, the day it turns long-term ("estimated" lots were reconstructed from partial history),
 - allocation by asset class (cash included), the top-5 concentration, and the largest companies owned once funds are
   looked through (so overlap between funds and single stocks shows),
 - cash, the emergency fund (target and what's there) and cash not set aside for goals,
@@ -80,7 +83,9 @@ headlines alone are not a reason to trade. Don't time the market or predict pric
 concentration in one company or sector (a single stock over about 10%, or overlap through funds), drift from a
 sensible mix for their age and goals, money needed within about three years sitting in stocks, an emergency fund that
 is short, idle cash beyond the emergency fund and goals, losses worth harvesting in taxable accounts (mind the 30-day
-wash-sale rule, also across accounts), and gains that would be short-term if sold now. Prefer making changes inside
+wash-sale rule, also across accounts), and gains that would be short-term if sold now. Name which lots to sell
+(losses to harvest, then long-term or highest-cost lots), and if a lot turns long-term within a few weeks, say that
+waiting saves tax. Prefer making changes inside
 tax-advantaged accounts, or with new money, over selling at a gain in a taxable account. Only suggest buying a ticker
 they don't hold if it's a broad, low-cost fund, and say why.
 
@@ -92,7 +97,7 @@ using their rates; "None, tax-advantaged account." where that applies) and risks
 of the portfolio, and any smaller one worth a word. verdict overall: hold (nothing worth doing), small_moves or act.
 headline: one plain sentence. summary: 3 to 5 sentences on where the portfolio stands and why. market: 2 or 3 sentences
 on today's market and what, if anything, it means for them. watch: up to 4 things to keep an eye on. caveats: what you
-couldn't see or had to assume (for example: no tax lots, so holding periods are unknown). Plain words, no jargon
+couldn't see or had to assume (for example: estimated lots, or a holding with no cost basis). Plain words, no jargon
 without a short explanation, whole dollars."""
 
 MOVE_FIELDS = ("action", "symbol", "account", "amount", "urgency", "confidence", "why", "tax_impact", "risks")
@@ -281,6 +286,20 @@ def facts(db: DbSession, settings: Settings, viewer_id: int, question: str = "")
     invested = sum(p.value_cents for p in ps)
     live = quotes.latest(db, {p.symbol for p in ps})
 
+    every_lot = lots.of(db, accounts, ps)
+    lots_of: dict[tuple[int, str], list[dict]] = defaultdict(list)
+    for lot in every_lot:
+        lots_of[(lot["account_id"], lot["symbol"])].append(
+            {
+                "acquired": lot["acquired"] or f"before {lot['acquired_before'] or 'the history'}",
+                "shares": round(lot["quantity"], 4),
+                "cost": dollars(lot["cost_cents"]),
+                "gain": dollars(lot["gain_cents"]),
+                "term": lot["term"] or "unknown",
+                "long_term_on": lot["long_term_on"],
+                "estimated": lot["estimated"],
+            }
+        )
     grouped: dict[str, list[portfolio.Position]] = defaultdict(list)
     for p in ps:
         grouped[p.symbol].append(p)
@@ -307,6 +326,11 @@ def facts(db: DbSession, settings: Settings, viewer_id: int, question: str = "")
                     "tax": "taxable" if p.account_id in taxable_ids else "tax_advantaged",
                     "value": dollars(p.value_cents),
                     "cost_basis": dollars(p.cost_basis_cents),
+                    **(
+                        {"tax_lots": lots_of.get((p.account_id, symbol), [])[:MAX_LOTS]}
+                        if p.account_id in taxable_ids and (p.account_id, symbol) in lots_of
+                        else {}
+                    ),
                 }
                 for p in sorted(parts, key=lambda p: -p.value_cents)
             ],
@@ -331,6 +355,12 @@ def facts(db: DbSession, settings: Settings, viewer_id: int, question: str = "")
     prefs = plan.preferences(db)
     try:
         tax = tax_picture(db, viewer_id, on)
+        held = lots.summary(every_lot, on)
+        tax |= {
+            "unrealized_short_term_gain_in_taxable": dollars(held["short_gain_cents"]),
+            "unrealized_long_term_gain_in_taxable": dollars(held["long_gain_cents"]),
+            "unrealized_gain_of_unknown_term_in_taxable": dollars(held["unknown_gain_cents"]),
+        }
     except (KeyError, ValueError, TypeError, ZeroDivisionError) as e:
         log.info("tax picture for the moves review failed (%s)", type(e).__name__)
         tax = None

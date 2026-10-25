@@ -131,12 +131,39 @@ export type Security = {
     as_of: string | null;
     // Stock plan shares not vested yet: shown here, never counted in the position, portfolio or net worth.
     unvested?: { quantity: number; value_cents: number; accounts: { account: string; quantity: number }[] };
+    lots?: TaxLots;
   } | null;
   exposure: Company | null;
   fund: FundRow | null;
   rules: PriceRule[];
   market_data: boolean;
   sources: Sources;
+};
+
+export type TaxLot = {
+  symbol: string;
+  account_id: number;
+  account: string;
+  taxable: boolean;
+  acquired: string | null; // null: shares from before the activity history
+  acquired_before: string | null;
+  quantity: number;
+  cost_cents: number | null;
+  value_cents: number;
+  gain_cents: number | null;
+  term: "short" | "long" | null;
+  long_term_on: string | null;
+  estimated: boolean;
+};
+
+export type TaxLots = {
+  rows: TaxLot[];
+  short_gain_cents: number;
+  long_gain_cents: number;
+  unknown_gain_cents: number;
+  has_taxable: boolean;
+  next_long_term: { on: string; days: number; quantity: number; gain_cents: number } | null;
+  lot_count: number;
 };
 
 export const price = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2 });

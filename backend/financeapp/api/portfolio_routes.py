@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
 
-from financeapp import demo, household, lookthrough, portfolio, quotes, security
+from financeapp import demo, household, lookthrough, lots, portfolio, quotes, security
 from financeapp.ai import moves
 from financeapp.ai.providers import ProviderError
 from financeapp.ai.service import AIUnavailable
@@ -227,6 +227,9 @@ def detail(
             ],
             "as_of": max(p.as_of for p in mine).isoformat(),
         }
+        rows = lots.of(db, accounts, mine)
+        if rows:
+            position["lots"] = {"rows": rows, **lots.summary(rows)}
     locked = portfolio.unvested(db, accounts, symbol)
     if locked and price:
         if position is None:

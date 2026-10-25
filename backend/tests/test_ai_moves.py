@@ -1,4 +1,5 @@
 import json
+from datetime import timedelta
 from decimal import Decimal
 
 import pytest
@@ -6,7 +7,7 @@ from sqlalchemy import select
 
 from financeapp import security
 from financeapp.ai import moves
-from financeapp.models import Account, Balance, Connection, HoldingSnapshot, Preference
+from financeapp.models import Account, Balance, Connection, HoldingSnapshot, InvestmentTransaction, Preference
 from tests.conftest import csrf, db_of, needs_db
 from tests.test_ai import FakeProviders, add_claude, fake  # noqa: F401  (fake is a fixture)
 from tests.test_ai_budget import ai_route
@@ -67,6 +68,10 @@ def holdings(db):
                            quantity=Decimal(100), price=Decimal(200), value_cents=2_000_000,
                            cost_basis_cents=1_200_000))  # fmt: skip
     db.add(Balance(account_id=a.id, date=TODAY, current_cents=2_000_000))
+    # 40 of the shares were bought 100 days ago (a short-term lot); the rest are from before the history.
+    db.add(InvestmentTransaction(account_id=a.id, external_id="b1", date=TODAY - timedelta(days=100), type="buy",
+                                 subtype="buy", symbol="AAPL", name="Apple", quantity=Decimal(40), price=Decimal(75),
+                                 amount_cents=-300_000, source="plaid"))  # fmt: skip
     return ira, a
 
 
@@ -87,9 +92,14 @@ def test_the_offer_shows_what_goes_and_sends_nothing(client, home, fake):  # noq
     preview = json.loads(offer["preview"])
     aapl = next(h for h in preview["holdings"] if h["symbol"] == "AAPL")
     assert aapl["gain"] == 8000 and aapl["gain_percent"] == pytest.approx(66.67)
-    assert aapl["accounts"] == [
-        {"account": "Fidelity Brokerage", "tax": "taxable", "value": 20000, "cost_basis": 12000}
-    ]
+    brokerage = aapl["accounts"][0]
+    assert {k: brokerage[k] for k in ("account", "tax", "value", "cost_basis")} == {
+        "account": "Fidelity Brokerage", "tax": "taxable", "value": 20000, "cost_basis": 12000,
+    }  # fmt: skip
+    held = [(lot["shares"], lot["cost"], lot["term"]) for lot in brokerage["tax_lots"]]
+    assert held == [(60.0, 9000, "unknown"), (40.0, 3000, "short")]
+    assert brokerage["tax_lots"][1]["long_term_on"] is not None
+    assert "tax_lots" not in next(h for h in preview["holdings"] if h["symbol"] == "VTI")["accounts"][0]
     vti = next(h for h in preview["holdings"] if h["symbol"] == "VTI")
     assert vti["accounts"][0]["tax"] == "tax_advantaged" and vti["percent_of_portfolio"] == 60.0
     assert preview["market"]["indexes"][0] == {

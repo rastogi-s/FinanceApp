@@ -1,6 +1,6 @@
 [
   {
-    "version": "0.36.0",
+    "version": "0.37.0",
     "title": "Any moves today?",
     "features": [
       {
@@ -8,6 +8,18 @@
         "title": "Ask AI whether to buy, sell or hold",
         "body": "Portfolio has a new Any moves today? card. It asks the AI you set up for a careful second opinion from your holdings, gains against cost, which accounts are taxable, your mix and overlap through funds, cash and emergency fund, goals, tax bracket, and today's market with recent headlines on your largest holdings. You get a verdict, a few ideas with the reasoning, tax impact and what could go wrong, and a word on every holding. Type a question too, like where a bonus should go. You see exactly what's sent first (no account numbers or names), nothing is ever traded, and the last answer stays on the page. Turn it on in Settings, AI under Reviewing your portfolio. Ideas to consider, not financial advice.",
         "tryIt": "/portfolio/moves"
+      }
+    ]
+  },
+  {
+    "version": "0.36.0",
+    "title": "Your tax lots",
+    "features": [
+      {
+        "id": "tax-lots",
+        "title": "Every holding shows its tax lots",
+        "body": "Open a holding on Portfolio to see its shares by the day you bought them: shares, cost a share, value, gain, and whether a sale would be short-term or long-term. In a taxable account the page adds up your long-term and short-term gains, and tells you when the next lot with a gain turns long-term, so you can wait a few weeks for the lower rate. Lots are built from your brokerage's buys and sells over the last two years, oldest sold first; shares older than that show as one earlier lot. Retirement and HSA lots are shown too, marked as not taxed.",
+        "tryIt": "/portfolio"
       }
     ]
   },
