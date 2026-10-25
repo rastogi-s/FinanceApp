@@ -1,0 +1,7 @@
+Transaction Date,Clearing Date,Description,Merchant,Category,Type,Amount (USD),Purchased By
+10/14/2026,10/15/2026,"TRADER JOE S #552 SAN FRANCISCO CA","Trader Joe's",Grocery,Purchase,54.20,Shubham Rastogi
+10/12/2026,10/12/2026,"ACH DEPOSIT INTERNET TRANSFER FROM ACCOUNT ENDING IN 4417","Ach Deposit Internet Transfer From Account Ending In 4417",Payment,Payment,-200.00,Shubham Rastogi
+10/10/2026,10/11/2026,"BLUE BOTTLE COFFEE OAKLAND CA","Blue Bottle Coffee",Restaurants,Purchase,6.50,Shubham Rastogi
+10/08/2026,10/09/2026,"APPLE STORE RETURN","Apple Store",Other,Credit,-29.00,Shubham Rastogi
+10/05/2026,10/05/2026,"ACH DEPOSIT INTERNET TRANSFER FROM ACCOUNT ENDING IN 4417","Ach Deposit Internet Transfer From Account Ending In 4417",Payment,Payment,-150.00,Shubham Rastogi
+10/03/2026,10/04/2026,"NETFLIX.COM LOS GATOS CA","Netflix",Other,Purchase,15.49,Shubham Rastogi

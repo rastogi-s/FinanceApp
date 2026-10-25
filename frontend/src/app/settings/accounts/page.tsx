@@ -17,6 +17,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { Money, formatMoney } from "@/components/money";
+import { FlipCard } from "@/components/flip-card";
 import { SubPageTitle } from "@/components/page";
 import { UploadSheet } from "@/components/upload-sheet";
 import { Badge } from "@/components/ui/badge";
@@ -781,6 +782,8 @@ function AccountSheet({
             </Button>
           </div>
         )}
+
+        {typed && <FlipCard accountId={a.id} name={current.display_name} disabled={disabled} onDone={onSaved} />}
 
         {current.reminder && (
           <ReminderCard reminder={current.reminder} manual={c.provider === "manual"} disabled={disabled} onChange={saveReminder} />

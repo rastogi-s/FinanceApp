@@ -1,5 +1,17 @@
 [
   {
+    "version": "0.40.0",
+    "title": "Money in and out the right way round",
+    "features": [
+      {
+        "id": "flip-money-in-out",
+        "title": "Turn an upload's money in and out around",
+        "body": "If an uploaded account shows purchases as money coming in, tap it in Settings → Accounts and use Turn money in and out around. It works on any uploaded or typed-in account, for everything in it or just one upload, shows Out and In before and after, and can mark the account as a credit card at the same time. Transfers and categories are worked out again, categories you picked yourself stay, and doing it twice puts things back. Uploading a file again the right way round also fixes rows saved backwards, without adding them twice. Apple Card exports are now recognized and read the right way round, and any file with a Type column (Purchase, Payment, Sale...) uses it to tell money in from money out.",
+        "tryIt": "/settings/accounts"
+      }
+    ]
+  },
+  {
     "version": "0.39.0",
     "title": "Upload into an account you already have",
     "features": [

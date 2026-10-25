@@ -191,7 +191,7 @@ def test_a_pdf_statement_is_read_with_ai_then_saved_like_any_file(client, home, 
         json={"targets": [{"index": 0, "institution": "Chase", "name": "Checking", "type": "depository"}]},
         headers=csrf(client),
     )
-    assert r.json() == {"holdings": 0, "transactions": 2, "accounts": 1}
+    assert r.json() == {"holdings": 0, "transactions": 2, "accounts": 1, "turned_around": 0}
     activity = client.get("/api/auth/audit").json()
     assert any(e["action"] == "ai_read_file" for e in activity)
 

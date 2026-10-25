@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session as DbSession
 
-from financeapp import auth, crypto, dedupe, demo, household, notify, paystub, reminders, review, search, sync
+from financeapp import auth, crypto, dedupe, demo, flip, household, notify, paystub, reminders, review, search, sync
 from financeapp.ai import documents, extract, reading
 from financeapp.ai.providers import ProviderError
 from financeapp.ai.service import AIUnavailable
@@ -557,7 +557,11 @@ def _builtin(data: bytes, name: str, kind: str) -> tuple[ParsedFile | None, dict
 
 @router.post("/imports")
 async def upload(
-    file: UploadFile, request: Request, read_with_ai: bool = False, who: Signed = Depends(signed_in)
+    file: UploadFile,
+    request: Request,
+    read_with_ai: bool = False,
+    account_id: int | None = None,
+    who: Signed = Depends(signed_in),
 ) -> dict:
     """Reads an upload into a preview. What the app can't read by itself comes back as an offer to read it with AI
     (what would be sent, to whom); the browser uploads it again with read_with_ai=true if the person agrees."""
@@ -603,12 +607,18 @@ async def upload(
             ),
             None,
         )
+        if suggested is None and len(parsed.accounts) == 1:
+            # Uploaded from an account's own Upload button: that's where it goes unless changed.
+            suggested = next((a for a in targets if a.id == account_id), None)
         # An account with these last 4 digits already syncing through Plaid or SnapTrade: don't double count.
         synced_twin = next((a for a in all_accounts if fa.mask and a.mask == fa.mask and a not in targets), None)
-        duplicates = 0
+        duplicates = backwards = 0
         if suggested is not None and fa.transactions:
-            have = set(db.scalars(select(Transaction.external_id).where(Transaction.account_id == suggested.id)))
+            saved = db.scalars(select(Transaction).where(Transaction.account_id == suggested.id))
+            have = {t.external_id: t for t in saved}
             duplicates = sum(1 for t in fa.transactions if t.external_id in have)
+            # Already saved the other way round (an earlier upload read backwards): saving turns those around.
+            backwards = len(flip.reversed_matches(have, fa.transactions))
         dates = sorted(t.date for t in fa.transactions)
         out_accounts.append(
             {
@@ -621,6 +631,7 @@ async def upload(
                 "holdings_cents": sum(h.value_cents for h in fa.holdings),
                 "transactions": len(fa.transactions),
                 "duplicates": duplicates,
+                "backwards": backwards,
                 "first_date": dates[0].isoformat() if dates else None,
                 "last_date": dates[-1].isoformat() if dates else None,
                 "balance_cents": fa.balance_cents,
@@ -688,7 +699,7 @@ def commit_import(import_id: int, body: CommitIn, request: Request, who: Signed 
         raise HTTPException(404, "That upload isn't waiting to be saved any more. Upload it again.")
     allowed = {a.id: a for a in _account_candidates(db)}
     as_of = date.fromisoformat(imp.parsed["as_of"])
-    totals = {"holdings": 0, "transactions": 0, "accounts": 0}
+    totals = {"holdings": 0, "transactions": 0, "accounts": 0, "turned_around": 0}
     new_connections: dict[str, Connection] = {}
     saved_into: list[int] = []
     for target in body.targets:
@@ -738,8 +749,10 @@ def commit_import(import_id: int, body: CommitIn, request: Request, who: Signed 
                 data = TransactionData(**{**t, "date": date.fromisoformat(t["date"])})
                 if body.flip:
                     data.amount_cents = -data.amount_cents
+                    flip.resign(data)
                 data.account_external_id = "file"
                 txns.append(data)
+            totals["turned_around"] += flip.claim_reversed(db, account, txns)
             totals["transactions"] += len(sync.save_transactions(db, {"file": account}, txns, "file", imp.id))
         if fa["balance_cents"] is not None:
             sync.save_balance(db, account.id, as_of, fa["balance_cents"])
@@ -753,6 +766,46 @@ def commit_import(import_id: int, body: CommitIn, request: Request, who: Signed 
     categorize(db)
     audit(db, request, "import", who.user.id, format=imp.summary.get("format"), **totals)
     return totals
+
+
+class FlipIn(BaseModel):
+    import_id: int | None = None  # just one upload; None: every transaction in the account
+    type: str | None = Field(default=None, pattern="^(depository|credit|loan|investment|other)$")
+
+
+def _flippable(db: DbSession, account_id: int) -> Account:
+    account = next((a for a in _account_candidates(db) if a.id == account_id), None)
+    if account is None:
+        raise HTTPException(404, "Only uploaded or typed-in accounts can be turned around.")
+    return account
+
+
+@router.get("/accounts/{account_id}/flip")
+def flip_preview(account_id: int, request: Request, who: Signed = Depends(signed_in)) -> dict:
+    """Money in and out for an uploaded account, overall and per upload, before turning it around."""
+    return flip.uploads_of(db_of(request), _flippable(db_of(request), account_id))
+
+
+@router.post("/accounts/{account_id}/flip")
+def flip_account(account_id: int, body: FlipIn, request: Request, who: Signed = Depends(signed_in)) -> dict:
+    """Money in and out came in the wrong way round: flips the account's transactions (or one upload's), then
+    re-pairs transfers and re-categorizes. Doing it twice puts everything back."""
+    no_demo(who)
+    db = db_of(request)
+    account = _flippable(db, account_id)
+    q = select(Transaction).where(Transaction.account_id == account.id)
+    if "import_id" in body.model_fields_set:
+        q = q.where(
+            Transaction.import_id.is_(None) if body.import_id is None else Transaction.import_id == body.import_id
+        )
+    if body.type:
+        account.type = body.type
+    result = flip.turn_around(db, list(db.scalars(q)))
+    if body.type and not result["flipped"]:
+        db.flush()
+        categorize(db)
+    audit(db, request, "flip_transactions", who.user.id, account_id=account.id, **result)
+    return result
 
 
 @router.delete("/imports/{import_id}")
