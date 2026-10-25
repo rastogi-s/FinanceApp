@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
 
-from financeapp import demo, household, lookthrough, portfolio, quotes, security
+from financeapp import demo, household, lookthrough, lots, portfolio, quotes, security
 from financeapp.api.alert_routes import rule_json
 from financeapp.api.deps import Signed, audit, settings_of, signed_in
 from financeapp.models import AlertRule, Category, Fund, Preference, Quote, now
@@ -184,6 +184,9 @@ def detail(
             ],
             "as_of": max(p.as_of for p in mine).isoformat(),
         }
+        rows = lots.of(db, accounts, mine)
+        if rows:
+            position["lots"] = {"rows": rows, **lots.summary(rows)}
     locked = portfolio.unvested(db, accounts, symbol)
     if locked and price:
         if position is None:

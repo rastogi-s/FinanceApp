@@ -8,6 +8,7 @@ import { RuleSheet, type RuleIn } from "@/components/alert-sheets";
 import { Money } from "@/components/money";
 import { BackLink, Notice } from "@/components/page";
 import { PriceChart, pointLabel } from "@/components/price-chart";
+import { TaxLotsCard } from "@/components/tax-lots";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -155,6 +156,7 @@ function Holding() {
       <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
         {data.position && <PositionCard s={data} />}
         <StatsCard s={data} />
+        {data.position?.lots && <TaxLotsCard lots={data.position.lots} />}
         {data.exposure && data.exposure.sources.length > 1 && <ExposureCard s={data} />}
         {data.is_fund && <FundCard s={data} />}
         <AlertsCard s={data} onAdd={() => setAlertOpen(true)} />
