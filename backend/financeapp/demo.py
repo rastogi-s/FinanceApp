@@ -1313,3 +1313,109 @@ def review(today: date | None = None) -> dict:
         "kept_out": {"card_cents": _cents(7_420), "invest_cents": _cents(3_000), "own_cents": _cents(1_500)},
         "groups": groups,
     }
+
+
+def moves_offer(today: date | None = None) -> dict:
+    """Any moves today? with sample data: no AI call, and a sample answer to show what one looks like."""
+    today = today or datetime.now(UTC).date()
+    at = datetime.combine(today, datetime.min.time(), UTC).replace(hour=19, minute=50)
+    total = sum(h[4] for h in HOLDINGS)
+
+    def share(symbol: str) -> float:
+        return round(sum(h[4] for h in HOLDINGS if h[0] == symbol) / total * 100, 2)
+
+    holdings = [
+        ("VTI", "Vanguard Total Stock Market ETF", "keep", "The core of the portfolio: broad, cheap, and spread over "
+         "three accounts. Nothing to change."),
+        ("FXAIX", "Fidelity 500 Index Fund", "keep", "Overlaps heavily with VTI, which is fine; both are low cost."),
+        ("VXUS", "Vanguard Total International ETF", "add", "About 12% abroad is on the low side for a long "
+         "horizon; new 401(k) money could go here first."),
+        ("AAPL", "Apple", "trim", "10% in one company, and about 13% once the index funds are counted. Up 72% against "
+         "cost in a taxable account."),
+        ("BND", "Vanguard Total Bond Market ETF", "keep", "A small cushion; fine for now given the cash on hand."),
+        ("MSFT", "Microsoft", "watch", "7.5% directly plus about 4% through funds. Not urgent, but don't add to it."),
+    ]  # fmt: skip
+    answer = {
+        "verdict": "small_moves",
+        "headline": "Nothing urgent today; two small changes would make the portfolio sturdier.",
+        "summary": (
+            "The portfolio is broadly diversified through VTI and FXAIX, and the emergency fund is full. The one real "
+            "risk is Apple: about 13% of everything once the index funds are looked through. International stocks are "
+            "light at about 12%. Today's market moves don't change any of that."
+        ),
+        "market": (
+            "A quiet day: the S&P 500 is up 0.4% with volatility low. Nothing in today's market calls for a change; "
+            "the ideas below are about the portfolio's shape, not timing."
+        ),
+        "moves": [
+            {
+                "action": "trim",
+                "symbol": "AAPL",
+                "name": "Apple",
+                "held": True,
+                "account": "E*TRADE Brokerage",
+                "amount_cents": 1_000_000,
+                "urgency": "this_month",
+                "confidence": "medium",
+                "why": (
+                    "Apple is 9.9% directly and about 13% with the index funds, far more than any other company. "
+                    "Selling about $10,000 brings it near 8%."
+                ),
+                "tax_impact": (
+                    "About 42% of the sale is gain: roughly $4,200 taxed at 15% federal plus 3.99% NC, about $800. "
+                    "Check the lots first and sell the ones held over a year."
+                ),
+                "risks": "Apple could keep outperforming; trimming gives up some of that in exchange for less risk.",
+            },
+            {
+                "action": "add",
+                "symbol": "VXUS",
+                "name": "Vanguard Total International ETF",
+                "held": True,
+                "account": "Fidelity 401(k)",
+                "amount_cents": 1_000_000,
+                "urgency": "no_rush",
+                "confidence": "medium",
+                "why": (
+                    "International is about 12% of stocks against a common 20 to 30%. Moving $10,000 of VTI to VXUS "
+                    "inside the 401(k) raises it without any tax."
+                ),
+                "tax_impact": "None, tax-advantaged account.",
+                "risks": "International stocks have lagged the US for years and may keep doing so.",
+            },
+        ],
+        "holdings": [
+            {"symbol": s, "name": n, "percent": share(s), "verdict": v, "note": note} for s, n, v, note in holdings
+        ],
+        "watch": [
+            "Apple's weight after earnings next week",
+            "The house down payment is 4 years out: start moving that money out of stocks in about a year",
+        ],
+        "caveats": "Sample data. With your own accounts, the review uses your real holdings, gains, goals and taxes.",
+        "indexes": [
+            {"name": "S&P 500", "level": 6812.4, "change_percent": 0.41},
+            {"name": "Nasdaq Composite", "level": 23104.9, "change_percent": 0.62},
+            {"name": "VIX (volatility)", "level": 14.2, "change_percent": -3.1},
+            {"name": "10-year Treasury yield", "level": 4.12, "change_percent": 0.5},
+        ],
+        "headline_count": 18,
+    }
+    return {
+        "available": False,
+        "problem": "Not available with sample data. This is a sample answer.",
+        "provider": None,
+        "model": None,
+        "max_cost": None,
+        "holdings": len({h[0] for h in HOLDINGS}),
+        "headlines": 0,
+        "preview": None,
+        "last": {
+            "at": at.isoformat(),
+            "model": "claude-opus-5-5",
+            "cost": 0.09,
+            "question": "",
+            "prices_as_of": at.isoformat(),
+            "market_open": False,
+            "answer": answer,
+        },
+    }

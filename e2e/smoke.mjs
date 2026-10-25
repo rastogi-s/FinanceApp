@@ -40,6 +40,7 @@ const PLACES = [
   ["holding-stock", "/portfolio/holding?s=AAPL", "direct"],
   ["holding-fund", "/portfolio/holding?s=VTI", "direct"],
   ["income", "/portfolio/income", "direct"],
+  ["moves", "/portfolio/moves", "direct"],
 ];
 const REQUIRED_HEADERS = {
   "content-security-policy": /default-src 'none'.*frame-ancestors 'none'/,

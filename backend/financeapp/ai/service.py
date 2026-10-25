@@ -53,6 +53,12 @@ TASKS = {
         "account numbers and people's names aren't.",
         pictures=False,
     ),
+    "portfolio_moves": Task(
+        "Reviewing your portfolio",
+        "A second opinion on whether to buy, sell or hold, from your holdings, gains, goals, taxes and today's market. "
+        "Tickers, amounts and percentages are sent; account numbers and names aren't.",
+        pictures=False,
+    ),
 }
 
 # Dollars per million tokens (input, output), from each provider's price list. A model that isn't here is priced
