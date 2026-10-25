@@ -43,7 +43,10 @@ function Gain({ l, className }: { l: TaxLot; className?: string }) {
 }
 
 function turns(l: TaxLot) {
-  return l.taxable && l.term === "short" && l.long_term_on ? `Long-term on ${asOf(l.long_term_on)}` : null;
+  if (!l.taxable || !l.long_term_on) return null;
+  if (l.term === "short") return `Long-term on ${asOf(l.long_term_on)}`;
+  // Shares from before the history: bought by then at the latest, so surely long-term by this day.
+  return l.term == null ? `Long-term by ${asOf(l.long_term_on)} at the latest` : null;
 }
 
 function LotList({ rows }: { rows: TaxLot[] }) {
@@ -210,8 +213,8 @@ export function TaxLotsCard({ lots }: { lots: TaxLots }) {
           Built from your brokerage&apos;s buys and sells, oldest shares sold first. Its own lots can differ if you picked lots
           when selling, if it uses average cost (common for mutual funds), or after a wash sale.
           {earlier &&
-            " “Before” lots are shares older than the two years of activity the brokerage shares; their cost is what's left of its total cost basis."}
-          {guessed && " *Long-term because they're more than two years old."}
+            " “Before” lots are shares older than the first activity your brokerage sent; their cost is what's left of its total cost basis."}
+          {guessed && " *Long-term because they're older than that first activity, which was more than a year ago."}
         </p>
       </CardContent>
     </Card>
