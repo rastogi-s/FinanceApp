@@ -89,6 +89,12 @@ class Holding:
     value_cents: int
     cost_basis_cents: int | None
     accounts: list[str] = field(default_factory=list)
+    account_shares: dict[str, Decimal] = field(default_factory=dict)  # account name -> shares held there
+    account_values: dict[str, int] = field(default_factory=dict)
+
+    def add(self, account: str, shares: Decimal, value_cents: int) -> None:
+        self.account_shares[account] = self.account_shares.get(account, Decimal(0)) + shares
+        self.account_values[account] = self.account_values.get(account, 0) + value_cents
 
 
 @dataclass
@@ -198,19 +204,24 @@ def reinvesting(db: DbSession, accounts: list[Account], since: date) -> set[str]
     )
 
 
-def holdings(db: DbSession, accounts: list[Account]) -> list[Holding]:
+def holdings(db: DbSession, accounts: list[Account], cash: set[str] | None = None) -> list[Holding]:
+    """Holdings combined across accounts (cash and money market positions left out; their symbols go in `cash`)."""
     names = {a.id: household.display_name(a) for a in accounts}
     combined: dict[str, Holding] = {}
     for p in portfolio.positions(db, accounts):
+        if p.asset_class == "Cash" and cash is not None:
+            cash.add(p.symbol)
         if p.asset_class == "Cash" or p.quantity <= 0:
             continue
         h = combined.get(p.symbol)
         if h is None:
-            combined[p.symbol] = Holding(
+            combined[p.symbol] = h = Holding(
                 p.symbol, p.name, p.asset_class, p.quantity, p.price, p.value_cents, p.cost_basis_cents,
                 [names.get(p.account_id, "")],
             )  # fmt: skip
+            h.add(names.get(p.account_id, ""), p.quantity, p.value_cents)
             continue
+        h.add(names.get(p.account_id, ""), p.quantity, p.value_cents)
         h.shares += p.quantity
         h.value_cents += p.value_cents
         h.cost_basis_cents = (
@@ -406,6 +417,8 @@ def dividend_holdings(
             next_ex = nxt
         lag = pay_lag(rows, paid_on[h.symbol])
         price = float(h.price)
+        held = h.account_shares or {(h.accounts[0] if h.accounts else ""): h.shares}
+        values = h.account_values or {next(iter(held)): h.value_cents}
         out.append(
             {
                 "symbol": h.symbol,
@@ -432,6 +445,15 @@ def dividend_holdings(
                 "growth_5y": growth_rate(rows, today),
                 "reinvesting": h.symbol in drip,
                 "from": source,
+                "by_account": [
+                    {
+                        "account": name,
+                        "shares": float(n),
+                        "value_cents": values.get(name, 0),
+                        "annual_cents": int(ttm * n * 100),
+                    }
+                    for name, n in sorted(held.items(), key=lambda kv: -kv[1])
+                ],
             }
         )
     return sorted(out, key=lambda r: -r["annual_cents"])
@@ -564,6 +586,104 @@ def interest_accounts(cash: list[CashAccount], pays: list[Payment], today: date)
     return sorted(out, key=lambda r: -r["balance_cents"])
 
 
+def cash_yearly(pays: list[Payment], today: date) -> int:
+    """What a brokerage's cash pays in a year at the current pace: the monthly average of the last three months when
+    it pays monthly, else the last year's total; nothing when it hasn't paid in four months (the cash moved)."""
+    if not pays or pays[-1].date <= today - timedelta(days=120):
+        return 0
+    recent = [p for p in pays if p.date > today - timedelta(days=95)]
+    months = len({_month(p.date) for p in recent})
+    if months >= 2:
+        return round(sum(p.cents for p in recent) / months * 12)
+    return sum(p.cents for p in pays if p.date > today - timedelta(days=365))
+
+
+def estimate(rows: list[dict], accounts: list[dict], pays: list[Payment], cash_symbols: set[str], today: date) -> dict:
+    """A year of dividends and interest at today's holdings, balances and rates, in all and by account, plus each
+    expected dividend payment of the next 12 months by account (so the page can total the next 1, 2, 3 or 6 months).
+
+    Dividends: each holding's last 12 months of dividends per share times the shares held now in each account.
+    Brokerage cash (sweep interest, money market fund dividends): its current pace. Bank accounts: balance times APY
+    (typed in, or what the last three months of interest work out to)."""
+    by: dict[str, dict] = {}
+
+    def row(name: str, kind: str) -> dict:
+        return by.setdefault(
+            name,
+            {"account": name, "kind": kind, "value_cents": 0, "dividends_annual_cents": 0, "interest_annual_cents": 0,
+             "apy": None, "rate_from": None, "payers": []},
+        )  # fmt: skip
+
+    for r in rows:
+        for a in r["by_account"]:
+            if a["annual_cents"] <= 0:
+                continue
+            acct = row(a["account"], "investment")
+            acct["dividends_annual_cents"] += a["annual_cents"]
+            acct["value_cents"] += a["value_cents"]
+            acct["payers"].append({"symbol": r["symbol"], "annual_cents": a["annual_cents"]})
+
+    cash_pays: dict[tuple[str, str | None], list[Payment]] = defaultdict(list)  # each account's cash, each fund
+    for p in pays:
+        if p.source == "brokerage" and (p.kind == "interest" or (p.kind == "dividend" and p.symbol in cash_symbols)):
+            cash_pays[(p.account, p.symbol)].append(p)
+    for (name, _), ps in cash_pays.items():
+        yearly = cash_yearly(ps, today)
+        if yearly > 0:
+            row(name, "investment")["interest_annual_cents"] += yearly
+
+    for a in accounts:
+        apy = a["apy"] if a["apy"] is not None else a["implied_apy"]
+        if apy is None or a["balance_cents"] <= 0:
+            continue
+        acct = row(a["name"], "bank")
+        acct["kind"] = "cd" if a["kind"] == "cd" else "bank"
+        acct["value_cents"] = a["balance_cents"]
+        acct["interest_annual_cents"] += round(a["balance_cents"] * apy / 100)
+        acct["apy"] = apy
+        acct["rate_from"] = "typed" if a["apy"] is not None else "recent"
+
+    out = []
+    for acct in by.values():
+        acct["annual_cents"] = acct["dividends_annual_cents"] + acct["interest_annual_cents"]
+        if acct["annual_cents"] <= 0:
+            continue
+        acct["payers"] = sorted(acct["payers"], key=lambda x: -x["annual_cents"])[:5]
+        acct["dividend_yield_percent"] = (
+            round(acct["dividends_annual_cents"] / acct["value_cents"] * 100, 2)
+            if acct["kind"] == "investment" and acct["value_cents"] and acct["dividends_annual_cents"]
+            else None
+        )
+        out.append(acct)
+    out.sort(key=lambda x: -x["annual_cents"])
+
+    end = _add_months(date(today.year, today.month, 1), 13)
+    schedule = []
+    for r in rows:
+        if not r["next_pay_date"] or not r["frequency"] or not r["next_cents"]:
+            continue
+        total = sum(a["shares"] for a in r["by_account"]) or 1
+        step = timedelta(days=round(365 / r["frequency"]))
+        pay = date.fromisoformat(r["next_pay_date"])
+        while pay < end:
+            for a in r["by_account"]:
+                cents = round(r["next_cents"] * a["shares"] / total)
+                if cents > 0:
+                    schedule.append({"account": a["account"], "symbol": r["symbol"], "pay_date": pay.isoformat(),
+                                     "cents": cents})  # fmt: skip
+            pay += step
+    schedule.sort(key=lambda x: x["pay_date"])
+    dividends = sum(a["dividends_annual_cents"] for a in out)
+    interest = sum(a["interest_annual_cents"] for a in out)
+    return {
+        "annual_cents": dividends + interest,
+        "dividends_annual_cents": dividends,
+        "interest_annual_cents": interest,
+        "accounts": out,
+        "payments": schedule,
+    }
+
+
 def build_from(
     pays: list[Payment],
     hs: list[Holding],
@@ -572,6 +692,7 @@ def build_from(
     cash: list[CashAccount],
     since: date,
     today: date,
+    cash_symbols: set[str] | None = None,
 ) -> dict:
     year_ago = today - timedelta(days=365)
     rows = dividend_holdings(hs, hist, pays, drip, today)
@@ -641,6 +762,7 @@ def build_from(
             "accounts": accounts,
         },
         "tax": [tax_summary(pays, y, today, classes, since) for y in (today.year, today.year - 1)],
+        "estimate": estimate(rows, accounts, pays, cash_symbols or set(), today),
     }
 
 
@@ -665,10 +787,13 @@ def build(db: DbSession, today: date) -> dict:
     accounts = household.counted(db)
     since = since_for(today)
     pays = payments(db, accounts, since)
-    hs = holdings(db, accounts)
+    cash_symbols: set[str] = set()
+    hs = holdings(db, accounts, cash_symbols)
     hist = history(db, [h.symbol for h in hs])
     drip = reinvesting(db, accounts, today - timedelta(days=400))
-    return build_from(pays, hs, hist, drip, cash_accounts(db, accounts), history_start(db, accounts, today), today)
+    return build_from(
+        pays, hs, hist, drip, cash_accounts(db, accounts), history_start(db, accounts, today), today, cash_symbols
+    )
 
 
 def tax_year(db: DbSession, year: int, today: date) -> dict:

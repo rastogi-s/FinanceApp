@@ -1,5 +1,29 @@
 [
   {
+    "version": "0.42.0",
+    "title": "A year of dividends and interest, ahead",
+    "features": [
+      {
+        "id": "income-ahead",
+        "title": "What your money should pay you",
+        "body": "Dividends & interest now starts with what to expect from what you hold now: a year of dividends (each holding's last 12 months per share times the shares you have today) plus interest on savings, CDs and brokerage cash at today's rates. Switch between the next 1, 2, 3 or 6 months and a year; shorter windows count each dividend only when it's due.",
+        "tryIt": "/portfolio/income"
+      },
+      {
+        "id": "income-by-account",
+        "title": "Per account",
+        "body": "Turn on By account to see what each brokerage account, savings account and CD is expected to pay over the window you picked, with its biggest payers, dividend yield or APY.",
+        "tryIt": "/portfolio/income"
+      },
+      {
+        "id": "income-portfolio",
+        "title": "On Portfolio too",
+        "body": "The Dividends & interest card on Portfolio now shows about how much a year your current holdings and cash should pay, above what came in over the last 12 months.",
+        "tryIt": "/portfolio"
+      }
+    ]
+  },
+  {
     "version": "0.41.0",
     "title": "Income over time",
     "features": [

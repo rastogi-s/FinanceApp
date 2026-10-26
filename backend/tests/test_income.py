@@ -149,3 +149,44 @@ def test_demo_income(tmp_path):
     assert any(a["kind"] == "cd" and a["maturity"] for a in page["interest"]["accounts"])
     assert c.get("/api/income/tax", params={"year": 2026}).json()["year"] == 2026
     assert c.put("/api/income/accounts/2", json={"apy": 4}).status_code == 403
+
+
+def test_estimate_a_year_by_account_and_short_windows():
+    today = date(2026, 10, 21)
+    quarterly = [(date(2025 + y, m, 10), Decimal("0.50")) for y in range(2) for m in (2, 5, 8, 11)]
+    quarterly = [r for r in quarterly if r[0] <= today]
+    h = income.Holding("ABC", "ABC Corp", "Stocks", Decimal(100), Decimal(50), 500_000, 400_000, ["Taxable", "IRA"])
+    h.add("Taxable", Decimal(75), 375_000)
+    h.add("IRA", Decimal(25), 125_000)
+    rows = income.dividend_holdings([h], {"ABC": quarterly}, [], set(), today)
+    assert [a["annual_cents"] for a in rows[0]["by_account"]] == [150_00, 50_00]  # $2 a share a year
+
+    def pay(d: date, cents: int, account: str = "Taxable", kind: str = "interest", symbol: str | None = None):
+        return income.Payment(d, 1, account, symbol, "x", cents, kind, "brokerage", "ordinary", True)
+
+    pays = [pay(date(2026, m, 15), 10_00) for m in (8, 9, 10)]  # sweep interest, $10 a month
+    pays += [pay(date(2026, m, 1), 5_00, kind="dividend", symbol="SPAXX") for m in (9, 10)]  # money market fund
+    pays.append(pay(date(2025, 12, 1), 99_00, account="Old", kind="interest"))  # stopped: the cash moved
+    bank = [
+        {"name": "Savings", "kind": "savings", "balance_cents": 10_000_00, "apy": None, "implied_apy": 4.0},
+        {"name": "Checking", "kind": "checking", "balance_cents": 5_000_00, "apy": None, "implied_apy": None},
+    ]
+    e = income.estimate(rows, bank, pays, {"SPAXX"}, today)
+    by = {a["account"]: a for a in e["accounts"]}
+    assert set(by) == {"Taxable", "IRA", "Savings"}
+    assert by["Taxable"]["dividends_annual_cents"] == 150_00
+    assert by["Taxable"]["interest_annual_cents"] == 120_00 + 60_00
+    assert by["Savings"]["interest_annual_cents"] == 400_00 and by["Savings"]["rate_from"] == "recent"
+    assert e["annual_cents"] == 150_00 + 50_00 + 180_00 + 400_00
+    # The schedule splits each payment by the shares in each account, a year ahead.
+    nov = [p for p in e["payments"] if p["pay_date"].startswith("2026-11")]
+    assert sorted(p["cents"] for p in nov) == [12_50, 37_50]
+    assert len({p["pay_date"] for p in e["payments"]}) in (4, 5)
+
+
+def test_demo_income_has_an_estimate():
+    from financeapp import demo
+
+    e = demo.income(date(2026, 10, 21))["estimate"]
+    assert e["dividends_annual_cents"] == demo.income(date(2026, 10, 21))["dividends"]["forward_annual_cents"]
+    assert e["interest_annual_cents"] > 0 and len(e["accounts"]) >= 3
