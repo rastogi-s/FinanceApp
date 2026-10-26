@@ -27,6 +27,7 @@ export type DividendHolding = {
   growth_5y: number | null; // yearly growth of the dividend per share, e.g. 0.06
   reinvesting: boolean;
   from: "history" | "payments";
+  by_account: { account: string; shares: number; value_cents: number; annual_cents: number }[];
 };
 
 export type Upcoming = { symbol: string; name: string; ex_date: string; pay_date: string; cents: number; reinvesting: boolean };
@@ -99,7 +100,63 @@ export type Income = {
     accounts: InterestAccount[];
   };
   tax: TaxYear[];
+  estimate: Estimate;
 };
+
+export type EstimateAccount = {
+  account: string;
+  kind: "investment" | "bank" | "cd";
+  value_cents: number;
+  dividends_annual_cents: number;
+  interest_annual_cents: number;
+  annual_cents: number;
+  apy: number | null;
+  rate_from: "typed" | "recent" | null;
+  dividend_yield_percent: number | null;
+  payers: { symbol: string; annual_cents: number }[];
+};
+
+/** A year at today's holdings, balances and rates, from the server; `payments` are the next 12 months' dividends. */
+export type Estimate = {
+  annual_cents: number;
+  dividends_annual_cents: number;
+  interest_annual_cents: number;
+  accounts: EstimateAccount[];
+  payments: { account: string; symbol: string; pay_date: string; cents: number }[];
+};
+
+export const WINDOWS = [1, 2, 3, 6, 12] as const;
+export type Window = (typeof WINDOWS)[number];
+
+export type WindowAccount = EstimateAccount & { dividendsCents: number; interestCents: number; totalCents: number };
+
+/**
+ * What's expected over the next `months`. A year is each holding's last 12 months of dividends per share times the
+ * shares held now; a shorter window adds up the dividends due in it at each holding's usual schedule, so a quarterly
+ * payer counts only when it pays. Interest comes in evenly, a month's worth each month.
+ */
+export function estimateFor(e: Estimate, months: Window, today = new Date()) {
+  const start = isoDay(today);
+  const end = isoDay(new Date(today.getFullYear(), today.getMonth() + months, today.getDate()));
+  const due: Record<string, number> = {};
+  for (const p of e.payments) {
+    if (p.pay_date >= start && p.pay_date < end) due[p.account] = (due[p.account] ?? 0) + p.cents;
+  }
+  const accounts: WindowAccount[] = e.accounts
+    .map((a) => {
+      const dividendsCents = months === 12 ? a.dividends_annual_cents : (due[a.account] ?? 0);
+      const interestCents = Math.round((a.interest_annual_cents * months) / 12);
+      return { ...a, dividendsCents, interestCents, totalCents: dividendsCents + interestCents };
+    })
+    .sort((a, b) => b.totalCents - a.totalCents);
+  const dividendsCents = accounts.reduce((s, a) => s + a.dividendsCents, 0);
+  const interestCents = accounts.reduce((s, a) => s + a.interestCents, 0);
+  return { dividendsCents, interestCents, totalCents: dividendsCents + interestCents, accounts };
+}
+
+function isoDay(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
 
 export const DEFAULT_DIVIDEND_GROWTH = 0.04; // when a holding has no five-year history
 export const HORIZONS = [1, 5, 10, 20] as const;

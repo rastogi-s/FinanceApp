@@ -23,8 +23,13 @@ import {
   type DividendHolding,
   type Income,
   type InterestAccount,
+  type Estimate,
   type TaxYear,
+  WINDOWS,
+  type Window,
+  type WindowAccount,
   apyOf,
+  estimateFor,
   cdWhatIf,
   dayLabel,
   monthLabel,
@@ -65,6 +70,7 @@ export default function IncomePage() {
       {p && (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <Summary p={p} />
+          <Ahead e={p.estimate} />
           <div className="md:col-span-2">
             <div className="grid grid-cols-2 gap-1 rounded-full bg-muted p-1" role="radiogroup" aria-label="Show">
               {(["dividends", "interest"] as const).map((t) => (
@@ -100,7 +106,6 @@ function Summary({ p }: { p: Income }) {
   const total = d.received_12m_cents + i.received_12m_cents;
   const prior = d.received_prior_12m_cents;
   const change = prior ? ((d.received_12m_cents - prior) / prior) * 100 : null;
-  const interestAhead = projectInterest(i.accounts, 0, 1)[0]?.interestCents ?? 0;
   return (
     <Card className="md:col-span-2">
       <CardHeader>
@@ -129,12 +134,122 @@ function Summary({ p }: { p: Income }) {
               </>
             )}
           </Stat>
-          <Stat label="Next 12 months" value={<Money cents={d.forward_annual_cents + interestAhead} />}>
-            At today&apos;s dividends and rates
+          <Stat label="Next 12 months" value={<Money cents={p.estimate.annual_cents} />}>
+            At today&apos;s holdings and rates
           </Stat>
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+// ---- what to expect: the next month to the next year, in all or by account
+
+const WINDOW_LABEL: Record<Window, string> = { 1: "1 month", 2: "2 months", 3: "3 months", 6: "6 months", 12: "1 year" };
+
+function Ahead({ e }: { e: Estimate }) {
+  const [months, setMonths] = useRemembered<Window>("ahead", 12, { valid: (v) => (WINDOWS as readonly number[]).includes(v) });
+  const [split, setSplit] = useRemembered("ahead-by-account", false);
+  const w = useMemo(() => estimateFor(e, months), [e, months]);
+  const label = months === 12 ? "a year" : months === 1 ? "in the next month" : `in the next ${months} months`;
+  return (
+    <Card className="md:col-span-2">
+      <CardHeader>
+        <CardTitle>Expected from what you hold now</CardTitle>
+        <Badge variant="muted">Estimate</Badge>
+      </CardHeader>
+      <CardContent>
+        <div className="grid grid-cols-5 gap-1 rounded-full bg-muted p-1" role="radiogroup" aria-label="Over the next">
+          {WINDOWS.map((m) => (
+            <button
+              key={m}
+              type="button"
+              role="radio"
+              aria-checked={months === m}
+              onClick={() => setMonths(m)}
+              className={cn(
+                "h-9 rounded-full text-xs font-medium whitespace-nowrap transition-colors sm:text-sm",
+                months === m ? "bg-card text-foreground shadow-sm" : "text-muted-foreground",
+              )}
+            >
+              {WINDOW_LABEL[m]}
+            </button>
+          ))}
+        </div>
+        <p className="mt-5 text-4xl font-semibold tracking-tight">
+          <Money cents={w.totalCents} />
+        </p>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Dividends and interest {label}
+          {months === 12 && (
+            <>
+              , about <Money cents={Math.round(w.totalCents / 12)} /> a month
+            </>
+          )}
+          .
+        </p>
+        <div className="mt-4 grid grid-cols-2 gap-2 sm:gap-3">
+          <Stat label="Dividends" value={<Money cents={w.dividendsCents} />}>
+            {months === 12 ? "Last 12 months per share × shares now" : "Payments due at each holding's usual schedule"}
+          </Stat>
+          <Stat label="Interest" value={<Money cents={w.interestCents} />}>
+            Savings, CDs and brokerage cash at today&apos;s rates
+          </Stat>
+        </div>
+
+        <div className="mt-5">
+          <Switch checked={split} onCheckedChange={setSplit} label="By account" description="What each account is expected to pay" />
+        </div>
+        {split && (
+          <ul className="mt-2 divide-y">
+            {w.accounts.map((a) => (
+              <AheadRow key={a.account} a={a} total={w.totalCents} />
+            ))}
+            {w.accounts.length === 0 && <li className="py-3 text-sm text-muted-foreground">Nothing expected yet.</li>}
+          </ul>
+        )}
+        <p className="mt-3 text-xs text-muted-foreground">
+          An estimate, not a promise: dividends change when companies and funds change them, and bank rates move. Interest uses
+          the APY you typed in, or what the last three months of interest work out to.
+        </p>
+      </CardContent>
+    </Card>
+  );
+}
+
+function AheadRow({ a, total }: { a: WindowAccount; total: number }) {
+  const share = total ? (a.totalCents / total) * 100 : 0;
+  const detail =
+    a.kind === "investment"
+      ? [
+          a.payers.length ? a.payers.slice(0, 3).map((x) => x.symbol).join(", ") : null,
+          a.dividend_yield_percent !== null ? `${a.dividend_yield_percent.toFixed(2)}% yield` : null,
+          !a.payers.length && a.interest_annual_cents > 0 ? "Interest on cash" : null,
+        ]
+          .filter(Boolean)
+          .join(" · ")
+      : `${a.apy?.toFixed(2)}% APY${a.rate_from === "recent" ? " from recent interest" : ""}`;
+  return (
+    <li className="flex items-center gap-3 py-2.5">
+      <span className="grid size-8 shrink-0 place-items-center rounded-full bg-muted text-muted-foreground">
+        {a.kind === "investment" ? <Coins className="size-4" aria-hidden /> : <Landmark className="size-4" aria-hidden />}
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-medium">{a.account}</p>
+        <p className="truncate text-xs text-muted-foreground">{detail}</p>
+        <div className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-muted" aria-hidden>
+          <div className="h-full rounded-full bg-primary/70" style={{ width: `${share}%` }} />
+        </div>
+      </div>
+      <div className="shrink-0 text-right">
+        <Money cents={a.totalCents} className="text-sm font-medium tabular-nums" />
+        {a.dividendsCents > 0 && a.interestCents > 0 && (
+          <p className="text-[11px] text-muted-foreground tabular-nums">
+            <Money cents={a.dividendsCents} /> + <Money cents={a.interestCents} />
+          </p>
+        )}
+      </div>
+    </li>
   );
 }
 

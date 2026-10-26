@@ -1234,6 +1234,7 @@ def _sample_income(today: date):
         h.value_cents += _cents(dollars)
         h.cost_basis_cents = (h.cost_basis_cents or 0) + _cents(dollars * 0.68)
         h.accounts.append(account)
+        h.add(account, shares, _cents(dollars))
 
     hist: dict[str, list[tuple[date, Decimal]]] = {}
     pays: list[income.Payment] = []

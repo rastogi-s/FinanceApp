@@ -225,6 +225,11 @@ function IncomeLink() {
             "What your money paid you, and where reinvesting takes it"
           ) : (
             <>
+              {data!.estimate.annual_cents > 0 && (
+                <span className="block font-medium text-foreground">
+                  About <Money cents={data!.estimate.annual_cents} /> a year from what you hold now
+                </span>
+              )}
               <Money cents={total} /> in the last 12 months
               {data!.dividends.upcoming[0] && (
                 <>
