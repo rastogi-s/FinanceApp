@@ -4,16 +4,16 @@ version = "0.0.0"  # the release version comes from the image (APP_VERSION), not
 description = "Private, read-only household finance app"
 requires-python = ">=3.13,<3.14"
 dependencies = [
-    "fastapi==0.150.0",
+    "fastapi==0.161.1",
     "uvicorn==0.54.0",
-    "pydantic-settings==2.16.0",
-    "sqlalchemy==2.1.5",
+    "pydantic-settings==2.16.1",
+    "sqlalchemy==2.1.6",
     "psycopg[binary]==3.3.6",
     "argon2-cffi==25.1.0",
     "cryptography==50.0.2",
     "pyotp==2.10.0",
     "webauthn==3.0.1",
-    "alembic==1.20.0",
+    "alembic==1.20.1",
     "httpx==0.28.1",
     "segno==1.6.6",
     "python-multipart==0.0.32",
@@ -26,8 +26,8 @@ dependencies = [
 [dependency-groups]
 dev = [
     "pytest==9.1.1",
-    "httpx2==2.15.1",
-    "ruff==0.17.1",
+    "httpx2==2.16.0",
+    "ruff==0.17.2",
     "pip-audit==2.10.1",
 ]
 
