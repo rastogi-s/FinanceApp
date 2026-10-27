@@ -13,7 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session as DbSession
 
-from financeapp import alerts, budget, household, portfolio
+from financeapp import alerts, budget, household, kinds, portfolio
 from financeapp.models import Account, AlertEvent, Balance, Brief, Category, Transaction, now
 from financeapp.sync import today
 
@@ -112,6 +112,7 @@ def accounts(db: DbSession, _: NoArgs) -> dict:
                 "institution": a.institution,
                 "type": a.type,
                 "subtype": a.subtype,
+                "kind": kinds.LABEL[kinds.kind_of(a.type, a.subtype, a.name, a.kind)],
                 "balance": dollars(b.current_cents) if b else None,
                 "balance_as_of": b.date.isoformat() if b else None,
             }

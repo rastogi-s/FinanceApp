@@ -5,16 +5,26 @@ import { useRouter, useSearchParams } from "next/navigation";
 import {
   AlertTriangle,
   BellRing,
+  Briefcase,
   Building2,
   CheckCircle2,
   ChevronRight,
   CircleDashed,
+  CreditCard,
   FileUp,
+  GraduationCap,
+  HandCoins,
+  HeartPulse,
+  House,
   Landmark,
   LineChart,
+  LockKeyhole,
   PencilLine,
+  PiggyBank,
   Plus,
   RefreshCw,
+  TreePalm,
+  Wallet,
 } from "lucide-react";
 import { Money, formatMoney } from "@/components/money";
 import { FlipCard } from "@/components/flip-card";
@@ -33,6 +43,7 @@ import {
   type Connection,
   type ConnectionsData as Data,
   type Every,
+  type Kind,
   type Reminder,
   dueLabel,
   parseDollars,
@@ -44,13 +55,29 @@ import { resetHousehold, useApi } from "@/lib/household";
 import { cn } from "@/lib/utils";
 
 const PROVIDER = { plaid: "Plaid", snaptrade: "SnapTrade", file: "Uploaded", manual: "Typed in" } as const;
-const TYPE_LABEL: Record<string, string> = {
-  depository: "Cash",
-  credit: "Card",
-  loan: "Loan",
-  investment: "Investments",
-  other: "Other",
+const KIND_ICON: Record<string, React.ComponentType<{ className?: string }>> = {
+  checking: Wallet,
+  savings: PiggyBank,
+  cd: LockKeyhole,
+  brokerage: LineChart,
+  stock_plan: Briefcase,
+  retirement: TreePalm,
+  hsa: HeartPulse,
+  education: GraduationCap,
+  other: House,
+  card: CreditCard,
+  loan: HandCoins,
 };
+const VIEW_KEY = "finance-accounts-view";
+type View = "type" | "connection";
+
+function savedView(): View {
+  try {
+    return localStorage.getItem(VIEW_KEY) === "connection" ? "connection" : "type";
+  } catch {
+    return "type";
+  }
+}
 const when = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 const LINK_KEY = "finance-link-token";
 
@@ -151,6 +178,17 @@ function Accounts() {
 
   const linkedCount = data?.connections.reduce((n, c) => n + c.accounts.length, 0) ?? 0;
 
+  // By type is the default; the pick is remembered on this device.
+  const [view, setViewState] = useState<View>(savedView);
+  const setView = (v: View) => {
+    setViewState(v);
+    try {
+      localStorage.setItem(VIEW_KEY, v);
+    } catch {}
+  };
+  const relink = (c: Connection) => (c.provider === "plaid" || c.provider === "snaptrade") && link(c.provider, "banking", c.id);
+  const upload = (accountId?: number) => (demo ? toast("Uploads are off while the app shows sample data.") : setUploading({ accountId }));
+
   return (
     <>
       <SubPageTitle title="Accounts" back="/settings" subtitle="Every account, how it connects, and its backup." />
@@ -199,15 +237,42 @@ function Accounts() {
             </Card>
           )}
 
-          {data.connections.map((c) => (
-            <ConnectionCard
-              key={c.id}
-              connection={c}
-              onEdit={(account) => setEditing({ account, connection: c })}
-              onRelink={() => (c.provider === "plaid" || c.provider === "snaptrade") && link(c.provider, "banking", c.id)}
-              onUpload={(accountId) => (demo ? toast("Uploads are off while the app shows sample data.") : setUploading({ accountId }))}
-            />
-          ))}
+          {linkedCount > 0 && (
+            <div role="radiogroup" aria-label="Group accounts" className="grid grid-cols-2 gap-1 rounded-full bg-muted p-1 text-sm md:max-w-sm">
+              {(
+                [
+                  ["type", "By type"],
+                  ["connection", "By connection"],
+                ] as const
+              ).map(([v, label]) => (
+                <button
+                  key={v}
+                  type="button"
+                  role="radio"
+                  aria-checked={view === v}
+                  onClick={() => setView(v)}
+                  className={cn("rounded-full py-2 font-medium transition-colors", view === v ? "bg-card shadow-sm" : "text-muted-foreground")}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {view === "type" && linkedCount > 0 ? (
+            <ByType data={data} onEdit={(account, connection) => setEditing({ account, connection })} onRelink={relink} onUpload={upload} />
+          ) : (
+            data.connections.map((c) => (
+              <ConnectionCard
+                key={c.id}
+                connection={c}
+                kinds={data.kinds}
+                onEdit={(account) => setEditing({ account, connection: c })}
+                onRelink={() => relink(c)}
+                onUpload={upload}
+              />
+            ))
+          )}
 
           {data.revoked.length > 0 && <DisconnectedCard revoked={data.revoked} disabled={demo} onRemoved={changed} />}
         </div>
@@ -239,6 +304,7 @@ function Accounts() {
           account={sheet.account}
           connection={sheet.connection}
           people={data.people}
+          kinds={data.kinds}
           disabled={demo}
           onClose={() => {
             setEditing(null);
@@ -383,13 +449,193 @@ function SyncCard({
   );
 }
 
+/** Every account in one card per kind (checking, savings, CDs, cards...), each with its total. */
+function ByType({
+  data,
+  onEdit,
+  onRelink,
+  onUpload,
+}: {
+  data: Data;
+  onEdit: (a: Account, c: Connection) => void;
+  onRelink: (c: Connection) => void;
+  onUpload: (accountId?: number) => void;
+}) {
+  const stale = data.connections.filter((c) => c.status === "stale");
+  const rows = data.connections.flatMap((c) => c.accounts.map((a) => ({ a, c })));
+  return (
+    <>
+      {stale.length > 0 && (
+        <Card className="border-warning/40">
+          <CardHeader>
+            <CardTitle>Needs you</CardTitle>
+          </CardHeader>
+          <div className="grid grid-cols-1 gap-3 pt-3 pb-5">
+            {stale.map((c) => (
+              <StaleNotice key={c.id} connection={c} onRelink={() => onRelink(c)} onUpload={() => onUpload()} />
+            ))}
+          </div>
+        </Card>
+      )}
+      {data.kinds.map((k) => {
+        const mine = rows.filter((r) => r.a.kind === k.key);
+        return mine.length > 0 && <KindCard key={k.key} kind={k} rows={mine} onEdit={onEdit} />;
+      })}
+    </>
+  );
+}
+
+/** What an account adds to (or, for a card or loan, takes off) net worth; none when it isn't counted. */
+function counted(a: Account): number {
+  if (a.hidden || !a.is_authoritative || a.balance_cents === null) return 0;
+  return a.type === "credit" || a.type === "loan" ? -a.balance_cents : a.balance_cents;
+}
+
+function KindCard({
+  kind: k,
+  rows,
+  onEdit,
+}: {
+  kind: Kind;
+  rows: { a: Account; c: Connection }[];
+  onEdit: (a: Account, c: Connection) => void;
+}) {
+  const Icon = KIND_ICON[k.key] ?? Landmark;
+  // Biggest first; hidden and uncounted ones last, since they don't add to the total.
+  const sorted = [...rows].sort((x, y) => {
+    const off = Number(x.a.hidden || !x.a.is_authoritative) - Number(y.a.hidden || !y.a.is_authoritative);
+    return off || Math.abs(y.a.balance_cents ?? 0) - Math.abs(x.a.balance_cents ?? 0) || x.a.name.localeCompare(y.a.name);
+  });
+  const total = rows.reduce((n, r) => n + counted(r.a), 0);
+  return (
+    <Card>
+      <CardHeader className="items-center">
+        <div className="flex min-w-0 items-center gap-3">
+          <span
+            className={cn(
+              "grid size-9 shrink-0 place-items-center rounded-full [&_svg]:size-[18px]",
+              k.owed ? "bg-negative/10 text-negative" : "bg-accent text-accent-foreground",
+            )}
+            aria-hidden
+          >
+            <Icon />
+          </span>
+          <div className="min-w-0">
+            <h2 className="truncate font-medium">{k.label}</h2>
+            <p className="text-xs text-muted-foreground">
+              {rows.length} account{rows.length === 1 ? "" : "s"}
+            </p>
+          </div>
+        </div>
+        <div className="shrink-0 text-right">
+          <Money cents={total} className="font-semibold tabular-nums" />
+          <p className="text-[11px] text-muted-foreground">{k.owed ? "owed" : "total"}</p>
+        </div>
+      </CardHeader>
+      <ul className="divide-y pt-2 pb-1">
+        {sorted.map(({ a, c }) => (
+          <li key={a.id}>
+            <AccountRow account={a} connection={c} kinds={[k]} showSource onEdit={() => onEdit(a, c)} />
+          </li>
+        ))}
+      </ul>
+    </Card>
+  );
+}
+
+/** One account: name, where it comes from or what kind it is, what needs doing, and its balance. */
+function AccountRow({
+  account: a,
+  connection: c,
+  kinds,
+  showSource,
+  onEdit,
+}: {
+  account: Account;
+  connection: Connection;
+  kinds: Kind[];
+  /** In a kind's card: say which institution and link it comes from. In a connection's card: say its kind. */
+  showSource?: boolean;
+  onEdit: () => void;
+}) {
+  const kind = kinds.find((k) => k.key === a.kind)?.one ?? a.kind;
+  return (
+    <button
+      type="button"
+      onClick={onEdit}
+      className="flex w-full items-center gap-3 px-5 py-3.5 text-left transition-colors hover:bg-muted/50"
+    >
+      <div className="min-w-0 flex-1">
+        <p className={cn("truncate text-sm font-medium", a.hidden && "text-muted-foreground line-through")}>
+          {a.name}
+          {a.mask && <span className="ml-1.5 text-muted-foreground">••{a.mask}</span>}
+        </p>
+        <p className="text-xs text-muted-foreground">
+          {showSource ? `${c.institution} · ${PROVIDER[c.provider]}` : kind}
+          {showSource && c.status === "stale" && <span className="text-warning"> · stopped syncing</span>}
+          {!a.is_authoritative && " · not counted"}
+          <ReminderNote account={a} manual={c.provider === "manual"} />
+          {a.statement_diff_percent !== null && (
+            <span className={a.statement_diff_percent <= 1 ? "text-positive" : "text-warning"}>
+              {" "}
+              · {a.statement_diff_percent <= 1 ? "matches statement" : `${a.statement_diff_percent}% off statement`}
+            </span>
+          )}
+        </p>
+      </div>
+      {a.balance_cents !== null ? (
+        <Money cents={a.type === "credit" || a.type === "loan" ? -a.balance_cents : a.balance_cents} className="text-sm font-medium" />
+      ) : (
+        <span className="text-xs text-muted-foreground">Add a balance</span>
+      )}
+      <ChevronRight className="size-4 text-muted-foreground" aria-hidden />
+    </button>
+  );
+}
+
+/** A link that stopped syncing: sign in again, or upload a file instead. */
+function StaleNotice({
+  connection: c,
+  titled,
+  onRelink,
+  onUpload,
+}: {
+  connection: Connection;
+  /** Name the institution, when it isn't already the card's title. */
+  titled?: boolean;
+  onRelink: () => void;
+  onUpload: () => void;
+}) {
+  return (
+    <div className="mx-5 rounded-xl bg-warning/10 p-3.5 text-sm">
+      <p className="flex items-start gap-2 font-medium text-warning">
+        <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden />{" "}
+        <span>
+          {titled !== false && <>{c.institution}: </>}
+          {c.last_error || "This connection needs you to sign in at the bank again."}
+        </span>
+      </p>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <Button size="sm" onClick={onRelink}>
+          Reconnect
+        </Button>
+        <Button size="sm" variant="outline" onClick={onUpload}>
+          <FileUp /> Upload a file instead
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 function ConnectionCard({
   connection: c,
+  kinds,
   onEdit,
   onRelink,
   onUpload,
 }: {
   connection: Connection;
+  kinds: Kind[];
   onEdit: (a: Account) => void;
   onRelink: () => void;
   /** With an account id, the file goes into that account unless changed. */
@@ -430,56 +676,14 @@ function ConnectionCard({
         ) : null}
       </CardHeader>
       {c.status === "stale" && (
-        <div className="mx-5 mt-3 rounded-xl bg-warning/10 p-3.5 text-sm">
-          <p className="flex items-start gap-2 font-medium text-warning">
-            <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden />{" "}
-            {c.last_error || "This connection needs you to sign in at the bank again."}
-          </p>
-          <div className="mt-3 flex flex-wrap gap-2">
-            <Button size="sm" onClick={onRelink}>
-              Reconnect
-            </Button>
-            <Button size="sm" variant="outline" onClick={() => onUpload()}>
-              <FileUp /> Upload a file instead
-            </Button>
-          </div>
+        <div className="mt-3">
+          <StaleNotice connection={c} titled={false} onRelink={onRelink} onUpload={() => onUpload()} />
         </div>
       )}
       <ul className="divide-y pt-2 pb-1">
         {c.accounts.map((a) => (
           <li key={a.id}>
-            <button
-              type="button"
-              onClick={() => onEdit(a)}
-              className="flex w-full items-center gap-3 px-5 py-3.5 text-left transition-colors hover:bg-muted/50"
-            >
-              <div className="min-w-0 flex-1">
-                <p className={cn("truncate text-sm font-medium", a.hidden && "text-muted-foreground line-through")}>
-                  {a.name}
-                  {a.mask && <span className="ml-1.5 text-muted-foreground">••{a.mask}</span>}
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  {TYPE_LABEL[a.type] ?? a.type}
-                  {!a.is_authoritative && " · not counted"}
-                  <ReminderNote account={a} manual={c.provider === "manual"} />
-                  {a.statement_diff_percent !== null && (
-                    <span className={a.statement_diff_percent <= 1 ? "text-positive" : "text-warning"}>
-                      {" "}
-                      · {a.statement_diff_percent <= 1 ? "matches statement" : `${a.statement_diff_percent}% off statement`}
-                    </span>
-                  )}
-                </p>
-              </div>
-              {a.balance_cents !== null ? (
-                <Money
-                  cents={a.type === "credit" || a.type === "loan" ? -a.balance_cents : a.balance_cents}
-                  className="text-sm font-medium"
-                />
-              ) : (
-                <span className="text-xs text-muted-foreground">Add a balance</span>
-              )}
-              <ChevronRight className="size-4 text-muted-foreground" aria-hidden />
-            </button>
+            <AccountRow account={a} connection={c} kinds={kinds} onEdit={() => onEdit(a)} />
           </li>
         ))}
       </ul>
@@ -614,7 +818,7 @@ function ManualSheet({ open, onOpenChange, onSaved }: { open: boolean; onOpenCha
         </Field>
         <Field id="m-type" label="Kind">
           <Select value={type} onChange={(e) => setType(e.target.value)}>
-            <option value="depository">Cash (checking, savings)</option>
+            <option value="depository">Cash (checking, savings, CDs)</option>
             <option value="investment">Investments</option>
             <option value="credit">Credit card (what you owe)</option>
             <option value="loan">Loan (what you owe)</option>
@@ -636,6 +840,7 @@ function AccountSheet({
   account: a,
   connection: c,
   people,
+  kinds,
   disabled,
   onClose,
   onUpload,
@@ -644,6 +849,7 @@ function AccountSheet({
   account: Account;
   connection: Connection;
   people: Data["people"];
+  kinds: Kind[];
   disabled: boolean;
   onClose: () => void;
   /** Close this sheet and open the upload sheet with this account picked. */
@@ -742,6 +948,7 @@ function AccountSheet({
               onBlur={() => name !== current.name && name && patch({ name }, "Renamed.")}
             />
           </Field>
+          <KindField account={current} kinds={kinds} onChange={(kind) => patch({ kind }, "Moved.")} />
           {people.length > 1 && (
             <Field id="a-owner" label="Whose account">
               <Select
@@ -849,6 +1056,29 @@ function AccountSheet({
         )}
       </div>
     </Sheet>
+  );
+}
+
+/** What kind of account it is; the guess from the bank (or the name) can be changed. Owed stays owed. */
+function KindField({ account: a, kinds, onChange }: { account: Account; kinds: Kind[]; onChange: (kind: string | null) => void }) {
+  const owed = a.type === "credit" || a.type === "loan";
+  const options = kinds.filter((k) => k.owed === owed);
+  const auto = kinds.find((k) => k.key === a.kind_auto)?.one ?? a.kind_auto;
+  return (
+    <Field id="a-kind" label="Kind of account" hint="Where it's listed here and on Net worth. Spending and budgets don't change.">
+      <Select value={a.kind_set ? a.kind : ""} onChange={(e) => onChange(e.target.value || null)}>
+        <option value="">
+          {auto} (from {a.subtype ? "the bank" : "its name"})
+        </option>
+        {options
+          .filter((k) => k.key !== a.kind_auto)
+          .map((k) => (
+            <option key={k.key} value={k.key}>
+              {k.one}
+            </option>
+          ))}
+      </Select>
+    </Field>
   );
 }
 

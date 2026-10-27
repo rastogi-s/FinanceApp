@@ -18,7 +18,6 @@ isn't a change in net worth), and the window says so. Unvested stock plan shares
 The arithmetic (breakdown) works on plain data, so demo mode runs the same sums on its sample household.
 """
 
-import re
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from decimal import Decimal
@@ -26,16 +25,13 @@ from decimal import Decimal
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session as DbSession
 
-from financeapp import household, portfolio
+from financeapp import household, kinds, portfolio
 from financeapp.models import Account, Balance, HoldingSnapshot, InvestmentTransaction
 from financeapp.transfers import is_cash_move
 
 HISTORY_DAYS = 366
 MOVERS = 5  # holdings listed under "Biggest market moves"
 STALE_DAYS = 7  # a balance older than this is flagged on its row
-RETIREMENT = re.compile(
-    r"401|403|457|\bira\b|roth|\bhsa\b|health\s+savings|529|pension|retire|keogh|education|annuity|tsp|sep\b", re.I
-)
 
 # key, label, what it holds; in the order the sheet lists them.
 GROUPS = [
@@ -65,18 +61,18 @@ class AccountIn:
     moves: list[tuple[date, int]] = field(default_factory=list)  # money in (+) or out (-), from the brokerage
     has_activity: bool = False  # the brokerage sends its activity, so `moves` can be trusted
     unvested: list[dict] = field(default_factory=list)  # {"symbol", "name", "shares", "value_cents"}
+    # The kind Settings → Accounts lists it as (worked out from the account's own name, not the display name),
+    # or None to work it out here.
+    kind_set: str | None = None
+
+    @property
+    def kind(self) -> str:
+        return kinds.kind_of(self.type, self.subtype, self.name, self.kind_set)
 
 
 def group_of(a: AccountIn) -> str:
-    if a.type == "credit":
-        return "cards"
-    if a.type == "loan":
-        return "loans"
-    if a.type == "other":
-        return "other"
-    if RETIREMENT.search(f"{a.subtype or ''} {a.name}"):
-        return "retirement"
-    return "investments" if a.type == "investment" else "cash"
+    """The same kinds Settings → Accounts lists, added up in fewer groups."""
+    return kinds.NET_WORTH_GROUP[a.kind]
 
 
 def signed(a: AccountIn, cents: int) -> int:
@@ -167,6 +163,7 @@ def breakdown(accounts: list[AccountIn], end: date) -> dict:
             {
                 "id": a.id,
                 "name": a.name,
+                "kind": kinds.LABEL[a.kind],
                 "cents": signed(a, a.now_cents),
                 "as_of": last.isoformat() if last else None,
                 "stale": last is not None and (end - last).days > STALE_DAYS,
@@ -284,6 +281,7 @@ def build(db: DbSession, end: date) -> dict:
         ai = AccountIn(
             a.id, household.display_name(a), a.type, a.subtype,
             (b.current_cents if b else 0) + moved.get(a.id, 0), balances,
+            kind_set=kinds.kind_of(a.type, a.subtype, a.name, a.kind),
         )  # fmt: skip
         if a.type == "investment":
             _load_investments(db, a, ai, positions, end, since)

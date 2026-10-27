@@ -172,6 +172,7 @@ function GroupRow({ g }: { g: NetWorthGroup }) {
               <li key={a.id} className="flex items-baseline justify-between gap-3 text-xs">
                 <span className="min-w-0 wrap-anywhere text-muted-foreground">
                   {a.name}
+                  {g.key !== "cards" && g.key !== "loans" && <span className="ml-1">· {a.kind}</span>}
                   {a.stale && a.as_of && <span className="ml-1 text-warning">· as of {shortDay.format(new Date(a.as_of))}</span>}
                 </span>
                 <Money cents={a.cents} className="tabular-nums" />

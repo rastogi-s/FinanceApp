@@ -1,5 +1,23 @@
 [
   {
+    "version": "0.44.0",
+    "title": "Accounts, grouped by kind",
+    "features": [
+      {
+        "id": "accounts-by-type",
+        "title": "Checking, savings, CDs, cards and more",
+        "body": "Settings → Accounts now lists every account by kind: checking, savings, CDs, brokerage, stock plans, retirement, HSA, education, credit cards and loans, each with its total and the biggest first. CDs are spotted from the bank or the account's name. By connection is one tap away when you want to reconnect or upload.",
+        "tryIt": "/settings/accounts"
+      },
+      {
+        "id": "accounts-kind-pick",
+        "title": "Fix an account's kind",
+        "body": "If an account lands in the wrong group, open it and pick its kind. The net worth breakdown on Home follows the same kinds. Spending and budgets don't change.",
+        "tryIt": "/settings/accounts"
+      }
+    ]
+  },
+  {
     "version": "0.43.0",
     "title": "Net worth, explained",
     "features": [

@@ -5,6 +5,13 @@ export type Account = {
   name: string;
   display_name: string;
   type: string;
+  subtype: string | null;
+  /** Checking, savings, cd, card...: what it's grouped as (backend kinds.py). */
+  kind: string;
+  /** What the app guessed from the type, subtype and name. */
+  kind_auto: string;
+  /** Picked by hand on the account's sheet. */
+  kind_set: boolean;
   mask: string | null;
   hidden: boolean;
   is_authoritative: boolean;
@@ -17,6 +24,7 @@ export type Account = {
   /** Uploaded and typed-in accounts only: when the next statement should be uploaded. */
   reminder: Reminder | null;
 };
+export type Kind = { key: string; label: string; one: string; about: string; owed: boolean };
 export type Every = "monthly" | "quarterly" | "weekly" | "off";
 export type Reminder = {
   every: Every;
@@ -79,6 +87,8 @@ export type ConnectionsData = {
   revoked: Connection[];
   providers: { plaid: boolean; snaptrade: boolean };
   people: { id: number; name: string }[];
+  /** In the order the page lists them. */
+  kinds: Kind[];
   sync: {
     last_at: string | null;
     last_ok: boolean | null;
