@@ -1589,3 +1589,100 @@ def moves_offer(today: date | None = None) -> dict:
             "answer": answer,
         },
     }
+
+
+# ---- credit cards: the two cards above, a year of purchases on them, some on the wrong card
+
+CARD_SPEND = [
+    # merchant, MCC, online or in store, dollars low-high, times a month, which card (4: Amex Gold, 2: Sapphire)
+    ("Trader Joe's", "5411", "in store", 40, 140, 4.0, 4),
+    ("Whole Foods Market", "5411", "in store", 25, 110, 2.0, 4),
+    ("Sweetgreen", "5812", "in store", 14, 32, 3.0, 2),
+    ("Blue Bottle Coffee", "5814", "in store", 5, 12, 6.0, 4),
+    ("Shell", "5541", "in store", 35, 60, 2.5, 4),
+    ("Lyft", "4121", "online", 12, 38, 2.0, 4),
+    ("Spotify", "5815", "online", 12, 12, 1.0, 4),
+    ("Target", "5310", "in store", 20, 90, 2.0, 2),
+    ("Amazon", "5942", "online", 15, 80, 3.0, 2),
+    ("AMC Theatres", "7832", "in store", 18, 45, 0.7, 2),
+    ("Delta Air Lines", "3058", "online", 280, 520, 0.25, 2),
+    ("Costco", "5300", "in store", 90, 260, 1.0, 2),
+]
+
+
+def cards_wallet(today: date | None = None):
+    from financeapp import cards
+
+    today = today or datetime.now(UTC).date()
+    rng = random.Random(SEED + 7)  # noqa: S311 - sample data, not security
+    links = {4: ("amex-gold", "Amex Gold ••1008"), 2: ("chase-sapphire-preferred", "Sapphire Preferred ••9012")}
+    wallet = [cards.Card(aid, label, cards.product(pid)) for aid, (pid, label) in links.items()]
+    purchases = []
+    n = 0
+    for merchant, mcc, channel, lo, hi, per_month, card in CARD_SPEND:
+        known = cards.known_merchant(merchant)
+        tags = cards.tags_for(known, mcc, None, channel)
+        days = round(per_month * 12)
+        for _ in range(days):
+            n += 1
+            day = today - timedelta(days=rng.randrange(0, cards.HISTORY_DAYS))
+            dollars = lo if lo == hi else rng.uniform(lo, hi)
+            purchases.append(
+                cards.Purchase(
+                    f"demo-{n}",
+                    day,
+                    _cents(round(dollars, 2)),
+                    merchant,
+                    cards.merchant_key(merchant),
+                    tags,
+                    channel,
+                    card,
+                    mcc=mcc,
+                )
+            )
+    return cards.Wallet(wallet, purchases, purchases, cards.values_default(), today)
+
+
+def cards_page(today: date | None = None) -> dict:
+    from financeapp import cards
+    from financeapp.models import CardLink
+
+    w = cards_wallet(today)
+    on = w.on
+    statement = {
+        4: (_cents(2_140), _cents(1_986.40), _cents(40), 24.49, 9),
+        2: (_cents(860), _cents(1_204.17), _cents(35), 21.49, 17),
+    }
+    rows = []
+    for aid, name, institution, mask, pid, limit in [
+        (4, "Amex Gold", "American Express", "1008", "amex-gold", None),
+        (2, "Chase Sapphire", "Chase", "9012", "chase-sapphire-preferred", 18_000),
+    ]:
+        balance, last, minimum, apr, due_day = statement[aid]
+        due = on.replace(day=due_day) if on.day <= due_day else goals.add_months(on.replace(day=due_day), 1)
+        closed = goals.add_months(due, -1)
+        rows.append(
+            cards.CardAccount(
+                account_id=aid,
+                name=name,
+                institution=institution,
+                mask=mask,
+                link=CardLink(account_id=aid, product=pid, role="active", renewal_month=3 if aid == 4 else 8),
+                balance_cents=balance,
+                balance_as_of=on,
+                limit_cents=_cents(limit) if limit else None,
+                statement={
+                    "purchase_apr": apr,
+                    "aprs": [{"type": "purchase_apr", "percent": apr}],
+                    "statement_cents": last,
+                    "statement_date": (closed + timedelta(days=4)).isoformat(),
+                    "minimum_cents": minimum,
+                    "due_date": due.isoformat(),
+                    "last_payment_cents": last,
+                    "last_payment_date": (closed - timedelta(days=2)).isoformat(),
+                    "overdue": False,
+                    "as_of": on.isoformat(),
+                },
+            )
+        )
+    return cards.assemble(w, rows, demo=True)

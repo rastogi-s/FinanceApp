@@ -13,6 +13,7 @@ import httpx
 
 from financeapp.connectors.base import (
     AccountData,
+    CardStatementData,
     ConnectorError,
     FetchResult,
     HoldingData,
@@ -53,6 +54,19 @@ TYPES = {
     "investment": "investment",
     "brokerage": "investment",
 }
+
+
+def day(value: str | None) -> date | None:
+    try:
+        return date.fromisoformat(value) if value else None
+    except ValueError:
+        return None
+
+
+def mcc(value: str | None) -> str | None:
+    """A four-digit merchant category code, or nothing (Plaid's field is in beta and not every bank sends it)."""
+    code = (value or "").strip()
+    return code if len(code) == 4 and code.isdigit() else None
 
 
 class Plaid:
@@ -176,6 +190,7 @@ class Plaid:
                     mask=last4(a.get("mask")),
                     current_cents=cents(b.get("current")),
                     available_cents=cents(b.get("available")),
+                    limit_cents=cents(b.get("limit")) if kind == "credit" else None,
                 )
             )
 
@@ -184,8 +199,49 @@ class Plaid:
             self._investment_transactions(token, result)
 
         if any(t in ("depository", "credit", "loan") for t in types.values()):
+            # Merchant category codes came later: the first sync after that pulls the history again to get them.
+            if result.state.get("cursor") and not result.state.get("mcc"):
+                result.state.pop("cursor")
             self._transactions(token, result)
+            result.state["mcc"] = True
+        if any(t == "credit" for t in types.values()):
+            result.card_statements = self._card_statements(token)
         return result
+
+    def _card_statements(self, token: str) -> list[CardStatementData]:
+        """Card terms and statements from Liabilities, only where the login already has that product: asking an Item
+        without it would add it, and Plaid bills Liabilities per login. Nothing else depends on it, so a problem
+        here never stops the sync."""
+        try:
+            item = self._post("/item/get", {"access_token": token}).get("item") or {}
+            if "liabilities" not in (item.get("products") or []) + (item.get("billed_products") or []):
+                return []
+            data = self._post("/liabilities/get", {"access_token": token})
+        except ConnectorError:
+            return []
+        out = []
+        for c in (data.get("liabilities") or {}).get("credit") or []:
+            aprs = [
+                {"type": a.get("apr_type"), "percent": a.get("apr_percentage")}
+                for a in c.get("aprs") or []
+                if a.get("apr_percentage") is not None
+            ]
+            purchase = next((a["percent"] for a in aprs if a["type"] == "purchase_apr"), None)
+            out.append(
+                CardStatementData(
+                    account_external_id=c["account_id"],
+                    purchase_apr=Decimal(str(purchase)) if purchase is not None else None,
+                    aprs=aprs,
+                    statement_cents=cents(c.get("last_statement_balance")),
+                    statement_date=day(c.get("last_statement_issue_date")),
+                    minimum_cents=cents(c.get("minimum_payment_amount")),
+                    due_date=day(c.get("next_payment_due_date")),
+                    last_payment_cents=cents(c.get("last_payment_amount")),
+                    last_payment_date=day(c.get("last_payment_date")),
+                    overdue=c.get("is_overdue"),
+                )
+            )
+        return out
 
     def _holdings(self, token: str) -> list[HoldingData] | None:
         try:
@@ -322,6 +378,9 @@ class Plaid:
             description=(t.get("original_description") or t.get("name") or "")[:300],
             pending=bool(t.get("pending")),
             provider_category=category.get("detailed") or category.get("primary"),
+            mcc=mcc(t.get("merchant_category_code")),
+            channel=t.get("payment_channel") if t.get("payment_channel") in ("online", "in store", "other") else None,
+            website=(t.get("website") or "")[:120] or None,
         )
 
     def revoke(self, token: str, external_id: str) -> None:

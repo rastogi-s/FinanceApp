@@ -29,6 +29,7 @@ class AccountData:
     mask: str | None
     current_cents: int | None
     available_cents: int | None = None
+    limit_cents: int | None = None  # a card's credit limit
 
 
 @dataclass
@@ -54,6 +55,25 @@ class TransactionData:
     description: str
     pending: bool = False
     provider_category: str | None = None
+    mcc: str | None = None  # the merchant category code the card network saw: what card rewards go by
+    channel: str | None = None  # online | in store | other
+    website: str | None = None
+
+
+@dataclass
+class CardStatementData:
+    """A card's terms and latest statement, from the bank (Plaid Liabilities)."""
+
+    account_external_id: str
+    purchase_apr: Decimal | None = None
+    aprs: list[dict] = field(default_factory=list)  # [{"type": "purchase_apr", "percent": 24.49}, ...]
+    statement_cents: int | None = None
+    statement_date: date | None = None
+    minimum_cents: int | None = None
+    due_date: date | None = None
+    last_payment_cents: int | None = None
+    last_payment_date: date | None = None
+    overdue: bool | None = None
 
 
 @dataclass
@@ -79,6 +99,7 @@ class FetchResult:
     transactions: list[TransactionData] = field(default_factory=list)
     removed_transaction_ids: list[str] = field(default_factory=list)
     investment_transactions: list[InvestmentTransactionData] = field(default_factory=list)
+    card_statements: list[CardStatementData] = field(default_factory=list)
     state: dict = field(default_factory=dict)  # saved and handed back next time (e.g. a sync cursor)
 
 

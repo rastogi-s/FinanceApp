@@ -13,7 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session as DbSession
 
-from financeapp import alerts, budget, household, kinds, portfolio
+from financeapp import alerts, budget, cards, household, kinds, portfolio
 from financeapp.models import Account, AlertEvent, Balance, Brief, Category, Transaction, now
 from financeapp.sync import today
 
@@ -60,6 +60,14 @@ class RangeArgs(Args):
 
 class HistoryArgs(Args):
     days: int = Field(90, ge=2, le=household.HISTORY_DAYS, description="How many days back")
+
+
+class BestCardArgs(Args):
+    store: str | None = Field(None, max_length=80, description="A store or merchant name, e.g. Costco or Delta")
+    category: Literal[tuple(k for k in cards.CATEGORIES if k != "superstores")] | None = Field(  # type: ignore[valid-type]
+        None, description="A reward category instead of a store, e.g. dining or groceries"
+    )
+    amount: float = Field(100, gt=0, le=100_000, description="Purchase amount in dollars")
 
 
 def _range(start: date | None, end: date | None, default_start: date) -> tuple[date, date]:
@@ -301,6 +309,43 @@ def morning_brief(db: DbSession, _: NoArgs) -> dict:
     }
 
 
+def best_card(db: DbSession, args: BestCardArgs) -> dict:
+    if not args.store and not args.category:
+        raise ToolError("Give a store or a category.")
+    w = cards.wallet(db, today())
+    if not w.cards:
+        return {"cards": [], "note": "No cards are linked to a card product yet (Credit cards page)."}
+    cents = round(args.amount * 100)
+    kind = None if args.store else args.category
+    found = cards.lookup(w.cards, w.everything, w.on, w.values, w.ledger(), args.store or "", None, kind, cents)
+    if not found["found"]:
+        return {"store": args.store, "found": False, "note": "Unknown store: ask again with a category."}
+    out = []
+    for ch in found["channels"]:
+        ranked = []
+        for row in ch["cards"]:
+            ranked.append(
+                {
+                    "card": row["card"],
+                    "rate": row["rate"],
+                    "earns": dollars(row["value_cents"]),
+                    "why": row["why"],
+                    "cap": row["cap"],
+                    "warnings": row["warnings"],
+                    "better_through_portal": row["portal"],
+                }
+            )
+        out.append({"channel": ch["channel"], "cards": ranked})
+    return {
+        "store": found["name"],
+        "kind": found["kind"],
+        "how_known": found["how"],
+        "amount": args.amount,
+        "by_channel": out,
+        "note": "Earnings are in dollars at the household's cents-per-point values; caps already used are counted.",
+    }
+
+
 # ---- the catalog the MCP server lists
 
 
@@ -382,6 +427,14 @@ TOOLS = {
             recent_alerts,
         ),
         Tool("morning_brief", "Morning brief", "The latest morning brief the app wrote.", NoArgs, morning_brief),
+        Tool(
+            "best_card",
+            "Best card to use",
+            "Which of the household's credit cards earns the most at a store or in a reward category, in store and "
+            "online, with the rate, the dollars earned, caps and any warnings (e.g. a store that takes only Visa).",
+            BestCardArgs,
+            best_card,
+        ),
     ]
 }
 
