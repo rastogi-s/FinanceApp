@@ -15,6 +15,7 @@ code as the page.
 """
 
 import json
+import re
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from datetime import date, timedelta
@@ -28,6 +29,7 @@ from financeapp.config import PACKAGE_DIR
 from financeapp.models import Account, Balance, CardLink, CardStatement, Category, Preference, Transaction
 
 SAMPLE_CENTS = 100_00  # rankings show what a $100 purchase earns
+CARD_KEY = re.compile(r"card:\d{1,9}")  # a point value set for one card, by account id
 HISTORY_DAYS = 365
 CHANNELS = ("in store", "online")
 
@@ -273,10 +275,16 @@ class Card:
     product: dict
     choice: str | None = None
     role: str = "active"
+    # Where you'd rather use this card when it ties with another: category ids, or "*" for everywhere.
+    favored: frozenset[str] = frozenset()
 
     @property
     def program(self) -> str:
         return self.product["program"]
+
+    def favor(self, category: str) -> int:
+        """How much you'd rather use this card for a category, when it earns the same as another."""
+        return 2 if category in self.favored else 1 if "*" in self.favored else 0
 
 
 @dataclass
@@ -395,8 +403,13 @@ def earn(
         units += left / 100 * card.product["base"]
         if top_rate is None:
             top_rate = card.product["base"]
-    cpp = values.get(card.program, 1.0)
+    cpp = worth(card, values)
     return Earned(cents=units * cpp, units=units, rate=top_rate, rule=top_rule, capped=capped)
+
+
+def worth(card: Card, values: dict[str, float]) -> float:
+    """Cents a point on this card: what you set for the card, else for its program."""
+    return values.get(f"card:{card.account_id}", values.get(card.program, 1.0))
 
 
 def units_label(card: Card, rate: float) -> str:
@@ -440,6 +453,7 @@ def rank(
 ) -> list[dict]:
     """Every active card, best first, for one purchase."""
     accepts = ((merchant or {}).get("accepts") or {}).get(channel or "") if merchant else None
+    category = bucket(tags)
     rows = []
     for card in cards:
         if card.role != "active":
@@ -469,9 +483,11 @@ def rank(
                 "portal": portal_hint(card, tags, on, values, e),
                 "warnings": warnings,
                 "blocked": bool(accepts and card.product["network"] not in accepts),
+                "favor": card.favor(category),
             }
         )
-    rows.sort(key=lambda r: (r["blocked"], -r["value_cents"], r["card"]))
+    # Ties go to the card you picked for this category, then your default card.
+    rows.sort(key=lambda r: (r["blocked"], -r["value_cents"], -r["favor"], r["card"]))
     return rows
 
 
@@ -511,6 +527,13 @@ def best_by_category(
                 "spent_cents": spent.get(cid, 0),
                 "best": ranked[0] if ranked else None,
                 "next": ranked[1] if len(ranked) > 1 else None,
+                "tied": [
+                    {"account_id": r["account_id"], "card": r["card"]}
+                    for r in ranked
+                    if not r["blocked"] and r["value_cents"] == ranked[0]["value_cents"]
+                ]
+                if ranked
+                else [],
             }
         )
     return rows
@@ -661,8 +684,11 @@ def missed(cards: list[Card], purchases: list[Purchase], start: date, end: date,
         if card is None or p.day > end:
             continue
         got = earn(card, p.tags, p.channel, p.cents, p.day, actual_ledger, values, record=True)
+        cat = bucket(p.tags)
         options = [(earn(c, p.tags, p.channel, p.cents, p.day, best_ledger, values), c) for c in active]
-        best, best_card = max(options, key=lambda x: x[0].cents) if options else (got, card)
+        best, best_card = (
+            max(options, key=lambda x: (round(x[0].cents, 6), x[1].favor(cat))) if options else (got, card)
+        )
         if best.cents < got.cents:
             best, best_card = got, card
         earn(best_card, p.tags, p.channel, p.cents, p.day, best_ledger, values, record=True)
@@ -671,7 +697,6 @@ def missed(cards: list[Card], purchases: list[Purchase], start: date, end: date,
         spent += p.cents
         total_actual += got.cents
         total_best += best.cents
-        cat = bucket(p.tags)
         row = by_category.setdefault(
             cat,
             {
@@ -735,9 +760,12 @@ def values_default() -> dict[str, float]:
 
 
 def values(db: DbSession) -> dict[str, float]:
+    """Cents a point for each program, plus "card:<account id>" for a card you value on its own."""
     p = db.get(Preference, "cards")
     mine = (p.value if p else {}).get("cpp", {})
-    return {k: float(mine.get(k, v["cpp"])) for k, v in catalog()["programs"].items()}
+    out = {k: float(mine.get(k, v["cpp"])) for k, v in catalog()["programs"].items()}
+    out.update({k: float(v) for k, v in mine.items() if CARD_KEY.fullmatch(k)})
+    return out
 
 
 def set_values(db: DbSession, cpp: dict[str, float]) -> None:
@@ -745,8 +773,37 @@ def set_values(db: DbSession, cpp: dict[str, float]) -> None:
     if p is None:
         p = Preference(key="cards", value={})
         db.add(p)
-    given = {k: round(float(v), 2) for k, v in cpp.items() if k in catalog()["programs"]}
+    given = {k: round(float(v), 2) for k, v in cpp.items() if k in catalog()["programs"] or CARD_KEY.fullmatch(k)}
     p.value = {**p.value, "cpp": {**p.value.get("cpp", {}), **given}}
+
+
+def prefer(db: DbSession) -> dict:
+    """Which card to use when cards tie: a default, and one per category."""
+    p = db.get(Preference, "cards")
+    mine = (p.value if p else {}).get("prefer", {})
+    return {"default": mine.get("default"), "by": dict(mine.get("by", {}))}
+
+
+def set_prefer(db: DbSession, category: str | None, account_id: int | None) -> None:
+    p = db.get(Preference, "cards")
+    if p is None:
+        p = Preference(key="cards", value={})
+        db.add(p)
+    mine = prefer(db)
+    if category is None:
+        mine["default"] = account_id
+    elif account_id is None:
+        mine["by"].pop(category, None)
+    else:
+        mine["by"][category] = account_id
+    p.value = {**p.value, "prefer": mine}
+
+
+def favored(account_id: int, chosen: dict) -> frozenset[str]:
+    tags = {c for c, a in chosen.get("by", {}).items() if a == account_id}
+    if chosen.get("default") == account_id:
+        tags.add("*")
+    return frozenset(tags)
 
 
 def card_accounts(db: DbSession) -> list[Account]:
@@ -768,12 +825,13 @@ def label_of(a: Account, link: CardLink | None) -> str:
 def load_cards(db: DbSession) -> tuple[list[Card], list[Account], dict[int, CardLink]]:
     accounts = card_accounts(db)
     links = {link.account_id: link for link in db.scalars(select(CardLink))}
+    chosen = prefer(db)
     cards = []
     for a in accounts:
         link = links.get(a.id)
         p = product(link.product) if link else None
         if p is not None and link.role != "closed":
-            cards.append(Card(a.id, label_of(a, link), p, link.choice, link.role))
+            cards.append(Card(a.id, label_of(a, link), p, link.choice, link.role, favored(a.id, chosen)))
     return cards, accounts, links
 
 
@@ -841,6 +899,27 @@ def wallet(db: DbSession, on: date, everything: bool = True) -> Wallet:
     else:
         bank = []
     return Wallet(cards, purchases, purchases + bank, values(db), on)
+
+
+def card_values(cards: list[Card], vals: dict[str, float]) -> list[dict]:
+    """One row per card that earns points (not cash), since two cards on one program can be worth different
+    amounts: Ultimate Rewards from a Freedom card, say, go further once moved to a Sapphire card."""
+    programs = catalog()["programs"]
+    return [
+        {
+            "account_id": c.account_id,
+            "card": c.label,
+            "program": c.program,
+            "program_name": programs[c.program]["name"],
+            "cpp": worth(c, vals),
+            "default": vals[c.program],
+            "own": f"card:{c.account_id}" in vals,
+            "pairs": c.product.get("pairs"),
+            "transfers": bool(programs[c.program].get("transfers")),
+        }
+        for c in cards
+        if programs[c.program]["unit"] != "%"
+    ]
 
 
 def program_rows(vals: dict[str, float]) -> list[dict]:
@@ -1015,7 +1094,12 @@ def assemble(w: Wallet, accounts: list[CardAccount], demo: bool = False) -> dict
         "as_of": on.isoformat(),
         "cards": rows,
         "best": best_by_category(w.cards, w.everything, on, w.values, ledger),
+        "prefer": {
+            "default": next((c.account_id for c in w.cards if "*" in c.favored), None),
+            "by": {t: c.account_id for c in w.cards for t in sorted(c.favored) if t != "*"},
+        },
         "programs": program_rows(w.values),
+        "card_values": card_values(w.cards, w.values),
         "catalog": [product_summary(p) for p in catalog()["cards"]],
         "checked": catalog()["checked"],
     }

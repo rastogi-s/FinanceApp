@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { AlertTriangle, ChevronRight, CreditCard, Globe, Search, Sparkles, Store, X } from "lucide-react";
-import { CardFace, CardSheet, ValuesSheet, Chip } from "@/components/card-sheets";
+import { CardFace, CardSheet, ValuesSheet, Chip, setPrefer } from "@/components/card-sheets";
 import { Money } from "@/components/money";
 import { BackLink, Notice } from "@/components/page";
 import { Badge } from "@/components/ui/badge";
@@ -53,7 +53,7 @@ export default function CardsPageView() {
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <StoreLookup hasCards={s.cards.some((c) => c.linked && c.role === "active")} />
           <Wallet s={s} onOpen={setOpen} />
-          <BestByCategory s={s} />
+          <BestByCategory s={s} onSaved={setLocal} />
           <MissedPoints s={s} />
           <PointValues s={s} onEdit={() => setValues(true)} />
         </div>
@@ -351,7 +351,7 @@ function WalletCard({ c, asOf, onOpen }: { c: CardRow; asOf: string; onOpen: () 
 
 // ---- best card by category
 
-function BestByCategory({ s }: { s: CardsPage }) {
+function BestByCategory({ s, onSaved }: { s: CardsPage; onSaved: (p: CardsPage) => void }) {
   const [all, setAll] = useState(false);
   const linked = s.cards.some((c) => c.linked && c.role === "active");
   const used = s.best.filter((b) => b.spent_cents > 0).sort((a, b) => b.spent_cents - a.spent_cents);
@@ -371,7 +371,21 @@ function BestByCategory({ s }: { s: CardsPage }) {
           <>
             <ul className="grid grid-cols-1 divide-y">
               {rows.map((b) => (
-                <BestLine key={b.category} b={b} />
+                <BestLine
+                  key={b.category}
+                  b={b}
+                  picked={s.prefer.by[b.category] ?? null}
+                  onPick={(id) =>
+                    setPrefer(
+                      s,
+                      onSaved,
+                      { category: b.category, account_id: id },
+                      id === null
+                        ? `${b.label}: back to your default card.`
+                        : `${b.label}: ${b.tied.find((t) => t.account_id === id)?.card}.`,
+                    )
+                  }
+                />
               ))}
             </ul>
             {!all && rest.length > 0 && used.length > 0 && (
@@ -389,36 +403,58 @@ function BestByCategory({ s }: { s: CardsPage }) {
   );
 }
 
-function BestLine({ b }: { b: BestRow }) {
+function BestLine({ b, picked, onPick }: { b: BestRow; picked: number | null; onPick: (id: number | null) => void }) {
+  const tie = b.tied.length > 1;
   return (
-    <li className="flex items-center gap-3 py-2.5">
-      <div className="min-w-0 flex-1">
-        <p className="text-sm font-medium">{b.label}</p>
-        <p className="text-xs text-muted-foreground">
-          {b.spent_cents > 0 ? (
-            <>
-              <Money cents={b.spent_cents} /> a year
-            </>
-          ) : (
-            "Nothing yet"
-          )}
-        </p>
-      </div>
-      {b.best && (
-        <div className="min-w-0 text-right">
-          <p className="flex items-center justify-end gap-1.5 text-sm">
-            <Dot color={b.best.color} />
-            <span className="truncate font-medium">{b.best.product}</span>
-            <span className="tabular-nums">{b.best.rate}</span>
+    <li className="py-2.5">
+      <div className="flex items-center gap-3">
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-medium">{b.label}</p>
+          <p className="text-xs text-muted-foreground">
+            {b.spent_cents > 0 ? (
+              <>
+                <Money cents={b.spent_cents} /> a year
+              </>
+            ) : (
+              "Nothing yet"
+            )}
           </p>
-          {b.next && b.next.value_cents < b.best.value_cents ? (
-            <p className="truncate text-xs text-muted-foreground">
-              then {b.next.product} {b.next.rate}
+        </div>
+        {b.best && (
+          <div className="min-w-0 text-right">
+            <p className="flex items-center justify-end gap-1.5 text-sm">
+              <Dot color={b.best.color} />
+              <span className="truncate font-medium">{b.best.product}</span>
+              <span className="tabular-nums">{b.best.rate}</span>
             </p>
-          ) : b.next ? (
-            <p className="truncate text-xs text-muted-foreground">same as {b.next.product}</p>
-          ) : null}
-          {b.best.cap && <p className="truncate text-xs text-muted-foreground">{b.best.cap}</p>}
+            {b.next && b.next.value_cents < b.best.value_cents ? (
+              <p className="truncate text-xs text-muted-foreground">
+                then {b.next.product} {b.next.rate}
+              </p>
+            ) : b.next && !tie ? (
+              <p className="truncate text-xs text-muted-foreground">same as {b.next.product}</p>
+            ) : null}
+            {b.best.cap && <p className="truncate text-xs text-muted-foreground">{b.best.cap}</p>}
+          </div>
+        )}
+      </div>
+      {tie && b.best && (
+        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+          <span id={`tie-${b.category}`} className="mr-0.5 text-xs text-muted-foreground">
+            Same rate. Use
+          </span>
+          <div role="radiogroup" aria-labelledby={`tie-${b.category}`} className="flex flex-wrap gap-1.5">
+            {b.tied.map((t) => (
+              <Chip key={t.account_id} on={b.best!.account_id === t.account_id} onClick={() => onPick(t.account_id)} small>
+                {t.card}
+              </Chip>
+            ))}
+          </div>
+          {picked !== null && (
+            <button type="button" className="text-xs font-medium text-primary" onClick={() => onPick(null)}>
+              Use my default
+            </button>
+          )}
         </div>
       )}
     </li>
@@ -546,9 +582,8 @@ function MissedBody({ m }: { m: Missed }) {
 // ---- what points are worth
 
 function PointValues({ s, onEdit }: { s: CardsPage; onEdit: () => void }) {
-  const programs = new Set(s.cards.filter((c) => c.product).map((c) => c.product!.program));
-  const mine = s.programs.filter((p) => programs.has(p.name));
-  if (mine.length === 0) return null;
+  const cash = s.cards.some((c) => c.product && c.role !== "closed" && s.programs.find((p) => p.name === c.product!.program)?.unit === "%");
+  if (s.card_values.length === 0 && !cash) return null;
   return (
     <Card className="md:col-span-2">
       <CardHeader>
@@ -559,9 +594,15 @@ function PointValues({ s, onEdit }: { s: CardsPage; onEdit: () => void }) {
       </CardHeader>
       <CardContent>
         <ul className="flex flex-wrap gap-2 text-sm">
-          {mine.map((p) => (
-            <li key={p.id} className="rounded-full bg-muted px-3 py-1.5">
-              {p.name}: <span className="font-medium tabular-nums">{p.unit === "%" ? "cash" : `${p.cpp}¢ a point`}</span>
+          {cash && (
+            <li className="rounded-full bg-muted px-3 py-1.5">
+              Cash back: <span className="font-medium">cash</span>
+            </li>
+          )}
+          {s.card_values.map((v) => (
+            <li key={v.account_id} className="rounded-full bg-muted px-3 py-1.5">
+              {v.card} <span className="text-muted-foreground">· {v.program_name}</span>:{" "}
+              <span className="font-medium tabular-nums">{v.cpp}¢ a point</span>
             </li>
           ))}
         </ul>
