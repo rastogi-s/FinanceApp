@@ -7,6 +7,7 @@ import { AlertTriangle, ArrowDownRight, ArrowUpRight, Bell, ChevronRight, FileUp
 import { BriefCard } from "@/components/brief";
 import { Sparkline } from "@/components/charts";
 import { Money, formatMoney } from "@/components/money";
+import { NetWorthSheet } from "@/components/net-worth-sheet";
 import { HouseholdPage } from "@/components/page";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -67,9 +68,11 @@ export default function Home() {
 
             {!h.demo && <BriefCard />}
 
-            <Card className="overflow-hidden">
+            <NetWorthCard>
               <CardHeader>
-                <CardTitle>Net worth</CardTitle>
+                <CardTitle className="flex items-center gap-0.5">
+                  Net worth <ChevronRight className="size-4 text-muted-foreground" aria-hidden />
+                </CardTitle>
                 {history.length > 1 && (
                   <Badge variant={up ? "positive" : "negative"}>
                     {up ? <ArrowUpRight className="size-3.5" aria-hidden /> : <ArrowDownRight className="size-3.5" aria-hidden />}
@@ -87,7 +90,7 @@ export default function Home() {
                 points={history}
                 label={`Net worth over the last ${history.length} days, from ${formatMoney(history[0] ?? 0)} to ${formatMoney(h.net_worth.cents)}.`}
               />
-            </Card>
+            </NetWorthCard>
 
             <div className="grid grid-cols-2 gap-4">
               <FirstTile h={h} />
@@ -125,6 +128,27 @@ export default function Home() {
         );
       }}
     </HouseholdPage>
+  );
+}
+
+/** The Net worth card, which opens the sheet with the math behind it and what moved it. */
+function NetWorthCard({ children }: { children: React.ReactNode }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <Card className="relative overflow-hidden transition-colors has-[button:hover]:bg-muted/40">
+        {children}
+        {/* The whole card is the tap target; the heading and numbers stay readable as they are. */}
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          aria-haspopup="dialog"
+          aria-label="Net worth: see how it adds up and what moved it"
+          className="absolute inset-0 rounded-xl"
+        />
+      </Card>
+      <NetWorthSheet open={open} onOpenChange={setOpen} />
+    </>
   );
 }
 

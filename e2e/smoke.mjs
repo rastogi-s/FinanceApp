@@ -174,6 +174,26 @@ try {
     else console.log(`ok   ${size} privacy`);
     await page.getByRole("button", { name: "Show amounts" }).click();
 
+    // 4. Net worth opens its sheet: the math, then what moved it.
+    errors = [];
+    try {
+      const problems = [];
+      await page.getByRole("button", { name: /^Net worth: see how/ }).click();
+      const sheet = page.getByRole("dialog");
+      await sheet.getByText("What you own").waitFor();
+      await page.screenshot({ path: join(OUT, `${size}-net-worth.png`) });
+      await sheet.getByRole("radio", { name: "What moved it" }).click();
+      await sheet.getByText("By account").waitFor();
+      await page.screenshot({ path: join(OUT, `${size}-net-worth-moved.png`) });
+      const axe = await new AxeBuilder({ page }).include("[role=dialog]").withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"]).analyze();
+      for (const v of axe.violations.filter((v) => v.impact === "serious" || v.impact === "critical")) problems.push(`${v.id}: ${v.help}`);
+      problems.push(...errors);
+      if (problems.length) fail(`${size} net worth sheet`, problems);
+      else console.log(`ok   ${size} net worth sheet`);
+    } catch (e) {
+      fail(`${size} net worth sheet`, ["couldn't open it: " + e.message.split("\n")[0], ...errors]);
+    }
+
     await context.close();
   }
 } finally {
