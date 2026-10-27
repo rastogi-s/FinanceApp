@@ -191,6 +191,7 @@ class Plaid:
                     current_cents=cents(b.get("current")),
                     available_cents=cents(b.get("available")),
                     limit_cents=cents(b.get("limit")) if kind == "credit" else None,
+                    apy=a.get("apy") if kind == "depository" and isinstance(a.get("apy"), int | float) else None,
                 )
             )
 

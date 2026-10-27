@@ -365,6 +365,7 @@ class FakePlaid:
                             "subtype": "checking",
                             "mask": "4417",
                             "balances": {"current": 5000.25, "available": 4900},
+                            "apy": 0.01,
                         },
                         {
                             "account_id": "card",

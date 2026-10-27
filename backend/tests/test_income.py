@@ -52,7 +52,8 @@ def test_brokerage_dividends_and_bank_interest(client, home, plaid):  # noqa: F8
     i = page["interest"]
     assert i["received_12m_cents"] == 125 + 1_234 and i["brokerage_12m_cents"] == 125
     row = next(a for a in i["accounts"] if a["id"] == checking_id)
-    assert row["interest_12m_cents"] == 1_234 and row["apy"] is None and row["implied_apy"] is not None
+    # The APY the bank sent with the sync counts until one is typed in.
+    assert row["interest_12m_cents"] == 1_234 and row["apy"] == 0.01 and row["implied_apy"] is not None
 
     # The APY and a maturity date typed in on the page.
     body = {"apy": 4.25, "maturity": "2027-03-01", "term_months": 12}

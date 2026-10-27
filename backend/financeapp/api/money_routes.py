@@ -15,6 +15,7 @@ from financeapp import (
     crypto,
     dedupe,
     demo,
+    deposits,
     flip,
     household,
     kinds,
@@ -87,7 +88,9 @@ def connection_json(db: DbSession, c: Connection) -> dict:
     if c.provider in reminders.PROVIDERS:
         rows = reminders.status(db, reminders.local_today(db))
         due = {r["account_id"]: r for r in rows if r["connection_id"] == c.id}
-    for a in db.scalars(select(Account).where(Account.connection_id == c.id).order_by(Account.type, Account.name)):
+    rows = list(db.scalars(select(Account).where(Account.connection_id == c.id).order_by(Account.type, Account.name)))
+    details = deposits.build(db, rows, sync.today())
+    for a in rows:
         b = db.scalar(select(Balance).where(Balance.account_id == a.id).order_by(Balance.date.desc()).limit(1))
         match = None
         if a.statement_cents and b:
@@ -112,6 +115,7 @@ def connection_json(db: DbSession, c: Connection) -> dict:
                 "statement_date": a.statement_date.isoformat() if a.statement_date else None,
                 "statement_diff_percent": match,
                 "reminder": reminder_json(due[a.id]) if a.id in due else None,
+                "details": details.get(a.id),
             }
         )
     return {
@@ -400,6 +404,38 @@ def set_balance(account_id: int, body: BalanceIn, request: Request, who: Signed 
     conn.last_synced_at = now()
     reminders.uploaded(db, [a.id])
     return connection_json(db, conn)
+
+
+class TermsIn(BaseModel):
+    """What a bank account pays and a CD's terms, from the bank's site, the CD's receipt or a statement. Every field is
+    sent each time; null clears it (and for a CD lets the app guess it again)."""
+
+    apy: float | None = Field(default=None, ge=0, le=25)
+    opened: date | None = None
+    term_months: int | None = Field(default=None, ge=1, le=120)
+    maturity: date | None = None
+    principal_cents: int | None = Field(default=None, ge=0)
+    penalty_days: int | None = Field(default=None, ge=0, le=1825)
+    auto_renew: bool | None = None
+    grace_days: int | None = Field(default=None, ge=0, le=60)
+    pays_out: bool | None = None
+    monthly_fee_cents: int | None = Field(default=None, ge=0)
+    min_balance_cents: int | None = Field(default=None, ge=0)
+
+
+@router.put("/accounts/{account_id}/terms")
+def set_terms(account_id: int, body: TermsIn, request: Request, who: Signed = Depends(signed_in)) -> dict:
+    no_demo(who)
+    db = db_of(request)
+    a = db.get(Account, account_id)
+    if a is None or a.type in ("credit", "loan") or deposits.kind_of(a) not in deposits.KINDS:
+        raise HTTPException(404, "No such bank account.")
+    if body.opened and body.maturity and body.maturity <= body.opened:
+        raise HTTPException(422, "The maturity date has to come after the day it was opened.")
+    deposits.save_terms(db, a.id, body.model_dump())
+    audit(db, request, "account_terms_changed", who.user.id, account=a.id)
+    db.flush()
+    return connection_json(db, db.get_one(Connection, a.connection_id))
 
 
 class ReminderIn(BaseModel):

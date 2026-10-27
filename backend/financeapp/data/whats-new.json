@@ -1,6 +1,6 @@
 [
   {
-    "version": "0.46.0",
+    "version": "0.47.0",
     "title": "Your card when cards tie, and points worth more on some cards",
     "features": [
       {
@@ -14,6 +14,36 @@
         "title": "Point values per card",
         "body": "What your points are worth now lists each card on its own, so a Freedom card and a Sapphire card both show under Chase Ultimate Rewards, each with its own cents per point. Each card's value is used everywhere the page compares cards.",
         "tryIt": "/cards"
+      }
+    ]
+  },
+  {
+    "version": "0.46.0",
+    "title": "What your bank accounts pay",
+    "features": [
+      {
+        "id": "account-cd-terms",
+        "title": "CDs: earned so far and maturity",
+        "body": "Open a CD in Settings → Accounts to see what it has earned so far, what it's worth when it matures, how many days are left, the early withdrawal penalty and when the grace period ends. Type the rate and dates from the CD's receipt; anything missing is worked out from the account's history.",
+        "tryIt": "/settings/accounts"
+      },
+      {
+        "id": "account-cd-pushes",
+        "title": "A push before a CD matures",
+        "body": "You get a push 30 days and 7 days before a CD matures, on the day, and the day before its grace period ends, so it doesn't quietly renew at a worse rate.",
+        "tryIt": "/settings/accounts"
+      },
+      {
+        "id": "account-rates",
+        "title": "Savings and checking rates",
+        "body": "Savings and checking accounts show their APY (from the bank when it sends one), interest this month, this year and over 12 months, and how that compares with the national average and Treasuries. You get a push if a bank cuts its rate.",
+        "tryIt": "/settings/accounts"
+      },
+      {
+        "id": "account-checking-fees",
+        "title": "Checking fees and idle cash",
+        "body": "Checking shows the bank fees paid this year, and money sitting above a month and a half of what usually leaves the account, with what it would earn in savings.",
+        "tryIt": "/settings/accounts"
       }
     ]
   },

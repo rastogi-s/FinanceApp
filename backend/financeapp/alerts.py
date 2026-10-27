@@ -343,8 +343,9 @@ def evaluate(db: DbSession, kinds: set[str], companies: list[dict] | None = None
 
 
 def priority_of(rule: AlertRule | None, kind: str | None = None) -> str:
-    if rule is None and kind == "upload":
-        return "default"  # an upload reminder (reminders.py) is a to-do, not news: a Focus mode can hold it
+    if rule is None and kind in ("upload", "account"):
+        # An upload reminder (reminders.py) or a CD maturing (deposits.py) is a to-do, not news: Focus can hold it
+        return "default"
     p = (rule.params or {}).get("priority") if rule is not None else None
     return p if p in PRIORITIES else DEFAULT_PRIORITY
 

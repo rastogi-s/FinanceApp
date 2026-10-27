@@ -30,6 +30,7 @@ class AccountData:
     current_cents: int | None
     available_cents: int | None = None
     limit_cents: int | None = None  # a card's credit limit
+    apy: float | None = None  # what a bank account pays, when the bank says
 
 
 @dataclass
