@@ -17,6 +17,8 @@ export type Ranked = {
   portal: string | null;
   warnings: string[];
   blocked: boolean;
+  /** 2: your pick for this category, 1: your default card. Breaks ties. */
+  favor: number;
 };
 
 export type Product = {
@@ -112,6 +114,24 @@ export type BestRow = {
   spent_cents: number;
   best: Ranked | null;
   next: Ranked | null;
+  /** The cards that earn the most here, when more than one does. */
+  tied: { account_id: number; card: string }[];
+};
+
+/** Which card wins a tie: your default, and your pick per category. */
+export type Prefer = { default: number | null; by: Record<string, number> };
+
+/** What a point is worth on one card. Two cards on one program can differ (a Freedom card and a Sapphire card). */
+export type CardValue = {
+  account_id: number;
+  card: string;
+  program: string;
+  program_name: string;
+  cpp: number;
+  default: number;
+  own: boolean;
+  pairs: string | null;
+  transfers: boolean;
 };
 
 export type CardsPage = {
@@ -119,7 +139,9 @@ export type CardsPage = {
   as_of: string;
   cards: CardRow[];
   best: BestRow[];
+  prefer: Prefer;
   programs: Program[];
+  card_values: CardValue[];
   catalog: Product[];
   checked: string;
 };

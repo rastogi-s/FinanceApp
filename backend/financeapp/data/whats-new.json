@@ -1,5 +1,23 @@
 [
   {
+    "version": "0.46.0",
+    "title": "Your card when cards tie, and points worth more on some cards",
+    "features": [
+      {
+        "id": "cards-ties",
+        "title": "Pick the card when two earn the same",
+        "body": "When two cards earn the same in a category, Best card by category shows both, and you tap the one you want. You can also make a card your default for every tie from its card sheet. Your pick is used in the store lookup, the missed points report and when you ask Claude.",
+        "tryIt": "/cards"
+      },
+      {
+        "id": "cards-values-per-card",
+        "title": "Point values per card",
+        "body": "What your points are worth now lists each card on its own, so a Freedom card and a Sapphire card both show under Chase Ultimate Rewards, each with its own cents per point. Each card's value is used everywhere the page compares cards.",
+        "tryIt": "/cards"
+      }
+    ]
+  },
+  {
     "version": "0.45.0",
     "title": "Credit cards, and which one to use",
     "features": [

@@ -33,6 +33,11 @@ class LinkIn(BaseModel):
     renewal_month: int | None = Field(default=None, ge=1, le=12)
 
 
+class PreferIn(BaseModel):
+    category: str | None = Field(default=None, max_length=32)  # none: your default card everywhere
+    account_id: int | None = None  # none: clear it
+
+
 class ValuesIn(BaseModel):
     cpp: dict[str, float] = Field(max_length=20)
 
@@ -88,6 +93,22 @@ def set_values(body: ValuesIn, request: Request, who: Signed = Depends(signed_in
         raise HTTPException(422, "A point is worth between 0.01 and 5 cents.")
     db = db_of(request)
     cards.set_values(db, body.cpp)
+    db.flush()
+    return cards.page(db, today())
+
+
+@router.put("/cards/prefer")
+def set_prefer(body: PreferIn, request: Request, who: Signed = Depends(signed_in)) -> dict:
+    """Which card wins when cards earn the same: a default, or one for a category."""
+    no_demo(who)
+    db = db_of(request)
+    if body.category is not None and body.category not in cards.CATEGORIES:
+        raise HTTPException(422, "Pick a category from the list.")
+    if body.account_id is not None:
+        link = db.get(CardLink, body.account_id)
+        if link is None or link.role == "closed":
+            raise HTTPException(422, "Pick one of your cards.")
+    cards.set_prefer(db, body.category, body.account_id)
     db.flush()
     return cards.page(db, today())
 

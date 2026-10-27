@@ -177,6 +177,32 @@ def test_portal_rates_are_a_hint_not_a_ranking():
     assert best([gold], tags("hotels"))["portal"] == "5x if booked through Amex Travel"
 
 
+def test_your_pick_wins_a_tie():
+    gold, csp = card(1, "amex-gold"), card(2, "chase-sapphire-preferred")
+    t = tags("entertainment")  # 1x on both
+    assert best([gold, csp], t)["account_id"] == 1  # by name when you haven't said
+    csp.favored = frozenset({"*"})
+    assert best([gold, csp], t)["account_id"] == 2  # your default card
+    gold.favored = frozenset({"entertainment"})
+    assert best([gold, csp], t)["account_id"] == 1  # your pick for this category beats the default
+    assert best([gold, csp], tags("gas"))["account_id"] == 2  # a better rate still wins
+    assert best([gold, csp], tags("dining"))["account_id"] == 1
+
+    gold.favored, csp.favored = frozenset(), frozenset({"*"})
+    shop = cards.Purchase(1, TODAY, 100_00, "AMC", "amc", t, "in store", 1)
+    m = cards.missed([gold, csp], [shop], TODAY - timedelta(days=30), TODAY, VALUES)
+    assert m["missed_cents"] == 0 and m["purchases"] == []  # a tie is never a miss
+
+
+def test_a_card_can_be_worth_more_than_its_program():
+    flex, csp = card(1, "chase-freedom-flex"), card(2, "chase-sapphire-preferred")
+    t = tags("drugstores")  # 3x on the Flex, 1x on the Sapphire
+    assert best([flex, csp], t)["value_cents"] == 300
+    worth = {**VALUES, "card:2": 2.0, "card:1": 1.0}
+    assert cards.rank([flex, csp], tags("streaming"), None, TODAY, cards.Ledger(), worth)[0]["account_id"] == 2
+    assert cards.rank([flex, csp], t, None, TODAY, cards.Ledger(), worth)[0]["value_cents"] == 300
+
+
 def test_drawer_and_closed_cards_are_left_out():
     wallet = [card(1, "amex-gold", role="drawer"), card(2, "flat-1")]
     assert [r["account_id"] for r in cards.rank(wallet, tags("dining"), None, TODAY, cards.Ledger(), VALUES)] == [2]
@@ -335,17 +361,41 @@ def test_the_cards_page(client, home, fixed_today):
     assert m["missed_cents"] == 100 + 20  # Shell: 3x not 1x on $50; Sweetgreen: 4x not 3x on $20
     assert client.get("/api/cards/missed", params={"months": 2}).status_code == 422
 
+    # Both earn 1x on everything else: you pick which one.
+    other = next(b for b in page["best"] if b["category"] == "other")
+    assert {t["account_id"] for t in other["tied"]} == {gold, csp} and other["best"]["account_id"] == gold
+    page = client.put("/api/cards/prefer", json={"account_id": csp}, headers=h).json()
+    assert page["prefer"] == {"default": csp, "by": {}}
+    assert next(b for b in page["best"] if b["category"] == "other")["best"]["account_id"] == csp
+    page = client.put("/api/cards/prefer", json={"category": "other", "account_id": gold}, headers=h).json()
+    assert page["prefer"] == {"default": csp, "by": {"other": gold}}
+    assert next(b for b in page["best"] if b["category"] == "other")["best"]["account_id"] == gold
+    assert next(b for b in page["best"] if b["category"] == "entertainment")["best"]["account_id"] == csp
+    page = client.put("/api/cards/prefer", json={"category": "other"}, headers=h).json()
+    assert page["prefer"]["by"] == {}
+    assert client.put("/api/cards/prefer", json={"category": "nope", "account_id": gold}, headers=h).status_code == 422
+    assert client.put("/api/cards/prefer", json={"account_id": 99999}, headers=h).status_code == 422
+
     # Points worth more: Membership Rewards at 2 cents.
     page = client.put("/api/cards/values", json={"cpp": {"amex-mr": 2}}, headers=h).json()
     assert next(p for p in page["programs"] if p["id"] == "amex-mr")["cpp"] == 2
     assert client.put("/api/cards/values", json={"cpp": {"amex-mr": 50}}, headers=h).status_code == 422
+
+    # Two cards on one program can be worth different amounts: value one card on its own.
+    assert [v["account_id"] for v in page["card_values"]] == sorted([gold, csp], key=lambda i: rows[i]["label"])
+    page = client.put("/api/cards/values", json={"cpp": {f"card:{csp}": 1.5, "card:x": 3}}, headers=h).json()
+    by = {v["account_id"]: v for v in page["card_values"]}
+    assert by[csp]["cpp"] == 1.5 and by[csp]["own"] and by[csp]["default"] == 1
+    assert by[gold]["cpp"] == 2 and not by[gold]["own"]
+    found = client.get("/api/cards/lookup", params={"q": "shell"}).json()
+    assert found["channels"][0]["cards"][0]["value_cents"] == 450  # 3x at 1.5 cents on $100
 
     page = client.delete(f"/api/cards/{gold}/link", headers=h).json()
     assert not next(r for r in page["cards"] if r["account_id"] == gold)["linked"]
 
     key = new_key(client)
     answer = call(client, key, "best_card", {"store": "Shell", "amount": 40})["structuredContent"]
-    assert answer["by_channel"][0]["cards"][0]["earns"] == 1.20  # 3x on $40 at a cent a point
+    assert answer["by_channel"][0]["cards"][0]["earns"] == 1.80  # 3x on $40 at the 1.5 cents set above
 
 
 def test_demo_mode_cards(tmp_path):

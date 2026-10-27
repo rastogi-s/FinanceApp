@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select } from "@/components/ui/input";
 import { Sheet } from "@/components/ui/sheet";
+import { Switch } from "@/components/ui/switch";
 import { toast } from "@/components/ui/toast";
 import { api } from "@/lib/api";
 import { type CardRow, type CardsPage, type ProductDetail, type Role, MONTHS, PERIOD, ROLES, longDay, shortDay } from "@/lib/cards";
@@ -14,8 +15,34 @@ import { cn } from "@/lib/utils";
 
 const DEMO = "Changing cards is off while the app shows sample data.";
 
+/** Which card wins when cards earn the same: with no category, your default card everywhere. */
+export async function setPrefer(
+  page: CardsPage,
+  onSaved: (p: CardsPage) => void,
+  body: { category?: string; account_id: number | null },
+  done: string,
+) {
+  if (page.demo) return toast(DEMO);
+  try {
+    onSaved(await api<CardsPage>("/api/cards/prefer", { method: "PUT", body }));
+    toast(done);
+  } catch (e) {
+    toast((e as Error).message, "error");
+  }
+}
+
 /** A pill that's one of a set of choices. Put a few inside a role="radiogroup". */
-export function Chip({ on, onClick, children }: { on: boolean; onClick: () => void; children: React.ReactNode }) {
+export function Chip({
+  on,
+  onClick,
+  small = false,
+  children,
+}: {
+  on: boolean;
+  onClick: () => void;
+  small?: boolean;
+  children: React.ReactNode;
+}) {
   return (
     <button
       type="button"
@@ -23,7 +50,8 @@ export function Chip({ on, onClick, children }: { on: boolean; onClick: () => vo
       aria-checked={on}
       onClick={onClick}
       className={cn(
-        "rounded-full border px-3 py-1.5 text-sm font-medium transition-colors",
+        "rounded-full border font-medium transition-colors",
+        small ? "px-2.5 py-1 text-xs" : "px-3 py-1.5 text-sm",
         on ? "border-primary bg-accent text-accent-foreground" : "hover:bg-muted",
       )}
     >
@@ -102,6 +130,23 @@ export function CardSheet({
     >
       <div className="grid grid-cols-1 gap-6 pb-2">
         {row.product && <Rewards p={row.product} />}
+        {row.linked && row.role === "active" && page.cards.filter((c) => c.linked && c.role === "active").length > 1 && (
+          <div className="rounded-2xl border p-4">
+            <Switch
+              checked={page.prefer.default === row.account_id}
+              onCheckedChange={(on) =>
+                setPrefer(
+                  page,
+                  onSaved,
+                  { account_id: on ? row.account_id : null },
+                  on ? `${row.label} wins ties now.` : "No default card for ties.",
+                )
+              }
+              label="My default card"
+              description="When cards earn the same, use this one. You can still pick a different card for a category."
+            />
+          </div>
+        )}
         {row.caps.length > 0 && <Caps row={row} />}
         {row.statement && <StatementBlock row={row} />}
         <LinkForm
@@ -468,29 +513,34 @@ export function ValuesSheet({
 }
 
 function ValuesForm({ page, onSaved, onDone }: { page: CardsPage; onSaved: (p: CardsPage) => void; onDone: () => void }) {
-  // Only the programs your cards earn, unless no card is set up yet.
-  const held = new Set(page.cards.filter((c) => c.product && c.role !== "closed").map((c) => c.product!.program));
-  const points = page.programs.filter((p) => p.unit !== "%");
-  const programs = points.some((p) => held.has(p.name)) ? points.filter((p) => held.has(p.name)) : points;
-  const [text, setText] = useState<Record<string, string>>(() => Object.fromEntries(programs.map((p) => [p.id, String(p.cpp)])));
+  // One row per card that earns points, so two cards on one program can be worth different amounts. With no
+  // card set up yet, one row per program.
+  const rows: { key: string; label: string; cpp: number; default: number; hint: string }[] = page.card_values.length
+    ? page.card_values.map((v) => ({
+        key: `card:${v.account_id}`,
+        label: v.card,
+        cpp: v.cpp,
+        default: v.default,
+        hint: [v.program_name, v.pairs, v.transfers && !v.pairs ? "Moving points to airlines and hotels can make them worth more." : null]
+          .filter(Boolean)
+          .map((x) => String(x).replace(/\.$/, ""))
+          .join(". "),
+      }))
+    : page.programs.filter((p) => p.unit !== "%").map((p) => ({ key: p.id, label: p.name, cpp: p.cpp, default: p.default, hint: "" }));
+  const [text, setText] = useState<Record<string, string>>(() => Object.fromEntries(rows.map((r) => [r.key, String(r.cpp)])));
   const [busy, setBusy] = useState(false);
   const parsed = Object.fromEntries(Object.entries(text).map(([k, v]) => [k, Number(v)]));
-  const bad = (id: string) => {
-    const v = parsed[id] ?? NaN;
+  const bad = (key: string) => {
+    const v = parsed[key] ?? NaN;
     return !(v > 0 && v <= 5);
   };
-  const invalid = programs.some((p) => bad(p.id));
+  const invalid = rows.some((r) => bad(r.key));
 
   const save = async () => {
     if (page.demo) return toast(DEMO);
     setBusy(true);
     try {
-      onSaved(
-        await api<CardsPage>("/api/cards/values", {
-          method: "PUT",
-          body: { cpp: parsed },
-        }),
-      );
+      onSaved(await api<CardsPage>("/api/cards/values", { method: "PUT", body: { cpp: parsed } }));
       toast("Point values saved.");
       onDone();
     } catch (e) {
@@ -508,23 +558,19 @@ function ValuesForm({ page, onSaved, onDone }: { page: CardsPage; onSaved: (p: C
         if (!invalid) save();
       }}
     >
-      {programs.map((p) => (
+      {rows.map((r) => (
         <Field
-          key={p.id}
-          id={`cpp-${p.id}`}
-          label={p.name}
-          error={bad(p.id) ? "Between 0.01 and 5 cents." : null}
-          hint={
-            p.transfers
-              ? `Transfers to airlines and hotels, where points can be worth more. Default ${p.default}¢.`
-              : `Default ${p.default}¢.`
-          }
+          key={r.key}
+          id={`cpp-${r.key.replace(":", "-")}`}
+          label={r.label}
+          error={bad(r.key) ? "Between 0.01 and 5 cents." : null}
+          hint={`${r.hint ? r.hint + ". " : ""}Default ${r.default}¢.`}
         >
           <Input
             inputMode="decimal"
             autoComplete="off"
-            value={text[p.id] ?? ""}
-            onChange={(e) => setText((t) => ({ ...t, [p.id]: e.target.value }))}
+            value={text[r.key] ?? ""}
+            onChange={(e) => setText((t) => ({ ...t, [r.key]: e.target.value }))}
           />
         </Field>
       ))}
@@ -533,7 +579,7 @@ function ValuesForm({ page, onSaved, onDone }: { page: CardsPage; onSaved: (p: C
           type="button"
           variant="ghost"
           disabled={busy}
-          onClick={() => setText(Object.fromEntries(programs.map((p) => [p.id, String(p.default)])))}
+          onClick={() => setText(Object.fromEntries(rows.map((r) => [r.key, String(r.default)])))}
         >
           Use defaults
         </Button>
