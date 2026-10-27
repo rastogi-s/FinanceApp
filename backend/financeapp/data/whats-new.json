@@ -1,5 +1,29 @@
 [
   {
+    "version": "0.45.0",
+    "title": "Credit cards, and which one to use",
+    "features": [
+      {
+        "id": "cards-page",
+        "title": "A page for your credit cards",
+        "body": "Spending now links to Credit cards: what you owe on each card, how much of the limit you're using, the minimum and when it's due, and the APRs from your bank. Tap a card to pick which card it is (the app guesses from the name), then see what it earns, its credits and perks, and how close you are to any bonus limit.",
+        "tryIt": "/cards"
+      },
+      {
+        "id": "cards-best",
+        "title": "Which card earns the most where",
+        "body": "For each kind of spending, the page shows your best card and the runner-up, counting bonus limits, rotating categories and what your points are worth. Type a store to see the best card in store and online, including cards a store won't take (Costco warehouses take only Visa).",
+        "tryIt": "/cards"
+      },
+      {
+        "id": "cards-missed",
+        "title": "Points you missed",
+        "body": "See what your purchases earned against what your best card would have earned over the last 1, 3, 6 or 12 months, by category and by purchase. Claude can answer which card to use too, from the chat or your assistant.",
+        "tryIt": "/cards"
+      }
+    ]
+  },
+  {
     "version": "0.44.0",
     "title": "Accounts, grouped by kind",
     "features": [

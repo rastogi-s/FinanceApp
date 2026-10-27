@@ -181,6 +181,7 @@ class Account(Base):
     # What the statement said, typed in to check the app against it (the Phase 1 gate: within 1%).
     statement_cents: Mapped[int | None] = mapped_column(BigInteger)
     statement_date: Mapped[date | None] = mapped_column(Date)
+    credit_limit_cents: Mapped[int | None] = mapped_column(BigInteger)  # cards, from the bank
     created_at: Mapped[datetime] = mapped_column(default=now)
 
 
@@ -226,6 +227,10 @@ class Transaction(Base):
     transfer_group_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
     source: Mapped[str] = mapped_column(String(16))  # plaid | snaptrade | file | manual
     import_id: Mapped[int | None] = mapped_column(ForeignKey("imports.id", ondelete="SET NULL"))
+    # What the card network saw (bank-linked cards only): card rewards go by the merchant category code.
+    mcc: Mapped[str | None] = mapped_column(String(4))
+    channel: Mapped[str | None] = mapped_column(String(8))  # online | in store | other
+    website: Mapped[str | None] = mapped_column(String(120))
     created_at: Mapped[datetime] = mapped_column(default=now)
 
 
@@ -565,3 +570,35 @@ class Brief(Base):
     channel: Mapped[str | None] = mapped_column(String(16))  # ntfy | email, when it was sent
     created_at: Mapped[datetime] = mapped_column(default=now)
     read_at: Mapped[datetime | None]
+
+
+# ---- credit cards
+
+
+class CardLink(Base):
+    """Which card product a credit card account is (cards.py's catalog), so its rewards and credits are known."""
+
+    __tablename__ = "card_links"
+    account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id", ondelete="CASCADE"), primary_key=True)
+    product: Mapped[str] = mapped_column(String(60))  # a catalog id, e.g. "amex-gold"
+    choice: Mapped[str | None] = mapped_column(String(32))  # the category picked, for cards that let you choose
+    role: Mapped[str] = mapped_column(String(12), default="active")  # active | drawer (kept, not used) | closed
+    renewal_month: Mapped[int | None] = mapped_column(Integer)  # when the annual fee posts, 1-12
+    created_at: Mapped[datetime] = mapped_column(default=now)
+
+
+class CardStatement(Base):
+    """A card's interest rates and latest statement, as the bank reported them (Plaid Liabilities)."""
+
+    __tablename__ = "card_statements"
+    account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id", ondelete="CASCADE"), primary_key=True)
+    as_of: Mapped[date] = mapped_column(Date)
+    purchase_apr: Mapped[Decimal | None] = mapped_column(Numeric(8, 4))
+    aprs: Mapped[list] = mapped_column(JSONB, default=list)
+    statement_cents: Mapped[int | None] = mapped_column(BigInteger)
+    statement_date: Mapped[date | None] = mapped_column(Date)
+    minimum_cents: Mapped[int | None] = mapped_column(BigInteger)
+    due_date: Mapped[date | None] = mapped_column(Date)
+    last_payment_cents: Mapped[int | None] = mapped_column(BigInteger)
+    last_payment_date: Mapped[date | None] = mapped_column(Date)
+    overdue: Mapped[bool | None] = mapped_column(Boolean)

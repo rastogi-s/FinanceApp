@@ -116,9 +116,13 @@ function PrivateShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const meta = useMeta();
   const [privacy, togglePrivacy] = usePrivacy();
-  // Goals and Taxes are reached from Plan, so Plan stays lit there.
+  // Goals and Taxes are reached from Plan, so Plan stays lit there; Credit cards from Spending.
   const active = (href: string) =>
-    href === "/" ? pathname === "/" : pathname.startsWith(href) || (href === "/plan" && /^\/(goals|taxes|earnings)/.test(pathname));
+    href === "/"
+      ? pathname === "/"
+      : pathname.startsWith(href) ||
+        (href === "/plan" && /^\/(goals|taxes|earnings)/.test(pathname)) ||
+        (href === "/spending" && pathname.startsWith("/cards"));
 
   return (
     <div className="min-h-dvh md:grid md:grid-cols-[15rem_1fr]">

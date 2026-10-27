@@ -31,6 +31,7 @@ from financeapp.models import (
     Account,
     AuditEvent,
     Balance,
+    CardStatement,
     Connection,
     HoldingSnapshot,
     InvestmentTransaction,
@@ -84,6 +85,8 @@ def save_accounts(db: DbSession, connection: Connection, accounts: list[AccountD
         a.type = data.type
         a.subtype = data.subtype
         a.mask = data.mask
+        if data.limit_cents is not None:
+            a.credit_limit_cents = data.limit_cents
         db.flush()
         if data.current_cents is not None:
             save_balance(db, a.id, on, data.current_cents, data.available_cents)
@@ -180,8 +183,25 @@ def save_transactions(
         t.description = data.description
         t.pending = data.pending
         t.provider_category = data.provider_category
+        t.mcc, t.channel, t.website = data.mcc, data.channel, data.website
     db.flush()
     return added
+
+
+def save_card_statements(db: DbSession, accounts: dict[str, Account], statements: list, on: date) -> None:
+    for s in statements:
+        account = accounts.get(s.account_external_id)
+        if account is None:
+            continue
+        row = db.get(CardStatement, account.id) or CardStatement(account_id=account.id)
+        row.as_of = on
+        row.purchase_apr = s.purchase_apr
+        row.aprs = s.aprs
+        row.statement_cents, row.statement_date = s.statement_cents, s.statement_date
+        row.minimum_cents, row.due_date = s.minimum_cents, s.due_date
+        row.last_payment_cents, row.last_payment_date = s.last_payment_cents, s.last_payment_date
+        row.overdue = s.overdue
+        db.merge(row)
 
 
 def save_investment_transactions(
@@ -237,6 +257,7 @@ def save_fetch(db: DbSession, connection: Connection, result: FetchResult, on: d
                 save_balance(db, a.id, on, total)
     added = save_transactions(db, accounts, result.transactions, connection.provider)
     activity = save_investment_transactions(db, accounts, result.investment_transactions, connection.provider)
+    save_card_statements(db, accounts, result.card_statements, on)
     removed = 0
     if result.removed_transaction_ids:
         ids = [a.id for a in accounts.values()]

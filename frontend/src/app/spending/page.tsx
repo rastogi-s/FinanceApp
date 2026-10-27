@@ -1,8 +1,9 @@
 "use client";
 
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { ArrowLeftRight, Search, SlidersHorizontal, Sparkles, X } from "lucide-react";
+import { ArrowLeftRight, ChevronRight, CreditCard, Search, SlidersHorizontal, Sparkles, X } from "lucide-react";
 import { CategorySheet } from "@/components/category-sheet";
 import { Money } from "@/components/money";
 import { BackLink, HouseholdPage } from "@/components/page";
@@ -163,7 +164,22 @@ function Spending({ h, fromBudget }: { h: LinkedHousehold; fromBudget: boolean }
 
       <div className="grid grid-cols-1 gap-4">
         {!filtered ? (
-          <ThisMonth h={h} />
+          <>
+            <ThisMonth h={h} />
+            <Link
+              href="/cards"
+              className="flex items-center gap-3 rounded-xl border bg-card px-4 py-3.5 text-sm shadow-sm transition-colors hover:bg-muted/60"
+            >
+              <span className="grid size-9 shrink-0 place-items-center rounded-full bg-accent text-accent-foreground">
+                <CreditCard className="size-4" aria-hidden />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block font-medium">Credit cards</span>
+                <span className="block text-xs text-muted-foreground">Which card earns the most where, and what you&apos;re missing</span>
+              </span>
+              <ChevronRight className="size-4 text-muted-foreground" aria-hidden />
+            </Link>
+          </>
         ) : categoryMonth(f) ? (
           <CategoryMonth f={f} r={results} name={categoryName(categoryMonth(f)!, categories)} />
         ) : (
