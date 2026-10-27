@@ -1,5 +1,7 @@
 "use client";
 
+import type { Offers, RankedOffer } from "@/lib/offers";
+
 /** The Credit Cards page (backend cards.py): your cards, the best card by category, the store lookup, missed points. */
 
 export type Ranked = {
@@ -19,6 +21,8 @@ export type Ranked = {
   blocked: boolean;
   /** 2: your pick for this category, 1: your default card. Breaks ties. */
   favor: number;
+  /** The card's offer at this store (Chase Offers and the like), already counted in value_cents. */
+  offer?: RankedOffer;
 };
 
 export type Product = {
@@ -144,6 +148,7 @@ export type CardsPage = {
   card_values: CardValue[];
   catalog: Product[];
   checked: string;
+  offers: Offers;
 };
 
 export type Lookup = {
@@ -164,6 +169,8 @@ export type Lookup = {
   channels?: { channel: "in store" | "online"; cards: Ranked[] }[];
   same?: boolean;
   kinds: { id: string; label: string }[];
+  /** Card offers at this store, on any of your cards. */
+  offers?: (Omit<RankedOffer, "value_cents"> & { card: string })[];
 };
 
 export type Missed = {

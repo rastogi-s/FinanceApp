@@ -1,16 +1,16 @@
 """Credit cards: the page, which card product each card account is, what points are worth, the store lookup and the
 missed points report."""
 
-from datetime import timedelta
+from datetime import date, timedelta
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session as DbSession
 
-from financeapp import cards, demo
+from financeapp import cards, demo, offers
 from financeapp.api.deps import Signed, audit, signed_in
-from financeapp.models import Account, CardLink
+from financeapp.models import Account, CardLink, CardOffer
 from financeapp.sync import today
 
 router = APIRouter(prefix="/api")
@@ -36,6 +36,29 @@ class LinkIn(BaseModel):
 class PreferIn(BaseModel):
     category: str | None = Field(default=None, max_length=32)  # none: your default card everywhere
     account_id: int | None = None  # none: clear it
+
+
+class ReadIn(BaseModel):
+    text: str = Field(min_length=1, max_length=offers.MAX_TEXT)
+    site: str = Field(default="", max_length=120)  # the offers page's host name, from the bookmark
+
+
+class OfferIn(BaseModel):
+    merchant: str = Field(min_length=1, max_length=80)
+    kind: Literal["percent", "amount", "multiplier"]
+    value: float = Field(gt=0, le=10_000)
+    up_to: bool = False
+    min_spend_cents: int | None = Field(default=None, ge=0, le=10_000_000)
+    max_cents: int | None = Field(default=None, ge=0, le=10_000_000)
+    channel: Literal["online", "in store"] | None = None
+    expires: date | None = None
+    soon: bool = False
+    added: bool | None = None
+
+
+class OffersIn(BaseModel):
+    issuer: Literal["chase", "capital_one", "other"]
+    offers: list[OfferIn] = Field(max_length=offers.MAX_OFFERS)
 
 
 class ValuesIn(BaseModel):
@@ -122,7 +145,7 @@ def lookup(
     who: Signed = Depends(signed_in),
 ) -> dict:
     w = wallet_for(request, who)
-    return cards.lookup(w.cards, w.everything, w.on, w.values, w.ledger(), q, pick, kind)
+    return cards.lookup(w.cards, w.everything, w.on, w.values, w.ledger(), q, pick, kind, offers=w.offers)
 
 
 @router.get("/cards/missed")
@@ -132,3 +155,55 @@ def missed(request: Request, months: int = 12, who: Signed = Depends(signed_in))
     w = wallet_for(request, who)
     start = w.on - timedelta(days=round(months * 30.44))
     return {**cards.missed(w.cards, w.purchases, start, w.on, w.values), "months": months}
+
+
+# ---- card offers (offers.py)
+
+
+@router.post("/cards/offers/read")
+def read_offers(body: ReadIn, request: Request, who: Signed = Depends(signed_in)) -> dict:
+    """Reads the text of a Chase Offers or Capital One Offers page into offers, and says which card they're for.
+    Nothing is saved and the text isn't kept."""
+    no_demo(who)
+    on = today()
+    issuer = offers.issuer_of(body.site, body.text)
+    found = offers.parse(body.text, on)
+    name, mask = offers.card_on_page(body.text)
+    _, rows, links = cards.load_cards(db_of(request))
+    hit = offers.match_account(rows, issuer, mask)
+    return {
+        "issuer": issuer,
+        "issuer_name": offers.ISSUERS[issuer],
+        "card_name": name,
+        "mask": mask,
+        "account_id": hit.id if hit else None,
+        "accounts": [{"account_id": a.id, "label": cards.label_of(a, links.get(a.id))} for a in rows],
+        "offers": [r.json(issuer) for r in found],
+    }
+
+
+@router.put("/cards/{account_id}/offers")
+def save_offers(account_id: int, body: OffersIn, request: Request, who: Signed = Depends(signed_in)) -> dict:
+    """Saves a card's offers, replacing the ones it had (those were used or have ended)."""
+    no_demo(who)
+    db = db_of(request)
+    a = db.get(Account, account_id)
+    if a is None or a.type != "credit":
+        raise HTTPException(404, "That card is gone.")
+    found = [offers.Read(**o.model_dump()) for o in body.offers]
+    n = offers.replace(db, account_id, body.issuer, found, today())
+    db.flush()
+    audit(db, request, "card_offers_saved", who.user.id, account=account_id, count=n)
+    return cards.page(db, today())
+
+
+@router.delete("/cards/offers/{offer_id}")
+def remove_offer(offer_id: int, request: Request, who: Signed = Depends(signed_in)) -> dict:
+    """Takes one offer off (used it, or not interested)."""
+    no_demo(who)
+    db = db_of(request)
+    o = db.get(CardOffer, offer_id)
+    if o is not None:
+        db.delete(o)
+        db.flush()
+    return cards.page(db, today())

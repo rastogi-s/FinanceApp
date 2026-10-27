@@ -1697,7 +1697,46 @@ def cards_wallet(today: date | None = None):
                     mcc=mcc,
                 )
             )
-    return cards.Wallet(wallet, purchases, purchases, cards.values_default(), today)
+    return cards.Wallet(wallet, purchases, purchases, cards.values_default(), today, demo_offers(today))
+
+
+def demo_offers(today: date) -> list:
+    """Chase Offers on the Sapphire card, as if sent from its offers page this week."""
+    from financeapp import offers
+
+    seen = today - timedelta(days=2)
+    rows = [
+        ("Target", "percent", 5, "in store", today + timedelta(days=2), False, False),
+        ("Blue Bottle Coffee", "percent", 10, None, today + timedelta(days=19), True, True),
+        ("Delta Air Lines", "amount", 50, "online", today + timedelta(days=40), False, True),
+        ("Teleflora", "percent", 10, "online", None, True, None),
+        ("Pandora Jewelry", "percent", 10, None, today + timedelta(days=33), False, None),
+        ("Marathon Fuel", "percent", 5, "in store", today + timedelta(days=24), False, None),
+    ]
+    return [
+        offers.Offer(
+            f"demo-offer-{i}",
+            2,
+            "chase",
+            name,
+            cards_key(name),
+            kind,
+            value,
+            channel=channel,
+            expires=ends,
+            soon=soon,
+            added=added,
+            seen=seen,
+            max_cents=2_000 if kind == "percent" and value >= 10 else None,
+        )
+        for i, (name, kind, value, channel, ends, soon, added) in enumerate(rows)
+    ]
+
+
+def cards_key(name: str) -> str:
+    from financeapp.categorize import merchant_key
+
+    return merchant_key(name)
 
 
 def cards_page(today: date | None = None) -> dict:

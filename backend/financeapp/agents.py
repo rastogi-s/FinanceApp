@@ -317,7 +317,9 @@ def best_card(db: DbSession, args: BestCardArgs) -> dict:
         return {"cards": [], "note": "No cards are linked to a card product yet (Credit cards page)."}
     cents = round(args.amount * 100)
     kind = None if args.store else args.category
-    found = cards.lookup(w.cards, w.everything, w.on, w.values, w.ledger(), args.store or "", None, kind, cents)
+    found = cards.lookup(
+        w.cards, w.everything, w.on, w.values, w.ledger(), args.store or "", None, kind, cents, w.offers
+    )
     if not found["found"]:
         return {"store": args.store, "found": False, "note": "Unknown store: ask again with a category."}
     out = []
@@ -333,6 +335,7 @@ def best_card(db: DbSession, args: BestCardArgs) -> dict:
                     "cap": row["cap"],
                     "warnings": row["warnings"],
                     "better_through_portal": row["portal"],
+                    "card_offer": f"{row['offer']['name']}: {row['offer']['label']}" if row.get("offer") else None,
                 }
             )
         out.append({"channel": ch["channel"], "cards": ranked})
@@ -342,7 +345,8 @@ def best_card(db: DbSession, args: BestCardArgs) -> dict:
         "how_known": found["how"],
         "amount": args.amount,
         "by_channel": out,
-        "note": "Earnings are in dollars at the household's cents-per-point values; caps already used are counted.",
+        "note": "Earnings are in dollars at the household's cents-per-point values; caps already used are counted. "
+        "A card offer (Chase Offers and the like) is included in earns.",
     }
 
 
