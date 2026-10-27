@@ -9,7 +9,7 @@ import statistics
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
-from financeapp import forecast, goals, kinds, networth, plan, reminders
+from financeapp import deposits, forecast, goals, kinds, networth, plan, rates, reminders
 from financeapp.models import Goal, GoalFunding
 
 SEED = 20261019
@@ -332,10 +332,66 @@ def _upload_due() -> dict:
             "newest": r["newest"], "statement": r["statement"], "days_late": r["days_late"]}  # fmt: skip
 
 
+def _deposit_details(today: date) -> dict[int, dict]:
+    """The bank accounts' details on the sample Accounts page: checking, Ally savings and the Marcus CD."""
+    market = rates.BUNDLED
+
+    def base(kind: str, apy: float | None, apy_from: str | None, balance: int, month: int, ytd: int, year: int) -> dict:
+        return {
+            "kind": kind,
+            "apy": apy,
+            "apy_from": apy_from,
+            "apy_typed": apy if apy_from == "typed" else None,
+            "bank_apy": apy if apy_from == "bank" else None,
+            "implied_apy": apy,
+            "interest": {
+                "month_cents": month,
+                "ytd_cents": ytd,
+                "12m_cents": year,
+                "last_paid": (date(today.year, today.month, 1) - timedelta(days=1)).isoformat(),
+            },
+            "expected_12m_cents": round(balance * apy / 100) if apy else None,
+            "market": rates.benchmark(market, kind),
+            "rates": [],
+            "fdic": {"bank_cents": balance, "over_cents": 0},
+            "fees": {"ytd_cents": 0, "12m_cents": 0, "by_kind": []},
+            "monthly_fee_cents": None,
+            "min_balance_cents": None,
+            "below_minimum": False,
+            "idle": None,
+            "cd": None,
+        }
+
+    checking = base("checking", 0.01, "bank", _cents(14_350), 12, 98, 118)
+    overdraft, atm = {"label": "Overdraft", "cents": _cents(35)}, {"label": "ATM", "cents": _cents(3)}
+    checking["fees"] = {"ytd_cents": _cents(38), "12m_cents": _cents(38), "by_kind": [overdraft, atm]}
+    idle = _cents(6_850)
+    checking["idle"] = {"cents": idle, "buffer_cents": _cents(7_500), "monthly_out_cents": _cents(5_000),
+                        "rate": 3.8, "rate_from": "savings", "earn_cents": round(idle * 3.79 / 100)}  # fmt: skip
+    savings = base("savings", 3.8, "bank", _cents(38_900), round(38_900_00 * 3.8 / 1200),
+                   round(38_900_00 * 3.8 / 1200) * today.month, round(38_900_00 * 4.0 / 100))  # fmt: skip
+    months = [deposits.add_months(date(today.year, today.month, 1), -i) for i in range(5, -1, -1)]
+    savings["rates"] = [{"month": f"{m:%Y-%m}", "apy": 4.4 if i < 2 else 3.8} for i, m in enumerate(months)]
+    opened = deposits.add_months(today + timedelta(days=74), -12)
+    cd = base("cd", 4.4, "typed", _cents(25_000), 0, 0, 0)
+    cd["cd"] = deposits.cd(
+        deposits.CdInputs(
+            balance_cents=_cents(25_000), apy=4.4, opened=opened, term_months=12, principal_cents=_cents(25_000),
+            penalty_days=90, auto_renew=True, pays_out=True,  # it pays interest into checking each month
+        ),
+        today,
+        market,
+    )  # fmt: skip
+    cd["market"] = rates.benchmark(market, "cd", 12)
+    cd["expected_12m_cents"] = round(_cents(25_000) * 4.4 / 100)
+    return {1: checking, 3: savings, 9: cd}
+
+
 def connections() -> dict:
     """The Settings → Accounts page in demo mode."""
     today = datetime.now(UTC)
     synced = today.replace(hour=6, minute=2, second=0, microsecond=0).isoformat()
+    details = _deposit_details(today.date())
 
     def account(i: int, name: str, kind: str, cents: int, mask: str, subtype: str | None = None) -> dict:
         return {
@@ -357,6 +413,7 @@ def connections() -> dict:
             "statement_date": None,
             "statement_diff_percent": None,
             "reminder": None,
+            "details": details.get(i),
         }
 
     def connection(i: int, provider: str, institution: str, accounts: list[dict], status: str = "active") -> dict:

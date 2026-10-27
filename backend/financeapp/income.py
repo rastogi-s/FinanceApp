@@ -31,11 +31,12 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session as DbSession
 
-from financeapp import household, portfolio, quotes
+from financeapp import household, kinds, portfolio, quotes
 from financeapp.config import Settings
 from financeapp.db import Database
 from financeapp.models import (
     Account,
+    AccountTerms,
     Balance,
     Category,
     DividendHistory,
@@ -243,28 +244,28 @@ def history(db: DbSession, symbols: list[str]) -> dict[str, list[tuple[date, Dec
     return out
 
 
-def account_settings(db: DbSession) -> dict[str, dict]:
-    p = db.get(Preference, "interest_accounts")
-    return dict(p.value) if p else {}
-
-
 def cash_accounts(db: DbSession, accounts: list[Account]) -> list[CashAccount]:
-    saved = account_settings(db)
+    """Bank accounts with their rate and CD terms (account_terms, typed on the account or here). The APY the bank
+    sends counts like a typed one when nothing is typed."""
+    ids = [a.id for a in accounts if a.type == "depository"]
+    terms = {t.account_id: t for t in db.scalars(select(AccountTerms).where(AccountTerms.account_id.in_(ids)))}
     out = []
     for a in accounts:
         if a.type != "depository":
             continue
         b = db.scalar(select(Balance).where(Balance.account_id == a.id).order_by(Balance.date.desc()).limit(1))
-        s = saved.get(str(a.id), {})
+        t = terms.get(a.id)
+        rate = t.apy if t and t.apy is not None else (t.bank_apy if t else None)
+        is_cd = kinds.kind_of(a.type, a.subtype, a.name, a.kind) == "cd"
         out.append(
             CashAccount(
                 a.id,
                 household.display_name(a),
-                (a.subtype or "").lower() or None,
+                "cd" if is_cd else (a.subtype or "").lower() or None,
                 b.current_cents if b else 0,
-                s.get("apy"),
-                date.fromisoformat(s["maturity"]) if s.get("maturity") else None,
-                s.get("term_months"),
+                float(rate) if rate is not None else None,
+                t.maturity if t else None,
+                t.term_months if t else None,
             )
         )
     return out
@@ -774,8 +775,8 @@ def history_start(db: DbSession, accounts: list[Account], today: date) -> date:
     """The earliest day the brokerage activity and bank history reach (Plaid keeps two years), so totals can say
     what they cover. The later of the two: a total is only complete where both have history."""
     firsts = []
-    for model, kinds in ((InvestmentTransaction, ("investment",)), (Transaction, ("depository",))):
-        ids = [a.id for a in accounts if a.type in kinds]
+    for model, types in ((InvestmentTransaction, ("investment",)), (Transaction, ("depository",))):
+        ids = [a.id for a in accounts if a.type in types]
         if ids:
             first = db.scalar(select(model.date).where(model.account_id.in_(ids)).order_by(model.date).limit(1))
             if first is not None:

@@ -26,6 +26,7 @@ import {
   TreePalm,
   Wallet,
 } from "lucide-react";
+import { DepositDetails, DepositNote } from "@/components/deposit-details";
 import { Money, formatMoney } from "@/components/money";
 import { FlipCard } from "@/components/flip-card";
 import { SubPageTitle } from "@/components/page";
@@ -507,6 +508,8 @@ function KindCard({
     return off || Math.abs(y.a.balance_cents ?? 0) - Math.abs(x.a.balance_cents ?? 0) || x.a.name.localeCompare(y.a.name);
   });
   const total = rows.reduce((n, r) => n + counted(r.a), 0);
+  // Savings and CDs: what they pay in a year at today's balances and rates.
+  const yearly = rows.reduce((n, r) => n + (counted(r.a) && r.a.details?.kind !== "checking" ? (r.a.details?.expected_12m_cents ?? 0) : 0), 0);
   return (
     <Card>
       <CardHeader className="items-center">
@@ -524,6 +527,12 @@ function KindCard({
             <h2 className="truncate font-medium">{k.label}</h2>
             <p className="text-xs text-muted-foreground">
               {rows.length} account{rows.length === 1 ? "" : "s"}
+              {yearly > 0 && (
+                <>
+                  {" "}
+                  · about <Money cents={yearly} /> a year in interest
+                </>
+              )}
             </p>
           </div>
         </div>
@@ -575,6 +584,7 @@ function AccountRow({
           {showSource && c.status === "stale" && <span className="text-warning"> · stopped syncing</span>}
           {!a.is_authoritative && " · not counted"}
           <ReminderNote account={a} manual={c.provider === "manual"} />
+          {a.details && <DepositNote d={a.details} />}
           {a.statement_diff_percent !== null && (
             <span className={a.statement_diff_percent <= 1 ? "text-positive" : "text-warning"}>
               {" "}
@@ -928,6 +938,19 @@ function AccountSheet({
             {current.balance_cents === null ? "—" : <Money cents={current.balance_cents} style="exact" />}
           </p>
         </div>
+
+        {current.details && (
+          <DepositDetails
+            account={current}
+            details={current.details}
+            disabled={disabled}
+            onSaved={(r) => {
+              const updated = r.accounts.find((x) => x.id === a.id);
+              if (updated) setCurrent(updated);
+              onSaved();
+            }}
+          />
+        )}
 
         {typed && (
           <div className="grid grid-cols-1 gap-2">
