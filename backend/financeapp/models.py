@@ -171,6 +171,8 @@ class Account(Base):
     institution: Mapped[str] = mapped_column(String(120))
     type: Mapped[str] = mapped_column(String(16))  # depository | credit | loan | investment | other
     subtype: Mapped[str | None] = mapped_column(String(40))
+    # Set by hand when the kind guessed from type, subtype and name is wrong (kinds.py). Only changes grouping.
+    kind: Mapped[str | None] = mapped_column(String(16))
     mask: Mapped[str | None] = mapped_column(String(4))  # last 4 digits only, never the full number
     owner_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     # Only one source counts per real account (e.g. E*TRADE through SnapTrade and a CSV), so nothing is counted twice.

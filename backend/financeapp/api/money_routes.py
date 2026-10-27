@@ -17,6 +17,7 @@ from financeapp import (
     demo,
     flip,
     household,
+    kinds,
     networth,
     notify,
     paystub,
@@ -98,6 +99,9 @@ def connection_json(db: DbSession, c: Connection) -> dict:
                 "display_name": household.display_name(a),
                 "type": a.type,
                 "subtype": a.subtype,
+                "kind": kinds.kind_of(a.type, a.subtype, a.name, a.kind),
+                "kind_auto": kinds.detect(a.type, a.subtype, a.name),
+                "kind_set": a.kind is not None,
                 "mask": a.mask,
                 "hidden": a.hidden,
                 "is_authoritative": a.is_authoritative,
@@ -144,6 +148,7 @@ def connections(request: Request, who: Signed = Depends(signed_in)) -> dict:
         },
         "people": [{"id": u.id, "name": u.name} for u in db.scalars(select(User).order_by(User.id))],
         "sync": sync_status(db),
+        "kinds": kinds.listing(),
     }
 
 
@@ -319,6 +324,7 @@ class AccountPatch(BaseModel):
     statement_cents: int | None = None
     statement_date: date | None = None
     clear_statement: bool = False
+    kind: str | None = None  # null: guess it again from the type, subtype and name
 
 
 @router.patch("/accounts/{account_id}")
@@ -336,6 +342,10 @@ def patch_account(account_id: int, body: AccountPatch, request: Request, who: Si
         if body.owner_user_id is not None and db.get(User, body.owner_user_id) is None:
             raise HTTPException(422, "No such person.")
         a.owner_user_id = body.owner_user_id
+    if "kind" in body.model_fields_set:
+        if body.kind is not None and body.kind not in kinds.allowed(a.type):
+            raise HTTPException(422, "That kind doesn't fit this account.")
+        a.kind = None if body.kind == kinds.detect(a.type, a.subtype, a.name) else body.kind
     if body.statement_cents is not None and body.statement_date is None:
         a.statement_date = sync.today()
     if body.clear_statement:

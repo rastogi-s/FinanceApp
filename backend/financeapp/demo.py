@@ -9,7 +9,7 @@ import statistics
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
-from financeapp import forecast, goals, networth, plan, reminders
+from financeapp import forecast, goals, kinds, networth, plan, reminders
 from financeapp.models import Goal, GoalFunding
 
 SEED = 20261019
@@ -337,13 +337,16 @@ def connections() -> dict:
     today = datetime.now(UTC)
     synced = today.replace(hour=6, minute=2, second=0, microsecond=0).isoformat()
 
-    def account(i: int, name: str, kind: str, cents: int, mask: str) -> dict:
+    def account(i: int, name: str, kind: str, cents: int, mask: str, subtype: str | None = None) -> dict:
         return {
             "id": i,
             "name": name,
             "display_name": f"{name} ••{mask}",
             "type": kind,
-            "subtype": None,
+            "subtype": subtype,
+            "kind": kinds.detect(kind, subtype, name),
+            "kind_auto": kinds.detect(kind, subtype, name),
+            "kind_set": False,
             "mask": mask,
             "hidden": False,
             "is_authoritative": True,
@@ -376,12 +379,20 @@ def connections() -> dict:
                 "plaid",
                 "Chase",
                 [
-                    account(1, "Chase checking", "depository", _cents(14_350), "4417"),
-                    account(2, "Chase Sapphire", "credit", _cents(860), "9012"),
+                    account(1, "Chase checking", "depository", _cents(14_350), "4417", "checking"),
+                    account(2, "Chase Sapphire", "credit", _cents(860), "9012", "credit card"),
                 ],
             ),
-            connection(2, "plaid", "Ally", [account(3, "Ally savings", "depository", _cents(38_900), "2290")]),
-            connection(3, "plaid", "American Express", [account(4, "Amex Gold", "credit", _cents(2_140), "1008")]),
+            connection(
+                2, "plaid", "Ally", [account(3, "Ally savings", "depository", _cents(38_900), "2290", "savings")]
+            ),
+            connection(
+                3,
+                "plaid",
+                "American Express",
+                [account(4, "Amex Gold", "credit", _cents(2_140), "1008", "credit card")],
+            ),
+            connection(7, "manual", "Marcus", [account(9, "Marcus 12-month CD", "depository", _cents(25_000), "7781")]),
             connection(
                 4,
                 "snaptrade",
@@ -413,6 +424,7 @@ def connections() -> dict:
         "providers": {"plaid": True, "snaptrade": True},
         "people": [{"id": 0, "name": "Sample"}],
         "sync": {"last_at": synced, "last_ok": True, "clean_days": 7, "running": False},
+        "kinds": kinds.listing(),
     }
 
 

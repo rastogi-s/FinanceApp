@@ -279,6 +279,27 @@ def test_manual_accounts_and_statement_check(client, home):
 
 
 @needs_db
+def test_an_accounts_kind_can_be_set_by_hand(client, home):
+    home.setup()
+    r = client.post(
+        "/api/accounts/manual",
+        json={"name": "Marcus", "institution": "Goldman", "type": "depository", "balance_cents": 2500000},
+        headers=csrf(client),
+    )
+    a = r.json()["accounts"][0]
+    assert (a["kind"], a["kind_auto"], a["kind_set"]) == ("checking", "checking", False)
+    r = client.patch(f"/api/accounts/{a['id']}", json={"kind": "cd"}, headers=csrf(client))
+    a = r.json()["accounts"][0]
+    assert (a["kind"], a["kind_auto"], a["kind_set"]) == ("cd", "checking", True)
+    sheet = client.get("/api/net-worth").json()
+    assert sheet["groups"][0]["key"] == "cash" and sheet["groups"][0]["accounts"][0]["kind"] == "CD"
+    r = client.patch(f"/api/accounts/{a['id']}", json={"kind": "card"}, headers=csrf(client))
+    assert r.status_code == 422  # what you own can't be listed as owed
+    r = client.patch(f"/api/accounts/{a['id']}", json={"kind": None}, headers=csrf(client))
+    assert r.json()["accounts"][0]["kind"] == "checking" and not r.json()["accounts"][0]["kind_set"]
+
+
+@needs_db
 def test_net_worth_history_carries_balances_forward(client, home):
     home.setup()
     r = client.post(
@@ -738,7 +759,7 @@ def test_demo_mode_serves_sample_settings_and_refuses_changes(tmp_path):
 
     c = TestClient(create_app(Settings(static_dir=tmp_path, allowed_hosts="testserver", demo_mode=True)))
     assert c.get("/api/auth/state").json()["demo"] is True
-    assert len(c.get("/api/connections").json()["connections"]) == 6
+    assert len(c.get("/api/connections").json()["connections"]) == 7
     assert c.get("/api/categories").status_code == 200
     sample = c.get("/api/transactions", params={"kind": "transfer"}).json()
     assert sample["count"] == 2 and sample["out_cents"] == 0  # the savings move and the card payment

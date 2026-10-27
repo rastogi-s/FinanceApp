@@ -62,6 +62,20 @@ def test_groups_add_up_to_net_worth():
     assert b["history"][-1]["cents"] == b["cents"] and b["history"][0]["date"] == (END - timedelta(days=60)).isoformat()
 
 
+def test_groups_follow_the_kind_from_settings():
+    accounts = sample()
+    cd = AccountIn(6, "Marcus", "depository", None, 10_000_00, [(WEEK, 10_000_00)])
+    accounts.append(cd)
+    rows = {r["name"]: r for g in networth.breakdown(accounts, END)["groups"] for r in g["accounts"]}
+    assert rows["Marcus"]["kind"] == "Checking"
+    cd.kind_set = "cd"
+    accounts[2].kind_set = "retirement"  # the "Brokerage" is really an inherited IRA
+    by = {g["key"]: g for g in networth.breakdown(accounts, END)["groups"]}
+    assert next(r for r in by["cash"]["accounts"] if r["name"] == "Marcus")["kind"] == "CD"
+    assert "Brokerage" in {r["name"] for r in by["retirement"]["accounts"]}
+    assert "investments" not in by
+
+
 def test_a_week_splits_markets_from_saving():
     week = next(w for w in networth.breakdown(sample(), END)["windows"] if w["key"] == "week")
     rows = {r["name"]: r for r in week["accounts"]}

@@ -188,6 +188,7 @@ def merge_account(db: DbSession, a: Account, b: Account, rekey: bool) -> None:
         i.account_id = a.id
     db.flush()
 
+    a.kind = a.kind or b.kind
     if rekey:
         a.external_id = b.external_id
         a.subtype = b.subtype or a.subtype

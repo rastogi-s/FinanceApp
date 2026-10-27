@@ -8,7 +8,7 @@ export type NetWorthGroup = {
   about: string;
   owed: boolean;
   cents: number; // what's owed is negative
-  accounts: { id: number; name: string; cents: number; as_of: string | null; stale: boolean }[];
+  accounts: { id: number; name: string; kind: string; cents: number; as_of: string | null; stale: boolean }[];
 };
 
 export type WindowAccount = {
