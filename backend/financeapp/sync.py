@@ -9,6 +9,7 @@ logged never contain them.
 
 import logging
 from datetime import UTC, date, datetime, timedelta
+from decimal import Decimal
 
 from sqlalchemy import delete, select, text
 from sqlalchemy.dialects.postgresql import insert
@@ -29,6 +30,7 @@ from financeapp.connectors.base import (
 from financeapp.db import Database
 from financeapp.models import (
     Account,
+    AccountTerms,
     AuditEvent,
     Balance,
     CardStatement,
@@ -90,6 +92,10 @@ def save_accounts(db: DbSession, connection: Connection, accounts: list[AccountD
         db.flush()
         if data.current_cents is not None:
             save_balance(db, a.id, on, data.current_cents, data.available_cents)
+        if data.apy is not None:  # a bank that sends none keeps the last one (deposits.py)
+            terms = db.get(AccountTerms, a.id) or AccountTerms(account_id=a.id, rates={})
+            terms.bank_apy = Decimal(str(round(data.apy, 3)))
+            db.merge(terms)
     return existing
 
 

@@ -185,6 +185,29 @@ class Account(Base):
     created_at: Mapped[datetime] = mapped_column(default=now)
 
 
+class AccountTerms(Base):
+    """What a bank account pays and, for a CD, its terms (deposits.py). Typed in on the account, except bank_apy,
+    which comes with each sync when the bank sends one. rates keeps the APY seen each month ({"2026-10": 4.1}), so a
+    cut shows up."""
+
+    __tablename__ = "account_terms"
+    account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id", ondelete="CASCADE"), primary_key=True)
+    apy: Mapped[Decimal | None] = mapped_column(Numeric(6, 3))  # typed
+    bank_apy: Mapped[Decimal | None] = mapped_column(Numeric(6, 3))  # from the bank (Plaid)
+    opened: Mapped[date | None] = mapped_column(Date)
+    term_months: Mapped[int | None] = mapped_column(Integer)
+    maturity: Mapped[date | None] = mapped_column(Date)
+    principal_cents: Mapped[int | None] = mapped_column(BigInteger)
+    penalty_days: Mapped[int | None] = mapped_column(Integer)  # early withdrawal: this many days of interest
+    auto_renew: Mapped[bool | None] = mapped_column(Boolean)
+    grace_days: Mapped[int | None] = mapped_column(Integer)
+    pays_out: Mapped[bool | None] = mapped_column(Boolean)  # interest paid to another account instead of added
+    monthly_fee_cents: Mapped[int | None] = mapped_column(BigInteger)
+    min_balance_cents: Mapped[int | None] = mapped_column(BigInteger)  # to skip the monthly fee
+    rates: Mapped[dict] = mapped_column(default=dict)
+    updated_at: Mapped[datetime] = mapped_column(default=now)
+
+
 class Balance(Base):
     """An account's balance on a day. Credit and loan balances are stored as positive amounts owed."""
 

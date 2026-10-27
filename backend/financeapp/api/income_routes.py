@@ -7,9 +7,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session as DbSession
 
-from financeapp import demo, household, income
+from financeapp import demo, deposits, household, income
 from financeapp.api.deps import Signed, audit, signed_in
-from financeapp.models import Account, Preference
+from financeapp.models import Account
 from financeapp.sync import today
 
 router = APIRouter(prefix="/api")
@@ -53,19 +53,8 @@ def set_account(account_id: int, body: InterestAccountIn, request: Request, who:
     a = db.get(Account, account_id)
     if a is None or a.type != "depository" or a not in household.counted(db):
         raise HTTPException(404, "No such bank account.")
-    p = db.get(Preference, "interest_accounts") or Preference(key="interest_accounts", value={})
-    value = dict(p.value)
-    entry = {
-        "apy": body.apy,
-        "maturity": body.maturity.isoformat() if body.maturity else None,
-        "term_months": body.term_months,
-    }
-    if any(v is not None for v in entry.values()):
-        value[str(a.id)] = entry
-    else:
-        value.pop(str(a.id), None)
-    p.value = value
-    db.merge(p)
+    # Only these three: anything else typed on the account (opened, penalty, renewal) stays as it was.
+    deposits.save_terms(db, a.id, {"apy": body.apy, "maturity": body.maturity, "term_months": body.term_months})
     audit(db, request, "interest_account_changed", who.user.id, account=a.id)
     db.flush()
     return income.build(db, today())

@@ -23,7 +23,88 @@ export type Account = {
   statement_diff_percent: number | null;
   /** Uploaded and typed-in accounts only: when the next statement should be uploaded. */
   reminder: Reminder | null;
+  /** Checking, savings and CDs: the rate, interest, the market, and a CD's terms (backend deposits.py). */
+  details: Details | null;
 };
+export type Benchmark = {
+  national: number;
+  national_label: string;
+  national_as_of: string;
+  treasury: number;
+  treasury_label: string;
+  treasury_as_of: string;
+};
+export type CdDetails = {
+  opened: string | null;
+  term_months: number | null;
+  maturity: string | null;
+  principal_cents: number;
+  penalty_days: number | null;
+  auto_renew: boolean | null;
+  grace_days: number | null;
+  grace_typical: boolean;
+  pays_out: boolean | null;
+  /** Worked out from the account's history, not typed in. */
+  guessed: ("opened" | "term_months" | "maturity" | "principal_cents")[];
+  missing: ("apy" | "opened" | "maturity")[];
+  earned_cents: number | null;
+  credited_cents: number;
+  built_up_cents: number | null;
+  interest_total_cents: number | null;
+  value_at_maturity_cents: number | null;
+  days_left: number | null;
+  days_total: number | null;
+  progress: number | null;
+  penalty_cents: number | null;
+  grace_ends: string | null;
+  status: "open" | "grace" | "matured" | "renewed" | null;
+  break_even: { rate: number; gain_cents: number } | null;
+  balance_gap_cents: number | null;
+};
+export type Details = {
+  kind: "checking" | "savings" | "cd";
+  apy: number | null;
+  apy_from: "typed" | "bank" | "recent" | null;
+  apy_typed: number | null;
+  bank_apy: number | null;
+  implied_apy: number | null;
+  interest: { month_cents: number; ytd_cents: number; "12m_cents": number; last_paid: string | null };
+  expected_12m_cents: number | null;
+  market: Benchmark;
+  rates: { month: string; apy: number }[];
+  fdic: { bank_cents: number; over_cents: number };
+  fees: { ytd_cents: number; "12m_cents": number; by_kind: { label: string; cents: number }[] };
+  monthly_fee_cents: number | null;
+  min_balance_cents: number | null;
+  below_minimum: boolean;
+  idle: {
+    cents: number;
+    buffer_cents: number;
+    monthly_out_cents: number;
+    rate: number;
+    rate_from: "savings" | "treasury";
+    earn_cents: number;
+  } | null;
+  cd: CdDetails | null;
+};
+/** What PUT /api/accounts/{id}/terms takes: every field, null to clear. */
+export type TermsIn = {
+  apy: number | null;
+  opened: string | null;
+  term_months: number | null;
+  maturity: string | null;
+  principal_cents: number | null;
+  penalty_days: number | null;
+  auto_renew: boolean | null;
+  grace_days: number | null;
+  pays_out: boolean | null;
+  monthly_fee_cents: number | null;
+  min_balance_cents: number | null;
+};
+
+export function percent(apy: number): string {
+  return `${apy.toFixed(2)}%`;
+}
 export type Kind = { key: string; label: string; one: string; about: string; owed: boolean };
 export type Every = "monthly" | "quarterly" | "weekly" | "off";
 export type Reminder = {
