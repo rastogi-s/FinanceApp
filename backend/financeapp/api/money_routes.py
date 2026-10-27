@@ -10,7 +10,21 @@ from pydantic import BaseModel, Field
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session as DbSession
 
-from financeapp import auth, crypto, dedupe, demo, flip, household, notify, paystub, reminders, review, search, sync
+from financeapp import (
+    auth,
+    crypto,
+    dedupe,
+    demo,
+    flip,
+    household,
+    networth,
+    notify,
+    paystub,
+    reminders,
+    review,
+    search,
+    sync,
+)
 from financeapp.ai import documents, extract, reading
 from financeapp.ai.providers import ProviderError
 from financeapp.ai.service import AIUnavailable
@@ -53,6 +67,14 @@ def get_household(request: Request, who: Signed = Depends(signed_in)) -> dict:
     if who.demo:
         return demo.household()
     return household.build(db_of(request))
+
+
+@router.get("/net-worth")
+def get_net_worth(request: Request, who: Signed = Depends(signed_in)) -> dict:
+    """How net worth adds up, and what moved it over each window (networth.py)."""
+    if who.demo:
+        return demo.net_worth()
+    return networth.build(db_of(request), sync.today())
 
 
 # ---- accounts and connections

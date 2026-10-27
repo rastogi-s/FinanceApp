@@ -9,7 +9,7 @@ import statistics
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
-from financeapp import forecast, goals, plan, reminders
+from financeapp import forecast, goals, networth, plan, reminders
 from financeapp.models import Goal, GoalFunding
 
 SEED = 20261019
@@ -78,15 +78,9 @@ def household(today: date | None = None) -> dict:
     cash = sum(c[1] for c in CASH)
     debts = sum(d[1] for d in DEBTS)
     net_worth = _cents(investments + cash - debts)
-    change_today = sum(_cents(h[4] * h[5] / 100) for h in HOLDINGS)
-
-    # A gently rising, slightly noisy 90-day history that ends at today's value.
-    history = []
-    value = net_worth
-    for i in range(90):
-        history.append({"date": (today - timedelta(days=i)).isoformat(), "cents": value})
-        value -= _cents(rng.uniform(-1800, 2600))
-    history.reverse()
+    # The last 90 days of the sample year behind the Net worth sheet, so the card and the sheet agree.
+    history = networth.breakdown(_sample_net_worth(today), today)["history"][-90:]
+    change_today = history[-1]["cents"] - history[-2]["cents"]
 
     budgets = [
         {
@@ -209,6 +203,83 @@ def household(today: date | None = None) -> dict:
         "allocation": [{"asset_class": k, "cents": v} for k, v in sorted(by_class.items(), key=lambda kv: -kv[1])],
         "projection": plan.projection(_plan_inputs(today, net_worth)),
     }
+
+
+def net_worth(today: date | None = None) -> dict:
+    """The Net worth sheet in demo mode: the real sums, run on a made-up year of the sample household's balances."""
+    today = today or datetime.now(UTC).date()
+    return {"linked": True, **networth.breakdown(_sample_net_worth(today), today)}
+
+
+def _sample_net_worth(today: date) -> list[networth.AccountIn]:
+    """A year (and a bit) of daily balances and holdings for household()'s accounts, ending at today's numbers.
+
+    Prices wander back from today's sample prices (yesterday's is set by the day's change, so "Today" is the market
+    alone); the 401(k) buys every two weeks from pay, E*TRADE vests Apple each quarter, the HSA takes $150 a month,
+    savings gets $1,500 on the 1st, and the cards go up and down between payments.
+    """
+    rng = random.Random(SEED + 1)  # noqa: S311 - sample data, not security
+    days = [today - timedelta(days=i) for i in range(networth.HISTORY_DAYS + 40)]  # newest first
+    change = {h[0]: h[5] for h in HOLDINGS}
+    prices: dict[str, list[Decimal]] = {}
+    for symbol, now in {**SAMPLE_PRICES, "HSA cash": 1.0}.items():
+        p = Decimal(str(now))
+        path = [p]
+        for i in range(1, len(days)):
+            if i == 1:
+                p = p * (1 - Decimal(str(change.get(symbol, 0))) / 100)
+            elif symbol != "HSA cash":
+                drift, noise = (0.0001, 0.002) if symbol == "BND" else (0.0005, 0.008)
+                p = p / Decimal(str(1 + rng.gauss(drift, noise)))
+            path.append(p.quantize(Decimal("0.0001")))
+        prices[symbol] = path
+
+    out = []
+    for i, (account, dollars) in enumerate(_by_account().items()):
+        held = [(sym, name, Decimal(str(v)) / prices[sym][0]) for sym, name, _, a, v, _ in HOLDINGS if a == account]
+        names = {sym: name for sym, name, _ in held}
+        shares = {sym: q for sym, _, q in held}
+        series: list[tuple[date, int]] = []
+        snapshots = []
+        for n, d in enumerate(days):
+            if n:
+                if account == "Fidelity 401(k)" and n % 14 == 0:
+                    for sym, part in (("VTI", 0.75), ("VXUS", 0.25)):
+                        shares[sym] -= Decimal(str(900 * part)) / prices[sym][n]
+                if account == "E*TRADE" and n % 91 == 0:
+                    shares["AAPL"] -= Decimal(12)
+                if account == "HealthEquity HSA" and d.day == 1:
+                    shares["HSA cash"] -= Decimal(150)
+            holdings = {sym: (q, prices[sym][n], names[sym]) for sym, q in shares.items()}
+            cents = _cents(dollars) if n == 0 else int(sum(q * p for q, p, _ in holdings.values()) * 100)
+            series.append((d, cents))
+            snapshots.append((d, holdings))
+        a = networth.AccountIn(10 + i, account, "investment", "hsa" if "HSA" in account else None, _cents(dollars),
+                               series[::-1], snapshots[0][1], snapshots[::-1])  # fmt: skip
+        if account == "E*TRADE":
+            a.unvested = [
+                {"symbol": "AAPL", "name": "Apple", "shares": 48.0, "value_cents": _cents(48 * SAMPLE_PRICES["AAPL"])}
+            ]
+        out.append(a)
+
+    for i, (name, dollars) in enumerate(CASH, 1):
+        series, value = [], _cents(dollars)
+        for n, d in enumerate(days):
+            series.append((d, value))
+            if name == "Ally savings" and d.day == 1:
+                value -= 1_500_00
+            elif name == "Chase checking" and n:
+                value = _cents(14_350 + rng.uniform(-2_500, 2_500)) if d.weekday() == 4 else value
+        out.append(networth.AccountIn(i, name, "depository", None, _cents(dollars), series[::-1]))
+
+    for i, (name, dollars) in enumerate(DEBTS):
+        series, value = [], _cents(dollars)
+        for n, d in enumerate(days):
+            series.append((d, value))
+            if n:
+                value = _cents(rng.uniform(300, 2_600)) if d.day == 20 else max(0, value - _cents(rng.uniform(0, 140)))
+        out.append(networth.AccountIn(20 + i, name, "credit", None, _cents(dollars), series[::-1]))
+    return out
 
 
 def _last_month(month_start: date) -> date:

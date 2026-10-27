@@ -1,5 +1,23 @@
 [
   {
+    "version": "0.43.0",
+    "title": "Net worth, explained",
+    "features": [
+      {
+        "id": "net-worth-math",
+        "title": "Tap net worth to see the math",
+        "body": "The Net worth card on Home now opens how it adds up: cash, investments, retirement and HSA, other assets, cards and loans, each account inside, and what you own less what you owe, to the dollar. It also shows what's within reach (cash and brokerage, less card balances), what's saved for later, and stock that hasn't vested yet, which isn't counted until it vests.",
+        "tryIt": "/"
+      },
+      {
+        "id": "net-worth-moved",
+        "title": "What moved it",
+        "body": "Pick today, a week, a month, three months, this year or a year to see which accounts pushed net worth up or down, how much came from markets and how much from saving and spending, a chart of the stretch, and the holdings whose prices moved it most.",
+        "tryIt": "/"
+      }
+    ]
+  },
+  {
     "version": "0.42.0",
     "title": "A year of dividends and interest, ahead",
     "features": [

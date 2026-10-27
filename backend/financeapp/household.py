@@ -71,6 +71,24 @@ def counted(db: DbSession) -> list[Account]:
     return list(db.scalars(select(Account).where(Account.hidden.is_(False), Account.is_authoritative.is_(True))))
 
 
+def latest_balances(db: DbSession, accounts: list[Account]) -> dict[int, Balance | None]:
+    return {
+        a.id: db.scalar(select(Balance).where(Balance.account_id == a.id).order_by(Balance.date.desc()).limit(1))
+        for a in accounts
+    }
+
+
+def live_moves(latest: dict[int, Balance | None], positions: list[portfolio.Position]) -> dict[int, int]:
+    """How far live prices move each investment account's balance. Only when the balance is from the same day as the
+    holdings they revalue: an older balance doesn't know about the holdings' newer prices."""
+    day = {p.account_id: p.as_of for p in positions}
+    return {
+        aid: c
+        for aid, c in portfolio.live_change_by_account(positions).items()
+        if c and latest.get(aid) is not None and latest[aid].date == day[aid]
+    }
+
+
 def build(db: DbSession) -> dict:
     return build_with_plan(db)[0]
 
@@ -84,10 +102,7 @@ def build_with_plan(db: DbSession) -> tuple[dict, dict | None]:
     history = net_worth_history(db, accounts, end)
     net = history[-1]["cents"] if history else 0
 
-    latest_balance = {}
-    for a in accounts:
-        b = db.scalar(select(Balance).where(Balance.account_id == a.id).order_by(Balance.date.desc()).limit(1))
-        latest_balance[a.id] = b
+    latest_balance = latest_balances(db, accounts)
 
     def account_row(a: Account) -> dict:
         b = latest_balance[a.id]
@@ -123,15 +138,9 @@ def build_with_plan(db: DbSession) -> tuple[dict, dict | None]:
         }
         for p in positions
     ]
-    moved = portfolio.live_change_by_account(positions)
+    moved = live_moves(latest_balance, positions)
     for row in investments:
-        b = latest_balance[row["id"]]
-        # Live prices move the balance only when it's from the same day as the holdings they revalue.
-        if (
-            moved.get(row["id"])
-            and b
-            and b.date.isoformat() == next((h["as_of"] for h in holdings if h["account_id"] == row["id"]), None)
-        ):
+        if moved.get(row["id"]):
             row["cents"] += moved[row["id"]]
             net += moved[row["id"]]
             if history:
