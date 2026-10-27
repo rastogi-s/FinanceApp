@@ -89,6 +89,7 @@ def test_reading_a_capital_one_offers_page():
     assert found["Expedia"].kind == "multiplier" and found["Expedia"].expires == date(2026, 11, 30)
     assert found["Expedia"].json("capital_one")["label"] == "5X miles"
     assert offers.issuer_of("capitaloneoffers.com", "") == "capital_one"
+    assert offers.issuer_of("notcapitalone.com", "") == "other"
 
 
 def test_pages_with_no_offers_and_odd_text():
@@ -97,6 +98,8 @@ def test_pages_with_no_offers_and_odd_text():
     assert offers.parse("5% cash back\n10% cash back", TODAY) == []  # no store names
     assert offers.parse("Big Sale\n80% cash back", TODAY) == []  # not a real offer
     assert offers.card_on_page("no card here") == (None, None)
+    assert offers.card_on_page("Venture X  ending in 4410") == ("Venture X", "4410")
+    assert offers.parse("Food Lion\n" + " " * 50_000 + "x\nup to" + " " * 50_000, TODAY) == []  # quick
 
 
 def test_matching_offer_stores_to_purchases():

@@ -43,34 +43,29 @@ MONTHS = {
     m: i + 1 for i, m in enumerate(["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"])
 }
 
-_UP_TO = r"(?P<up>up\s+to\s+)?"
-PERCENT = re.compile(_UP_TO + r"(?P<n>\d{1,2}(?:\.\d{1,2})?)\s?%\s*(?:in\s+)?(?:cash\s?back|back|off|rewards?)\b", re.I)
-AMOUNT = re.compile(
-    _UP_TO + r"\$(?P<n>\d{1,4}(?:\.\d{2})?)\s*(?:in\s+)?(?:cash\s?back|back|statement\s+credit|off)\b", re.I
-)
-MULTIPLIER = re.compile(_UP_TO + r"(?P<n>\d{1,2}(?:\.\d)?)\s?x\s*(?:the\s+)?(?:miles|points)\b", re.I)
-DAYS_LEFT = re.compile(r"\b(\d{1,3})\s+days?\s+(?:left|remaining)\b", re.I)
-ENDS = r"\b(?:exp(?:ires|iring|\.)?|ends|valid\s+(?:until|through|thru))\s*(?:on\s+)?"
+_UP_TO = r"(?P<up>up to )?"
+PERCENT = re.compile(_UP_TO + r"(?P<n>\d{1,2}(?:\.\d{1,2})?) ?% ?(?:in )?(?:cash ?back|back|off|rewards?)\b", re.I)
+AMOUNT = re.compile(_UP_TO + r"\$(?P<n>\d{1,4}(?:\.\d{2})?) ?(?:in )?(?:cash ?back|back|statement credit|off)\b", re.I)
+MULTIPLIER = re.compile(_UP_TO + r"(?P<n>\d{1,2}(?:\.\d)?) ?x ?(?:the )?(?:miles|points)\b", re.I)
+DAYS_LEFT = re.compile(r"\b(\d{1,3}) days? (?:left|remaining)\b", re.I)
+ENDS = r"\b(?:exp(?:ires|iring|\.)?|ends|valid (?:until|through|thru)) ?(?:on )?"
 ENDS_DATE = re.compile(ENDS + r"(\d{1,2})/(\d{1,2})(?:/(\d{2,4}))?", re.I)
 ENDS_NAMED = re.compile(
-    ENDS + r"(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+(\d{1,2})(?:,?\s+(\d{4}))?",
+    ENDS + r"(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.? (\d{1,2})(?:,? (\d{4}))?",
     re.I,
 )
-SOON = re.compile(r"\b(?:expiring|ends|ending)\s+soon\b|\blast\s+day\b|\bends\s+today\b", re.I)
+SOON = re.compile(r"\b(?:expiring|ends|ending) soon\b|\blast day\b|\bends today\b", re.I)
 ADDED = re.compile(r"^(?:added|added to card|activated|enrolled|offer added|✓|✔)$", re.I)
 NOT_ADDED = re.compile(r"^(?:add|add to card|add offer|activate|\+|⊕)$", re.I)
-ONLINE = re.compile(r"\bonline(?:\s+only)?\b", re.I)
-IN_STORE = re.compile(r"\bin[-\s]store(?:\s+only)?\b", re.I)
+ONLINE = re.compile(r"\bonline(?: only)?\b", re.I)
+IN_STORE = re.compile(r"\bin[- ]store(?: only)?\b", re.I)
 MIN_SPEND = re.compile(
-    r"\b(?:spend|purchases?\s+of|purchase\s+of|on\s+(?:a\s+)?(?:single\s+)?purchase\s+of)\s+\$(\d{1,5})(?:\.\d{2})?(?:\s+or\s+more|\+)?",
+    r"\b(?:spend|purchases? of|purchase of|on (?:a )?(?:single )?purchase of) \$(\d{1,5})(?:\.\d{2})?(?: or more|\+)?",
     re.I,
 )
-MAX_BACK = re.compile(
-    r"\b(?:max(?:imum)?(?:\s+of)?|up\s+to)\s+\$(\d{1,5})(?:\.\d{2})?\s*(?:cash\s?back|back|total)", re.I
-)
-CARD = re.compile(
-    r"(?P<name>[A-Za-z][A-Za-z ®™'&-]{1,40}?)\s*\(?\s*(?:\.{2,3}|…|ending\s+in|x{2,4})\s?(?P<mask>\d{4})\)?"
-)
+MAX_BACK = re.compile(r"\b(?:max(?:imum)?(?: of)?|up to) \$(\d{1,5})(?:\.\d{2})? ?(?:cash ?back|back|total)", re.I)
+# The card's last four digits: "(...9791)", "…9791", "ending in 9791". The card's name is the text before it.
+MASK = re.compile(r"(?:\.{2,3}|…|ending in|x{2,4}) ?(\d{4})\b", re.I)
 # Lines that are page furniture, not a store: section names, buttons, filters.
 NOISE = re.compile(
     r"^(?:new|all|all offers|featured|recommended|for you|just for you|shopping|groceries|grocery|home|home & garden|"
@@ -79,7 +74,7 @@ NOISE = re.compile(
     r"in store|online only|in-store only|online & in-store|details|view details|see details|terms|shop now|"
     r"chase offers|capital one offers|offers|my offers|earned|search|filter|sort|sort by|show more|load more|"
     r"view all|see all|back|menu|close|\+|⊕|✓|✔|[\d$.,% ]+|.*\bearned\b.*|.*\boffers?\b.*\bavailable\b.*|"
-    r"fresh for \w+|featured offers|popular|trending|ends soon|last day|new offers?|\d+\s+days?\s+left)$",
+    r"fresh for \w+|featured offers|popular|trending|ends soon|last day|new offers?|\d+ days? left)$",
     re.I,
 )
 
@@ -122,14 +117,18 @@ def label(kind: str, value: float, up_to: bool = False, issuer: str = "other") -
     return f"Up to {text}" if up_to else text
 
 
+def on_site(host: str, domain: str) -> bool:
+    return host == domain or host.endswith("." + domain)
+
+
 def issuer_of(site: str, text: str) -> str:
     host = (site or "").lower()
-    if host == "chase.com" or host.endswith(".chase.com"):
+    if on_site(host, "chase.com"):
         return "chase"
-    if host.endswith("capitalone.com") or host.endswith("capitaloneoffers.com"):
+    if on_site(host, "capitalone.com") or on_site(host, "capitaloneoffers.com"):
         return "capital_one"
     head = text[:5000].lower()
-    if "chase offers" in head or "chase.com" in head:
+    if "chase offers" in head:
         return "chase"
     if "capital one" in head:
         return "capital_one"
@@ -143,12 +142,12 @@ def _value(line: str) -> tuple[re.Match, str] | None:
     return min(found, key=lambda f: f[0].start()) if found else None
 
 
-CAP_LINE = re.compile(r"\s*(?:max(?:imum)?|limit|cap)\b", re.I)
+CAP_LINE = re.compile(r" ?(?:max(?:imum)?|limit|cap)\b", re.I)
 PUNCT = " -\u2013\u2014:|•·,"  # spaces, dashes and bullets around a name
 
 
 def _store_name(text: str) -> str | None:
-    name = re.sub(r"\s+", " ", text).strip(PUNCT)
+    name = " ".join(text.split()).strip(PUNCT)
     name = re.sub(r"^(?:earn|get|enjoy|save)\b|\b(?:earn|get|enjoy|save)$", "", name, flags=re.I).strip(PUNCT)
     if len(name) < 2 or len(name) > 60 or not re.search(r"[A-Za-z]{2}", name) or NOISE.fullmatch(name):
         return None
@@ -181,7 +180,8 @@ def _date(today: date, month: int, day: int, year: str | None) -> date | None:
 
 def parse(text: str, today: date) -> list[Read]:
     """Every offer on an offers page's text, in page order, each store once."""
-    lines = [re.sub(r"\s+", " ", ln).strip() for ln in text[:MAX_TEXT].splitlines()]
+    # One space between words, so the patterns above only ever see single spaces.
+    lines = [" ".join(ln.split()) for ln in text[:MAX_TEXT].splitlines()]
     lines = [ln for ln in lines if ln]
     # A "Max $5 cash back" line is the cap of the offer above it, not an offer.
     hits = [(i, v) for i, ln in enumerate(lines) if not CAP_LINE.match(ln) and (v := _value(ln))]
@@ -233,10 +233,14 @@ def parse(text: str, today: date) -> list[Read]:
 
 def card_on_page(text: str) -> tuple[str | None, str | None]:
     """The card the page is showing offers for: its name and last four digits, if the page says."""
-    m = CARD.search(text[:20_000])
-    if not m:
-        return None, None
-    return re.sub(r"\s+", " ", m.group("name")).strip() or None, m.group("mask")
+    for line in text[:20_000].splitlines():
+        line = " ".join(line.split())
+        if len(line) > 120 or not (m := MASK.search(line)):
+            continue
+        name = re.sub(r"[^A-Za-z®™'& -]", " ", line[: m.start()])
+        name = " ".join(name.split()[-5:])
+        return name or None, m.group(1)
+    return None, None
 
 
 def match_account(accounts: list[Account], issuer: str, mask: str | None) -> Account | None:
