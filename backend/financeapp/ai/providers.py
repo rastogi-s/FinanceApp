@@ -34,10 +34,11 @@ class ProviderError(RuntimeError):
     """A call failed. The message is shown to the person as-is, so it never includes the key. `reply` is set when
     the provider answered (and billed) but the answer can't be used, so the usage log still counts it."""
 
-    def __init__(self, message: str, reply: "Reply | None" = None) -> None:
+    def __init__(self, message: str, reply: "Reply | None" = None, status: int | None = None) -> None:
         super().__init__(message)
         self.message = message
         self.reply = reply
+        self.status = status  # the provider's HTTP status, when it answered with an error
 
 
 @dataclass
@@ -53,6 +54,10 @@ class Request:
     pictures: list[Picture] = field(default_factory=list)
     schema: dict | None = None  # ask for JSON matching this (where the provider can enforce it)
     max_tokens: int = 8000
+    # Let the model search the web itself, up to this many times (Claude only: Anthropic runs the searches, so
+    # nothing here fetches outside pages). A schema can't be enforced alongside it; the prompt asks for JSON instead.
+    web_searches: int = 0
+    timeout: float | None = None  # seconds; searching takes longer than a plain answer
 
 
 @dataclass
@@ -60,6 +65,10 @@ class Reply:
     text: str
     input_tokens: int
     output_tokens: int
+    web_searches: int = 0  # searches run (and billed) for this answer
+    # Pages the searches turned up and the ones the answer cites: {"url", "title", "age" or "quote"}. Outside text.
+    found: list[dict] = field(default_factory=list)
+    cited: list[dict] = field(default_factory=list)
 
 
 @dataclass
@@ -120,21 +129,22 @@ def _fail(r: httpx.Response, who: str) -> ProviderError:
     except ValueError:
         pass
     message = message[:160]
-    if r.status_code in (401, 403):
-        return ProviderError(f"{_cap(who)} didn't accept the key. Check it and try again.")
-    if r.status_code == 429:
-        return ProviderError(f"{_cap(who)} says slow down or add credit ({message or 'rate limited'}).")
-    if r.status_code == 404:
-        return ProviderError(f"{_cap(who)} doesn't know that model{f' ({message})' if message else ''}.")
-    if 300 <= r.status_code < 400:
-        return ProviderError(f"{_cap(who)} tried to redirect the request, so it wasn't sent.")
-    return ProviderError(f"{_cap(who)} returned an error ({r.status_code}{f': {message}' if message else ''}).")
+    code = r.status_code
+    if code in (401, 403):
+        return ProviderError(f"{_cap(who)} didn't accept the key. Check it and try again.", status=code)
+    if code == 429:
+        return ProviderError(f"{_cap(who)} says slow down or add credit ({message or 'rate limited'}).", status=code)
+    if code == 404:
+        return ProviderError(f"{_cap(who)} doesn't know that model{f' ({message})' if message else ''}.", status=code)
+    if 300 <= code < 400:
+        return ProviderError(f"{_cap(who)} tried to redirect the request, so it wasn't sent.", status=code)
+    return ProviderError(f"{_cap(who)} returned an error ({code}{f': {message}' if message else ''}).", status=code)
 
 
-def _send(method: str, url: str, who: str, **kwargs) -> dict:
+def _send(method: str, url: str, who: str, timeout: float | None = None, **kwargs) -> dict:
     try:
         with _client() as c:
-            r = c.request(method, url, **kwargs)
+            r = c.request(method, url, timeout=httpx.Timeout(timeout, connect=10) if timeout else TIMEOUT, **kwargs)
     except httpx.TimeoutException:
         raise ProviderError(f"{_cap(who)} took too long to answer.") from None
     except httpx.HTTPError:
@@ -194,35 +204,77 @@ def _optional_not_null(schema):
     return {k: _optional_not_null(v) for k, v in schema.items()}
 
 
+# Models that take the newer web search tool (it filters results before reading them, so it costs fewer tokens).
+FILTERING_SEARCH = re.compile(r"^claude-(opus-(4-[6-9]|5)|sonnet-(4-[6-9]|5))")
+MAX_RESUMES = 3  # a long search can pause; it's picked up again this many times at most
+
+
+def _search_tool(model: str, uses: int) -> dict:
+    kind = "web_search_20260209" if FILTERING_SEARCH.match(model) else "web_search_20250305"
+    return {"type": kind, "name": "web_search", "max_uses": uses}
+
+
 def _anthropic_complete(e: Endpoint, model: str, req: Request) -> Reply:
     content: list[dict] = [
         {"type": "image", "source": {"type": "base64", "media_type": p.mime, "data": _b64(p.data)}}
         for p in req.pictures
     ]
     content.append({"type": "text", "text": req.text})
-    payload: dict = {
-        "model": model,
-        "max_tokens": req.max_tokens,
-        "system": req.system,
-        "messages": [{"role": "user", "content": content}],
-    }
-    if req.schema:
+    messages: list[dict] = [{"role": "user", "content": content}]
+    payload: dict = {"model": model, "max_tokens": req.max_tokens, "system": req.system, "messages": messages}
+    if req.web_searches:
+        payload["tools"] = [_search_tool(model, req.web_searches)]
+    elif req.schema:
         payload["output_config"] = {"format": {"type": "json_schema", "schema": _optional_not_null(req.schema)}}
-    body = _send("POST", f"{ANTHROPIC_URL}/messages", "Claude", headers=_anthropic_headers(e), json=payload)
-    usage = body.get("usage") or {}
-    reply = Reply(
-        text="".join(b.get("text", "") for b in body.get("content", []) if b.get("type") == "text"),
-        input_tokens=int(usage.get("input_tokens") or 0)
-        + int(usage.get("cache_creation_input_tokens") or 0)
-        + int(usage.get("cache_read_input_tokens") or 0),
-        output_tokens=int(usage.get("output_tokens") or 0),
-    )
-    stop = body.get("stop_reason")
+    reply = Reply(text="", input_tokens=0, output_tokens=0)
+    blocks: list[dict] = []
+    for _ in range(MAX_RESUMES + 1):
+        body = _send(
+            "POST", f"{ANTHROPIC_URL}/messages", "Claude", req.timeout, headers=_anthropic_headers(e), json=payload
+        )
+        usage = body.get("usage") or {}
+        reply.input_tokens += (
+            int(usage.get("input_tokens") or 0)
+            + int(usage.get("cache_creation_input_tokens") or 0)
+            + int(usage.get("cache_read_input_tokens") or 0)
+        )
+        reply.output_tokens += int(usage.get("output_tokens") or 0)
+        reply.web_searches += int((usage.get("server_tool_use") or {}).get("web_search_requests") or 0)
+        got = [b for b in body.get("content") or [] if isinstance(b, dict)]
+        blocks += got
+        stop = body.get("stop_reason")
+        if stop != "pause_turn":
+            break
+        # The search loop paused: send its turn back as it is and it carries on where it stopped.
+        messages = [*messages[:1], {"role": "assistant", "content": blocks}]
+        payload["messages"] = messages
+    _collect_search(blocks, reply)
+    # The answer is the text after the last search (before it, the model may say what it's about to look up).
+    last_tool = max((i for i, b in enumerate(blocks) if b.get("type") != "text"), default=-1)
+    reply.text = "".join(b.get("text", "") for b in blocks[last_tool + 1 :] if b.get("type") == "text")
     if stop == "refusal":
         raise ProviderError("Claude declined to read this one.", reply)
     if stop == "max_tokens":
         raise ProviderError("The answer was too long and got cut off. Try a shorter file.", reply)
+    if stop == "pause_turn":
+        raise ProviderError("Claude was still searching after several rounds. Try a narrower question.", reply)
     return reply
+
+
+def _collect_search(blocks: list[dict], reply: Reply) -> None:
+    """The pages web search found and the ones the answer cites (urls and titles only; nothing is fetched here)."""
+    for b in blocks:
+        if b.get("type") == "web_search_tool_result" and isinstance(b.get("content"), list):
+            for r in b["content"]:
+                if isinstance(r, dict) and r.get("type") == "web_search_result" and isinstance(r.get("url"), str):
+                    reply.found.append(
+                        {"url": r["url"], "title": str(r.get("title") or "")[:300], "age": str(r.get("page_age") or "")}
+                    )
+        for c in b.get("citations") or [] if b.get("type") == "text" else []:
+            if isinstance(c, dict) and isinstance(c.get("url"), str):
+                reply.cited.append(
+                    {"url": c["url"], "title": str(c.get("title") or "")[:300], "quote": str(c.get("cited_text") or "")}
+                )
 
 
 # ---- OpenAI and OpenAI-compatible servers (Ollama, LM Studio, vLLM, OpenRouter...)
@@ -268,7 +320,9 @@ def _openai_complete(e: Endpoint, model: str, req: Request) -> Reply:
         # Local servers differ in what they accept: keep to the basics and ask for JSON in the prompt.
         payload["max_tokens"] = req.max_tokens
     who = _openai_who(e)
-    body = _send("POST", f"{_openai_base(e)}/chat/completions", who, headers=_openai_headers(e), json=payload)
+    body = _send(
+        "POST", f"{_openai_base(e)}/chat/completions", who, req.timeout, headers=_openai_headers(e), json=payload
+    )
     usage = body.get("usage") or {}
     choices = body.get("choices") or [{}]
     message = choices[0].get("message") or {}
@@ -310,7 +364,7 @@ def _gemini_complete(e: Endpoint, model: str, req: Request) -> Reply:
         | ({"responseMimeType": "application/json"} if req.schema else {}),
     }
     url = f"{GEMINI_URL}/models/{check_model(model)}:generateContent"
-    body = _send("POST", url, "Gemini", headers=_gemini_headers(e), json=payload)
+    body = _send("POST", url, "Gemini", req.timeout, headers=_gemini_headers(e), json=payload)
     usage = body.get("usageMetadata") or {}
     candidates = body.get("candidates") or [{}]
     reply = Reply(

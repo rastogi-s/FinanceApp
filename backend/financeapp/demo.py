@@ -1820,3 +1820,117 @@ def cards_page(today: date | None = None) -> dict:
             )
         )
     return cards.assemble(w, rows, demo=True)
+
+
+def research_offer(symbol: str, today: date | None = None) -> dict:
+    """Ask AI with sample data: no AI call. Apple and VTI carry a sample answer to show what one looks like; the
+    sources are real pages about each (quote pages, filings, the issuer), not made-up articles."""
+    today = today or datetime.now(UTC).date()
+    at = datetime.combine(today, datetime.min.time(), UTC).replace(hour=18, minute=12).isoformat()
+    held = any(h[0] == symbol for h in HOLDINGS)
+    fund = symbol in SAMPLE_FUNDS
+    suggested = (
+        ["What's the sentiment right now, and why?", "What's inside it and what does it cost?"]
+        if fund
+        else ["What's the sentiment right now, and why?", "What do analysts think?"]
+    )
+    if held:
+        suggested.insert(1, "Should I hold, add or trim, given my tax lots?")
+    suggested.append("What are the biggest risks?")
+    samples = {
+        "AAPL": {
+            "sentiment": "mixed",
+            "headline": "Mostly positive on the business, more cautious on the price: it already trades at a premium.",
+            "answer": (
+                "Sentiment toward Apple is broadly positive but not euphoric. Services keep growing faster than "
+                "hardware and carry much higher margins, and the installed base of devices keeps expanding, which is "
+                "why most analysts stay on Buy or Overweight.\n\nThe caution is about price, not quality. The stock "
+                "trades near the top of its 52-week range at roughly 30 times earnings, above its own 10-year average, "
+                "so a lot of good news is already expected. Regulation of the App Store and the search deal, and China "
+                "demand, are the risks most often named."
+            ),
+            "points": [
+                {"side": "bull", "text": "Services revenue keeps growing at double digits with gross margins above "
+                 "70%, steadily lifting overall margins.", "sources": [2, 3]},
+                {"side": "bull", "text": "Large buybacks shrink the share count every year.", "sources": [2]},
+                {"side": "bear", "text": "At about 30 times earnings, the valuation leaves little room for a "
+                 "disappointing quarter.", "sources": [1]},
+                {"side": "bear", "text": "App Store and search-deal regulation in the US and EU could cut "
+                 "high-margin revenue.", "sources": [2]},
+                {"side": "neutral", "text": "iPhone sales are steady rather than growing fast; upgrades drive most "
+                 "of the year-to-year change.", "sources": [3]},
+            ],
+            "analysts": "Most analysts covering Apple rate it Buy or Overweight, with average price targets a little "
+            "above today's price. A sample answer: with your own accounts, the AI looks up the latest ratings.",
+            "fundamentals": "Revenue grows in the mid single digits, services faster; operating margin around 30%; "
+            "P/E around 30, above the S&P 500's.",
+            "for_you": "Apple is about 10% of your portfolio and about 13% once your index funds are counted, all in "
+            "your taxable E*TRADE account at a large gain. If you want less of it, adding new money to your index "
+            "funds lowers the weight without a tax bill; if you do sell, the long-term lots cost the least tax.",
+            "watch": ["Next quarterly earnings and services growth", "App Store rulings in the US and EU"],
+            "sources": [
+                {"n": 1, "title": "Apple Inc. (AAPL) quote and statistics", "url": "https://finance.yahoo.com/quote/AAPL/",
+                 "publisher": "Yahoo Finance", "date": ""},
+                {"n": 2, "title": "Apple's annual and quarterly filings (10-K, 10-Q)",
+                 "url": "https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=0000320193&type=10-",
+                 "publisher": "SEC EDGAR", "date": ""},
+                {"n": 3, "title": "Apple investor relations", "url": "https://investor.apple.com/",
+                 "publisher": "investor.apple.com", "date": ""},
+            ],
+            "caveats": "Sample answer for the demo, so the numbers are illustrative rather than today's.",
+        },
+        "VTI": {
+            "sentiment": "positive",
+            "headline": "Broadly liked as a core holding: the whole US market for a 0.03% yearly fee.",
+            "answer": (
+                "VTI holds nearly every US-listed company, weighted by size, so its sentiment is really the US "
+                "market's. Commentators and fund researchers rate it highly for its very low cost, tax efficiency and "
+                "breadth.\n\nThe main caution people raise is concentration at the top: the largest tech companies are "
+                "a big share of the index, so it moves with them more than it used to."
+            ),
+            "points": [
+                {"side": "bull", "text": "An expense ratio of 0.03% a year, among the lowest of any fund.",
+                 "sources": [1]},
+                {"side": "bull", "text": "About 3,600 holdings across large, mid and small companies.", "sources": [1]},
+                {"side": "bear", "text": "The ten largest companies are about a third of the fund.", "sources": [1]},
+            ],
+            "analysts": "",
+            "fundamentals": "Tracks the CRSP US Total Market Index; expense ratio 0.03%; yield around 1.3%.",
+            "for_you": "VTI is your largest holding, spread over your 401(k), IRA and taxable account. Nothing here "
+            "suggests a change.",
+            "watch": ["How much of the fund the largest tech companies make up"],
+            "sources": [
+                {"n": 1, "title": "Vanguard Total Stock Market ETF (VTI) overview",
+                 "url": "https://investor.vanguard.com/investment-products/etfs/profile/vti", "publisher": "Vanguard",
+                 "date": ""},
+            ],
+            "caveats": "Sample answer for the demo, so the numbers are illustrative rather than today's.",
+        },
+    }  # fmt: skip
+    thread = []
+    if symbol in samples:
+        thread = [
+            {
+                "at": at,
+                "question": "What's the sentiment right now, and why?",
+                "model": "claude-opus-5-5",
+                "cost": 0.14,
+                "searched": 3,
+                "web_search": True,
+                "headlines": 8,
+                "answer": samples[symbol],
+            }
+        ]
+    return {
+        "available": False,
+        "problem": "With sample data, the AI isn't asked. Connect your own accounts to ask about any ticker.",
+        "provider": "Claude",
+        "model": "claude-opus-5-5",
+        "max_cost": None,
+        "web_search": True,
+        "held": held,
+        "headlines": 8,
+        "preview": None,
+        "suggested": suggested,
+        "thread": thread,
+    }
