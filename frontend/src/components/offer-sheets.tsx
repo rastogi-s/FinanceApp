@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, Bookmark, Check, ClipboardPaste, Copy, ExternalLink, Globe, Search, Store, Tag, X } from "lucide-react";
+import { AlertTriangle, Bookmark, Check, ClipboardPaste, Copy, ExternalLink, Globe, MapPin, Search, Store, Tag, X } from "lucide-react";
+import Link from "next/link";
 import { Money } from "@/components/money";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -11,7 +12,7 @@ import { Sheet } from "@/components/ui/sheet";
 import { toast } from "@/components/ui/toast";
 import { api } from "@/lib/api";
 import { type CardsPage, shortDay } from "@/lib/cards";
-import { type OfferItem, type ReadOffers, type Sent, OFFER_PAGES, bookmarklet } from "@/lib/offers";
+import { type Near, type OfferItem, type ReadOffers, type Sent, OFFER_PAGES, bookmarklet } from "@/lib/offers";
 import { cn } from "@/lib/utils";
 
 const DEMO = "Saving offers is off while the app shows sample data.";
@@ -24,11 +25,13 @@ export function OffersCard({
   onSaved,
   onAdd,
   onSetup,
+  onNear,
 }: {
   s: CardsPage;
   onSaved: (p: CardsPage) => void;
   onAdd: () => void;
   onSetup: () => void;
+  onNear: () => void;
 }) {
   const [q, setQ] = useState("");
   const [all, setAll] = useState(false);
@@ -107,6 +110,9 @@ export function OffersCard({
               </Button>
             )}
             <div className="flex flex-wrap gap-2 border-t pt-4">
+              <Button size="sm" onClick={onNear}>
+                <MapPin aria-hidden /> Offers near me
+              </Button>
               <Button size="sm" variant="secondary" onClick={onSetup}>
                 <Bookmark aria-hidden /> Send again
               </Button>
@@ -472,5 +478,147 @@ function BookmarkSteps() {
         <pre className="mt-2 max-h-40 overflow-auto rounded-xl bg-muted p-3 text-xs break-all whitespace-pre-wrap">{code}</pre>
       </details>
     </div>
+  );
+}
+
+// ---- offers near me
+
+export function NearSheet({ demo, open, onOpenChange }: { demo: boolean; open: boolean; onOpenChange: (open: boolean) => void }) {
+  return (
+    <Sheet
+      open={open}
+      onOpenChange={onOpenChange}
+      title="Offers near me"
+      description="Your in-store offers at stores within a few minutes' walk. Online-only offers are left out."
+    >
+      {open && <NearForm demo={demo} />}
+    </Sheet>
+  );
+}
+
+function distance(m: number): string {
+  const feet = m * 3.281;
+  return feet < 1000 ? `${Math.round(feet / 10) * 10} ft` : `${(m / 1609).toFixed(1)} mi`;
+}
+
+function NearForm({ demo }: { demo: boolean }) {
+  const [busy, setBusy] = useState(false);
+  const [near, setNear] = useState<Near | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const look = () => {
+    if (demo) return setError("Offers near me is off while the app shows sample data.");
+    if (!("geolocation" in navigator)) return setError("This browser can't share your location.");
+    setBusy(true);
+    setError(null);
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        try {
+          setNear(await api<Near>("/api/cards/offers/near", { body: { lat: pos.coords.latitude, lon: pos.coords.longitude } }));
+        } catch (e) {
+          setError((e as Error).message);
+        } finally {
+          setBusy(false);
+        }
+      },
+      (e) => {
+        setBusy(false);
+        setError(
+          e.code === e.PERMISSION_DENIED
+            ? "Location is off for this site. In Settings, Apps, Safari, Location, allow it (Ask), then try again."
+            : "Couldn't find where you are. Try again in a moment.",
+        );
+      },
+      { enableHighAccuracy: false, timeout: 15_000, maximumAge: 60_000 },
+    );
+  };
+
+  return (
+    <div className="grid grid-cols-1 gap-4 text-sm">
+      <Button onClick={look} disabled={busy} className="justify-self-start">
+        <MapPin aria-hidden /> {busy ? "Looking around…" : near ? "Look again" : "Use my location"}
+      </Button>
+      {error && (
+        <p className="text-negative" role="alert">
+          {error}
+        </p>
+      )}
+      {near && (
+        <div aria-live="polite" className="grid grid-cols-1 gap-2">
+          {near.offers.length === 0 ? (
+            <p className="text-muted-foreground">
+              None of your offers are at the {near.stores} store{near.stores === 1 ? "" : "s"} around you.
+            </p>
+          ) : (
+            <ul className="grid grid-cols-1 gap-2">
+              {near.offers.map((o) => (
+                <li key={String(o.id)} className="rounded-2xl border p-3.5">
+                  <div className="flex items-baseline justify-between gap-2">
+                    <p className="font-medium">{o.store}</p>
+                    <p className="shrink-0 font-semibold tabular-nums">{o.label}</p>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {distance(o.meters)} away · {o.name} on {o.card}
+                    {o.ends && ` · ${o.ends}`}
+                  </p>
+                  {(o.how || o.check_terms) && (
+                    <ul className="mt-1.5 grid gap-0.5 text-xs text-warning">
+                      {o.how && <li>{o.how}</li>}
+                      {o.check_terms && <li>The bank&apos;s list didn&apos;t say it works in store. Check the offer&apos;s terms.</li>}
+                    </ul>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+      <p className="text-xs text-muted-foreground">
+        Your location is rounded to about 100 m and sent once to OpenStreetMap to list the stores around you. It isn&apos;t saved.
+      </p>
+      <ArriveSteps />
+    </div>
+  );
+}
+
+function ArriveSteps() {
+  const url = typeof window === "undefined" ? "" : `${window.location.origin}/hook/offers-here`;
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(url);
+      toast("Copied the address.");
+    } catch {
+      toast("Couldn't copy. Select the address and copy it.", "error");
+    }
+  };
+  return (
+    <details className="rounded-2xl border px-4 py-3">
+      <summary className="cursor-pointer font-medium">Get a push when you arrive at a store</summary>
+      <p className="mt-2 text-muted-foreground">
+        An iPhone Shortcuts automation can ask the app as you arrive somewhere you go often, and you get a push if one of your offers is there.
+        Set it up once per place.
+      </p>
+      <ol className="mt-2 grid list-decimal gap-1.5 pl-5 text-muted-foreground">
+        <li>
+          Make a key in{" "}
+          <Link href="/settings/agents" className="font-medium text-primary">
+            Settings, Agents
+          </Link>{" "}
+          called &quot;Shortcuts&quot;, and copy it.
+        </li>
+        <li>In the Shortcuts app: Automation, +, Arrive. Pick the store&apos;s location, and choose Run Immediately.</li>
+        <li>Add Get Current Location, then Get Contents of URL with this address:</li>
+      </ol>
+      <div className="mt-2 flex items-center gap-2">
+        <code className="min-w-0 flex-1 truncate rounded-lg bg-muted px-2.5 py-1.5 text-xs">{url}</code>
+        <Button size="sm" variant="secondary" onClick={copy}>
+          <Copy aria-hidden /> Copy
+        </Button>
+      </div>
+      <ol start={4} className="mt-2 grid list-decimal gap-1.5 pl-5 text-muted-foreground">
+        <li>Set Method to POST. Add a header: Authorization, with the value Bearer and then your key.</li>
+        <li>Set Request Body to JSON with two fields: lat (the location&apos;s Latitude) and lon (its Longitude).</li>
+      </ol>
+      <p className="mt-2 text-xs text-muted-foreground">Each offer pushes at most once a day, however often you arrive.</p>
+    </details>
   );
 }
