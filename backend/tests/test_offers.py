@@ -92,6 +92,26 @@ def test_reading_a_capital_one_offers_page():
     assert offers.issuer_of("notcapitalone.com", "") == "other"
 
 
+def test_capital_one_stores_shown_only_as_logos():
+    # Capital One's tiles show the store as a logo; the bookmark sends each picture's label as a line before it.
+    page = """Capital One Offers
+Venture X Card Art
+Recommended
+Walmart logo
+Up to 5% back
+Online
+Logo for Expedia
+5X miles
+Ends Nov 30
+Best Buy
+Up to $40 back
+"""
+    found = offers.parse(page, TODAY)
+    assert [r.merchant for r in found] == ["Walmart", "Expedia", "Best Buy"]
+    assert found[0].channel == "online" and found[1].expires == date(2026, 11, 30)
+    assert offers.parse("Venture X Card Art\nUp to 5% back", TODAY) == []
+
+
 def test_pages_with_no_offers_and_odd_text():
     assert offers.parse("Sign in\nUsername\nPassword", TODAY) == []
     assert offers.parse("Purchase APR 24.99%\nBalance $1,204.17", TODAY) == []

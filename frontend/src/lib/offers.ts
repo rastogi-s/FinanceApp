@@ -5,7 +5,8 @@
  * "Send to Finance" bookmark, or pasted.
  *
  * The bookmark runs only when tapped, on the page you have open. It keeps the lines around each offer ("5% cash
- * back", "$20 back", "5X miles") and the card's name, leaving out anything about balances, payments or account
+ * back", "$20 back", "5X miles") and the card's name, with each picture's label read as a line of its own (Capital One
+ * shows the store only as a logo), leaving out anything about balances, payments or account
  * numbers, and opens this app at /cards#offers=… with them. A #fragment
  * never goes to any server, and the Credit Cards page takes it out of the address as soon as it reads it.
  */
@@ -101,7 +102,10 @@ export function bookmarklet(origin: string): string {
   const js = `(()=>{
 const v=/(\\d+(\\.\\d+)?\\s?%|\\$\\d+(\\.\\d\\d)?|\\d+(\\.\\d)?\\s?x)\\s*(in\\s+)?(cash\\s?back|back|off|rewards?|statement credit|(the\\s+)?miles|(the\\s+)?points)/i;
 const c=/(\\.{2,3}|\\u2026|ending in|x{2,4})\\s?\\d{4}/i;
+const a=[];
+try{document.querySelectorAll('img[alt],[role=img][aria-label]').forEach(m=>{const t=(m.getAttribute('alt')||m.getAttribute('aria-label')||'').trim();if(t.length<2||t.length>60||!m.parentNode)return;const e=document.createElement('span');e.textContent=t;e.style.cssText='position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap';m.parentNode.insertBefore(e,m);a.push(e);});}catch(e){}
 const l=document.body.innerText.split(/\\n+/).map(s=>s.trim()).filter(Boolean);
+a.forEach(e=>e.remove());
 const k=new Set();let card='';
 const no=/balance|available|payment|statement|routing|account (number|ending)/i;
 l.forEach((s,i)=>{if(!card&&c.test(s)&&s.length<80&&!no.test(s))card=s;if(v.test(s))for(let j=Math.max(0,i-3);j<Math.min(l.length,i+5);j++)if(!no.test(l[j]))k.add(j);});
