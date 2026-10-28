@@ -24,6 +24,7 @@ from functools import cache
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
 
+from financeapp import offers as card_offers
 from financeapp.categorize import merchant_key, normalize_merchant
 from financeapp.config import PACKAGE_DIR
 from financeapp.models import Account, Balance, CardLink, CardStatement, Category, Preference, Transaction
@@ -587,8 +588,10 @@ def lookup(
     pick: str | None = None,
     kind: str | None = None,
     cents: int = SAMPLE_CENTS,
+    offers: list[card_offers.Offer] | None = None,
 ) -> dict:
-    """Type a store: the best card for it in store and online, and why."""
+    """Type a store: the best card for it in store and online, and why. A card's offer at the store (Chase Offers
+    and the like) counts on top of what the card earns there."""
     query = " ".join(query.split())[:80]
     seen = history_matches(purchases, query) if query else []
     known = known_merchant(query) if query else None
@@ -637,11 +640,26 @@ def lookup(
         ways |= set(CHANNELS) if merchant.get("channel", "both") == "both" else {merchant["channel"]}
     channels = [ch for ch in CHANNELS if ch in ways] or list(CHANNELS)
     usual = channels[0] if len(channels) == 1 else "both"
+    keys = {merchant_key(query)} if query else set()
+    if merchant:
+        keys |= {merchant_key(merchant["name"]), *merchant["keys"]}
+    if history:
+        keys.add(history["key"])
+    here = [o for o in offers or [] if any(card_offers.same_store(o.key, k) for k in keys if k)]
     results = {}
     for ch in channels:
         t = set(tags)
         finish(t, ch)
-        results[ch] = rank(cards, frozenset(t), ch, on, ledger, values, cents, merchant=merchant)
+        results[ch] = with_offers(
+            rank(cards, frozenset(t), ch, on, ledger, values, cents, merchant=merchant),
+            here,
+            cards,
+            ch,
+            on,
+            values,
+            cents,
+        )
+    labels = {c.account_id: c.label for c in cards}
     same = len(results) == 2 and _winner(results["in store"]) == _winner(results["online"])
     return {
         "query": query,
@@ -656,7 +674,38 @@ def lookup(
         "channels": [{"channel": ch, "cards": rows} for ch, rows in results.items()],
         "same": same,
         "kinds": _kinds(),
+        "offers": [{**card_offers.note_for(o, on), "card": labels.get(o.account_id, "Another card")} for o in here],
     }
+
+
+def with_offers(
+    rows: list[dict],
+    here: list[card_offers.Offer],
+    cards: list[Card],
+    channel: str,
+    on: date,
+    values: dict[str, float],
+    cents: int,
+) -> list[dict]:
+    """Adds each card's best offer at the store to what it earns, and ranks again."""
+    if not here:
+        return rows
+    by_id = {c.account_id: c for c in cards}
+    for row in rows:
+        card = by_id[row["account_id"]]
+        cpp = worth(card, values)
+        mine = [(card_offers.worth(o, cents, cpp), o) for o in here if o.account_id == card.account_id]
+        mine = [(v, o) for v, o in mine if card_offers.fits(o, channel)]
+        if not mine:
+            continue
+        v, o = max(mine, key=lambda m: m[0])
+        row["offer"] = {**card_offers.note_for(o, on), "value_cents": v}
+        row["value_cents"] += v
+        row["percent"] = round(row["value_cents"] / cents * 100, 2) if cents else 0
+        if not o.added:
+            row["warnings"].append(card_offers.WHERE.get(o.issuer, card_offers.WHERE["other"]))
+    rows.sort(key=lambda r: (r["blocked"], -r["value_cents"], -r["favor"], r["card"]))
+    return rows
 
 
 def purchases_there(n: int) -> str:
@@ -876,6 +925,7 @@ class Wallet:
     everything: list[Purchase]  # card and bank purchases, for what you spend and where you shop
     values: dict[str, float]
     on: date
+    offers: list[card_offers.Offer] = field(default_factory=list)  # Chase Offers and the like, not expired
 
     def ledger(self) -> Ledger:
         return replay(self.cards, self.purchases, date(self.on.year, 1, 1), self.values)
@@ -898,7 +948,7 @@ def wallet(db: DbSession, on: date, everything: bool = True) -> Wallet:
         bank = load_purchases(db, spending_ids, since)
     else:
         bank = []
-    return Wallet(cards, purchases, purchases + bank, values(db), on)
+    return Wallet(cards, purchases, purchases + bank, values(db), on, card_offers.load(db, on))
 
 
 def card_values(cards: list[Card], vals: dict[str, float]) -> list[dict]:
@@ -1102,7 +1152,57 @@ def assemble(w: Wallet, accounts: list[CardAccount], demo: bool = False) -> dict
         "card_values": card_values(w.cards, w.values),
         "catalog": [product_summary(p) for p in catalog()["cards"]],
         "checked": catalog()["checked"],
+        "offers": offers_section(w, rows),
     }
+
+
+def offers_section(w: Wallet, rows: list[dict]) -> dict:
+    """Your card offers, the ones at stores you shop at first, then the ones ending soonest."""
+    labels = {r["account_id"]: r["label"] for r in rows}
+    since = w.on - timedelta(days=HISTORY_DAYS)
+    items = []
+    for o in w.offers:
+        if o.account_id not in labels:
+            continue
+        count, spent = card_offers.visits(w.everything, o, since)
+        items.append(
+            {
+                "id": o.id,
+                "account_id": o.account_id,
+                "card": labels[o.account_id],
+                "issuer": o.issuer,
+                "name": card_offers.OFFER_NAMES.get(o.issuer, "Card offer"),
+                "merchant": o.merchant,
+                "label": o.label,
+                "kind": o.kind,
+                "value": o.value,
+                "channel": o.channel,
+                "min_spend_cents": o.min_spend_cents,
+                "max_cents": o.max_cents,
+                "expires": o.expires.isoformat() if o.expires else None,
+                "ends": card_offers.ends_note(o, w.on),
+                "soon": card_offers.ending_soon(o, w.on),
+                "added": o.added,
+                "how": None if o.added else card_offers.WHERE.get(o.issuer, card_offers.WHERE["other"]),
+                "visits": count,
+                "spent_cents": spent,
+            }
+        )
+    items.sort(key=lambda x: (x["visits"] == 0, not x["soon"], -x["spent_cents"], x["merchant"].lower()))
+    cards_with = []
+    for aid in dict.fromkeys(o.account_id for o in w.offers if o.account_id in labels):
+        mine = [o for o in w.offers if o.account_id == aid]
+        seen = max((o.seen for o in mine if o.seen), default=None)
+        cards_with.append(
+            {
+                "account_id": aid,
+                "card": labels[aid],
+                "issuer": mine[0].issuer,
+                "count": len(mine),
+                "seen": seen.isoformat() if seen else None,
+            }
+        )
+    return {"items": items, "cards": cards_with}
 
 
 def caps(card: Card, ledger: Ledger, on: date) -> list[dict]:

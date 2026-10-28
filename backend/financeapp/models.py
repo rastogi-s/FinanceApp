@@ -625,3 +625,26 @@ class CardStatement(Base):
     last_payment_cents: Mapped[int | None] = mapped_column(BigInteger)
     last_payment_date: Mapped[date | None] = mapped_column(Date)
     overdue: Mapped[bool | None] = mapped_column(Boolean)
+
+
+class CardOffer(Base):
+    """A bank's offer on one card at one store (Chase Offers, Capital One Offers), read from its offers page by the
+    Send to Finance bookmark or pasted text (offers.py). Each send replaces the card's list."""
+
+    __tablename__ = "card_offers"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id", ondelete="CASCADE"), index=True)
+    issuer: Mapped[str] = mapped_column(String(16))  # chase | capital_one | other
+    merchant: Mapped[str] = mapped_column(String(80))  # as the bank wrote it
+    key: Mapped[str] = mapped_column(String(80))  # categorize.merchant_key of it
+    kind: Mapped[str] = mapped_column(String(12))  # percent | amount | multiplier
+    value: Mapped[Decimal] = mapped_column(Numeric(10, 2))  # 5 for 5%, 20 for $20, 5 for 5X
+    up_to: Mapped[bool] = mapped_column(Boolean, default=False)
+    min_spend_cents: Mapped[int | None] = mapped_column(BigInteger)
+    max_cents: Mapped[int | None] = mapped_column(BigInteger)
+    channel: Mapped[str | None] = mapped_column(String(8))  # online | in store | None: either
+    expires: Mapped[date | None] = mapped_column(Date)
+    soon: Mapped[bool] = mapped_column(Boolean, default=False)  # "expiring soon", no date given
+    added: Mapped[bool | None] = mapped_column(Boolean)  # added to the card; None: the page didn't say
+    first_seen: Mapped[date] = mapped_column(Date)
+    seen: Mapped[date] = mapped_column(Date)  # the last send it was in

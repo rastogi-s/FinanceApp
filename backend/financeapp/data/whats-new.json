@@ -1,5 +1,28 @@
 [
   {
+    "version": "0.48.0",
+    "title": "Chase Offers and Capital One Offers in the app",
+    "features": [
+      {
+        "id": "card-offers",
+        "title": "Your card offers, where you shop",
+        "body": "Credit cards now has a Card offers list: your Chase Offers and Capital One Offers, with the ones at stores you already shop at first, when each ends, and which aren't added to the card yet. Take one off once you've used it.",
+        "tryIt": "/cards"
+      },
+      {
+        "id": "card-offers-bookmark",
+        "title": "Send offers with one tap",
+        "body": "Set up the Send to Finance bookmark once. Then open Chase Offers or Capital One Offers in Safari, tap the bookmark, check the card and save. It never sees your bank password and doesn't run in the background. Pasting the page's text works too.",
+        "tryIt": "/cards"
+      },
+      {
+        "id": "card-offers-lookup",
+        "title": "Offers count in Which card here?",
+        "body": "Type a store and an offer on one of your cards is added to what that card earns there, so a 5% Chase Offer can make it the best card. You also get a push a few days before an offer ends at a store you shop at, and Claude's best card answer includes offers."
+      }
+    ]
+  },
+  {
     "version": "0.47.0",
     "title": "Your card when cards tie, and points worth more on some cards",
     "features": [

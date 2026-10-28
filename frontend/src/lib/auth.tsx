@@ -4,6 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState } f
 import { usePathname, useRouter } from "next/navigation";
 import { api, setApiHandlers, setCsrf } from "@/lib/api";
 import { resetHousehold } from "@/lib/household";
+import { hasKept, keepSent } from "@/lib/offers";
 
 export type User = { id: number; name: string; email: string; role: "owner" | "member" };
 type AuthState =
@@ -110,8 +111,10 @@ export function AuthProvider({ children, reauth }: { children: React.ReactNode; 
     if (state.status === "loading") return;
     if (state.status === "setup" && pathname !== "/setup" && !pathname.startsWith("/welcome")) router.replace("/setup");
     if (state.status === "signed-out" && !isPublic(pathname)) {
+      keepSent(); // card offers sent by the bookmark wait in this tab until you're signed in
       router.replace(state.reason === "idle" ? "/signin?idle=1" : "/signin");
     }
+    if (state.status === "signed-in" && hasKept() && pathname !== "/cards") router.replace("/cards");
   }, [state, pathname, router]);
 
   return <AuthContext.Provider value={{ state, refresh, signedIn, signOut }}>{children}</AuthContext.Provider>;

@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { AlertTriangle, ChevronRight, CreditCard, Globe, Search, Sparkles, Store, X } from "lucide-react";
+import { AlertTriangle, ChevronRight, CreditCard, Globe, Search, Sparkles, Store, Tag, X } from "lucide-react";
 import { CardFace, CardSheet, ValuesSheet, Chip, setPrefer } from "@/components/card-sheets";
+import { BookmarkSheet, ImportSheet, OffersCard } from "@/components/offer-sheets";
 import { Money } from "@/components/money";
 import { BackLink, Notice } from "@/components/page";
 import { Badge } from "@/components/ui/badge";
@@ -13,6 +14,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "@/lib/api";
 import { type BestRow, type CardRow, type CardsPage, type Lookup, type Missed, type Ranked, daysUntil, shortDay } from "@/lib/cards";
 import { useApi } from "@/lib/household";
+import { type Sent, takeSent } from "@/lib/offers";
 import { cn } from "@/lib/utils";
 
 export default function CardsPageView() {
@@ -20,7 +22,21 @@ export default function CardsPageView() {
   const [local, setLocal] = useState<CardsPage | null>(null);
   const [open, setOpen] = useState<number | null>(null);
   const [values, setValues] = useState(false);
+  const [sent, setSent] = useState<Sent | null>(null);
+  const [adding, setAdding] = useState(false);
+  const [setup, setSetup] = useState(false);
   const s = local ?? data;
+
+  // Offers sent by the bookmark arrive in the address (#offers=…); take them out of it straight away.
+  useEffect(() => {
+    const found = takeSent();
+    if (!found) return;
+    // Taken once (the address is cleared), so this runs even if the effect is run twice in development.
+    queueMicrotask(() => {
+      setSent(found);
+      setAdding(true);
+    });
+  }, []);
   const row = s?.cards.find((c) => c.account_id === open) ?? null;
 
   return (
@@ -53,6 +69,15 @@ export default function CardsPageView() {
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <StoreLookup hasCards={s.cards.some((c) => c.linked && c.role === "active")} />
           <Wallet s={s} onOpen={setOpen} />
+          <OffersCard
+            s={s}
+            onSaved={setLocal}
+            onAdd={() => {
+              setSent(null);
+              setAdding(true);
+            }}
+            onSetup={() => setSetup(true)}
+          />
           <BestByCategory s={s} onSaved={setLocal} />
           <MissedPoints s={s} />
           <PointValues s={s} onEdit={() => setValues(true)} />
@@ -62,6 +87,8 @@ export default function CardsPageView() {
         <>
           <CardSheet row={row} page={s} open={row !== null} onOpenChange={(o) => !o && setOpen(null)} onSaved={setLocal} />
           <ValuesSheet page={s} open={values} onOpenChange={setValues} onSaved={setLocal} />
+          <ImportSheet page={s} sent={sent} open={adding} onOpenChange={setAdding} onSaved={setLocal} />
+          <BookmarkSheet open={setup} onOpenChange={setSetup} />
         </>
       )}
     </>
@@ -224,6 +251,7 @@ function LookupResult({ r, onKind }: { r: Lookup; onKind: (k: string | null) => 
                       <li key={c.account_id} className={cn("flex items-center gap-2", c.blocked && "text-muted-foreground")}>
                         <Dot color={c.color} />
                         <span className="min-w-0 flex-1 truncate">{c.card}</span>
+                        {c.offer && <Tag className="size-3.5 shrink-0 text-positive" aria-label={`${c.offer.name}: ${c.offer.label}`} />}
                         <span className="shrink-0 tabular-nums">{c.blocked ? "Not taken" : c.rate}</span>
                         <span className="w-14 shrink-0 text-right tabular-nums">
                           <Money cents={c.value_cents} style="exact" />
@@ -258,8 +286,17 @@ function Winner({ r }: { r: Ranked }) {
           </p>
         </div>
       </div>
-      {(r.cap || r.portal || r.warnings.length > 0) && (
+      {(r.cap || r.portal || r.offer || r.warnings.length > 0) && (
         <ul className="mt-2.5 grid grid-cols-1 gap-1 text-xs">
+          {r.offer && (
+            <li className="flex items-start gap-1 font-medium text-positive">
+              <Tag className="mt-px size-3.5 shrink-0" aria-hidden />
+              <span>
+                {r.offer.name}: {r.offer.label}
+                {r.offer.ends && <span className="font-normal text-muted-foreground"> · {r.offer.ends}</span>}
+              </span>
+            </li>
+          )}
           {r.cap && <li className="text-muted-foreground">{r.cap}</li>}
           {r.portal && (
             <li className="flex items-center gap-1 text-primary">
