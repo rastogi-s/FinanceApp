@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useSyncExternalStore } from "react";
 import { ChartPie, Eye, EyeOff, House, PiggyBank, ReceiptText, Settings, TrendingUp } from "lucide-react";
+import { AlertsBell } from "@/components/alerts-bell";
 import { PullToRefresh } from "@/components/pull-to-refresh";
 import { ReauthDialog, requestReauth } from "@/components/reauth";
 import { Button } from "@/components/ui/button";
@@ -120,6 +121,9 @@ const WIDE_MAIN =
 const WIDE_HEADER =
   "xl:group-has-[[data-wide]]/shell:max-w-6xl xl:group-has-[[data-wide]]/shell:px-6 2xl:group-has-[[data-wide]]/shell:max-w-[88rem] 2xl:group-has-[[data-wide]]/shell:px-8 3xl:group-has-[[data-wide]]/shell:max-w-none";
 
+// Top bar buttons: 44px to tap on a phone (Apple's minimum) with 20px icons, 40px for a mouse.
+const TOP_ICON = "size-11 [&_svg]:size-5 md:size-10";
+
 function PrivateShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const meta = useMeta();
@@ -177,10 +181,12 @@ function PrivateShell({ children }: { children: React.ReactNode }) {
             {meta?.demo && (
               <span className="ml-1 rounded-full bg-warning/10 px-2.5 py-0.5 text-xs font-medium text-warning">Sample data</span>
             )}
-            <div className="ml-auto flex items-center gap-1">
+            <div className="-mr-1.5 ml-auto flex items-center md:mr-0 md:gap-1">
+              <AlertsBell demo={!!meta?.demo} className={TOP_ICON} />
               <Button
                 variant="ghost"
                 size="icon"
+                className={TOP_ICON}
                 onClick={togglePrivacy}
                 aria-pressed={privacy}
                 aria-label={privacy ? "Show amounts" : "Hide amounts"}
@@ -188,7 +194,7 @@ function PrivateShell({ children }: { children: React.ReactNode }) {
               >
                 {privacy ? <EyeOff /> : <Eye />}
               </Button>
-              <Button variant="ghost" size="icon" asChild>
+              <Button variant="ghost" size="icon" className={TOP_ICON} asChild>
                 <Link href="/settings" aria-label="Settings" title="Settings" data-tab="settings">
                   <Settings />
                 </Link>
