@@ -411,7 +411,7 @@ function BookmarkSteps() {
           <li>
             Tap <span className="font-medium text-foreground">Copy the bookmark</span> below.
           </li>
-          <li>In Safari, bookmark any page (Share, Add Bookmark) and name it &quot;Send to Finance&quot;.</li>
+          <li>In Safari, bookmark any page (Share, Add Bookmark), name it &quot;Send to Finance&quot; and save it in Favorites.</li>
           <li>Open Bookmarks, tap Edit, open the new bookmark, clear its address and paste. Save.</li>
         </ol>
         <Button onClick={copy} className="justify-self-start">
@@ -458,8 +458,9 @@ function BookmarkSteps() {
         <ol start={2} className="grid list-decimal gap-1.5 pl-5 text-muted-foreground">
           <li>Scroll to the bottom so every offer loads.</li>
           <li>
-            On iPhone, tap the address bar and type <span className="font-medium text-foreground">Send</span>, then tap the bookmark. On a laptop,
-            click it.
+            On iPhone, tap the address bar once without typing, then tap{" "}
+            <span className="font-medium text-foreground">Send to Finance</span> in Favorites. Typing its name runs it as
+            typed text, which Safari blocks (&quot;Cannot Run Script&quot;). On a laptop, click it.
           </li>
           <li>This app opens with the offers. Check the card and tap Save. Do it once per card.</li>
         </ol>

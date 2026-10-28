@@ -74,7 +74,8 @@ NOISE = re.compile(
     r"in store|online only|in-store only|online & in-store|details|view details|see details|terms|shop now|"
     r"chase offers|capital one offers|offers|my offers|earned|search|filter|sort|sort by|show more|load more|"
     r"view all|see all|back|menu|close|\+|⊕|✓|✔|[\d$.,% ]+|.*\bearned\b.*|.*\boffers?\b.*\bavailable\b.*|"
-    r"fresh for \w+|featured offers|popular|trending|ends soon|last day|new offers?|\d+ days? left)$",
+    r"fresh for \w+|featured offers|popular|trending|ends soon|last day|new offers?|\d+ days? left|"
+    r"image|icon|.*\bcard art\b.*|capital one|chase)$",
     re.I,
 )
 
@@ -143,12 +144,15 @@ def _value(line: str) -> tuple[re.Match, str] | None:
 
 
 CAP_LINE = re.compile(r" ?(?:max(?:imum)?|limit|cap)\b", re.I)
+LOGO = re.compile(r"^(?:(?:merchant|brand|store) )?logo(?: (?:for|of))?\b|\b(?:(?:merchant|brand|store) )?logo$", re.I)
 PUNCT = " -\u2013\u2014:|•·,"  # spaces, dashes and bullets around a name
 
 
 def _store_name(text: str) -> str | None:
     name = " ".join(text.split()).strip(PUNCT)
     name = re.sub(r"^(?:earn|get|enjoy|save)\b|\b(?:earn|get|enjoy|save)$", "", name, flags=re.I).strip(PUNCT)
+    # A logo's label, which the bookmark reads as a line: "Walmart logo", "Logo for Walmart".
+    name = LOGO.sub("", name).strip(PUNCT)
     if len(name) < 2 or len(name) > 60 or not re.search(r"[A-Za-z]{2}", name) or NOISE.fullmatch(name):
         return None
     if _value(name) or DAYS_LEFT.search(name) or ENDS_DATE.search(name) or ENDS_NAMED.search(name):
