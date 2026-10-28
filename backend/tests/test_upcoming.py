@@ -1,6 +1,6 @@
 from datetime import date, timedelta
 
-from financeapp import offers, upcoming
+from financeapp import cardpay, offers, upcoming
 from financeapp.models import CardStatement, Paycheck
 from tests.conftest import csrf, needs_db
 
@@ -29,18 +29,16 @@ def test_card_dues_only_within_the_window_and_with_a_balance():
     def due(days, cents, minimum=None):
         return CardStatement(due_date=TODAY + timedelta(days=days), statement_cents=cents, minimum_cents=minimum)
 
-    rows = upcoming.card_dues(
-        [
-            ("Amex Gold ••1008", due(6, 2_140_00, 40_00)),
-            ("Sapphire ••9012", due(30, 500_00)),  # too far
-            ("Freedom ••1111", due(3, 0)),  # nothing owed
-            ("Venture ••2222", due(-1, 80_00)),  # past
-        ],
-        TODAY,
-        END,
-    )
-    assert [(r["title"], r["cents"], r["detail"]) for r in rows] == [
-        ("Amex Gold ••1008 due", -2_140_00, "Statement balance, $40 minimum")
+    rows = [
+        (1, "Amex Gold ••1008", due(6, 2_140_00, 40_00)),
+        (2, "Sapphire ••9012", due(30, 500_00)),  # too far
+        (3, "Freedom ••1111", due(3, 0)),  # nothing owed
+        (4, "Venture ••2222", due(-5, 80_00)),  # long past
+    ]
+    payments = {i: p for i, _, s in rows if (p := cardpay.work_out(s, 0, None, TODAY))}
+    got = upcoming.card_dues(rows, payments, TODAY, END)
+    assert [(r["title"], r["cents"], r["detail"]) for r in got] == [
+        ("Amex Gold ••1008 due", -2_140_00, "Statement balance, not paid yet")
     ]
 
 

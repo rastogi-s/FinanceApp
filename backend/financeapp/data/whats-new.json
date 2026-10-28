@@ -1,5 +1,23 @@
 [
   {
+    "version": "0.57.0",
+    "title": "Card payments: paid or not, and a nudge before they're due",
+    "features": [
+      {
+        "id": "card-paid-status",
+        "title": "See if a card statement is already paid",
+        "body": "Coming up on Home now says Paid when a card's statement is paid in full since it closed. If it's only part paid, you see how much is paid and what's left; if nothing's paid yet, what's left and the minimum. The same shows on each card on Credit cards. Payments are read from the card's own activity and the bank's last payment.",
+        "tryIt": "/"
+      },
+      {
+        "id": "card-due-alert",
+        "title": "An automatic alert before a card payment is due",
+        "body": "No rule needed: if a statement isn't paid in full, you get a push 3 days before the due date, on the day, and the day after if it's still unpaid. Each goes out once per statement, waits for quiet hours, and is dropped the moment the statement is paid. Tapping it opens that card. The push never shows an amount.",
+        "tryIt": "/cards"
+      }
+    ]
+  },
+  {
     "version": "0.56.0",
     "title": "Ask AI about any stock or fund",
     "features": [

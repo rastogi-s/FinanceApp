@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { AlertTriangle, ChevronRight, CreditCard, Globe, Search, Sparkles, Store, Tag, X } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ChevronRight, CreditCard, Globe, Search, Sparkles, Store, Tag, X } from "lucide-react";
 import { CardFace, CardSheet, ValuesSheet, Chip, setPrefer } from "@/components/card-sheets";
 import { BookmarkSheet, ImportSheet, NearSheet, OffersCard } from "@/components/offer-sheets";
 import { Money } from "@/components/money";
@@ -37,6 +37,11 @@ export default function CardsPageView() {
       setSent(found);
       setAdding(true);
     });
+  }, []);
+  // A push about a card payment opens that card (/cards?card=ID).
+  useEffect(() => {
+    const id = Number(new URLSearchParams(window.location.search).get("card"));
+    if (id) queueMicrotask(() => setOpen(id));
   }, []);
   const row = s?.cards.find((c) => c.account_id === open) ?? null;
 
@@ -347,6 +352,7 @@ function Wallet({ s, onOpen }: { s: CardsPage; onOpen: (id: number) => void }) {
 
 function WalletCard({ c, asOf, onOpen }: { c: CardRow; asOf: string; onOpen: () => void }) {
   const due = c.statement?.due_date;
+  const pay = c.statement?.payment ?? null;
   const days = due ? daysUntil(due, asOf) : null;
   return (
     <button type="button" onClick={onOpen} className="group block w-full text-left" aria-label={`${c.label}: details`}>
@@ -369,7 +375,16 @@ function WalletCard({ c, asOf, onOpen }: { c: CardRow; asOf: string; onOpen: () 
             </p>
           </>
         )}
-        {due && c.statement?.minimum_cents !== null && c.statement?.minimum_cents !== undefined && (
+        {pay?.state === "paid" ? (
+          <p className="flex items-center gap-1 text-xs font-medium text-positive">
+            <CheckCircle2 className="size-3.5" aria-hidden /> Statement paid in full
+          </p>
+        ) : pay ? (
+          <p className={cn("text-xs", pay.state === "late" ? "font-medium text-negative" : days !== null && days <= 3 ? "font-medium text-warning" : "text-muted-foreground")}>
+            <Money cents={pay.left_cents} style="exact" /> left to pay {pay.state === "late" ? "(past due)" : `by ${shortDay.format(new Date(pay.due_date))}`}
+            {pay.state !== "late" && days !== null && days >= 0 && days <= 7 ? ` (${days === 0 ? "today" : days === 1 ? "tomorrow" : `in ${days} days`})` : ""}
+          </p>
+        ) : due && c.statement?.minimum_cents !== null && c.statement?.minimum_cents !== undefined && (
           <p className={cn("text-xs", days !== null && days <= 3 ? "font-medium text-warning" : "text-muted-foreground")}>
             <Money cents={c.statement.minimum_cents} style="exact" /> minimum due {shortDay.format(new Date(due))}
             {days !== null && days >= 0 && days <= 7 ? ` (${days === 0 ? "today" : days === 1 ? "tomorrow" : `in ${days} days`})` : ""}

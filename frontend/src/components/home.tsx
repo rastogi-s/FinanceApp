@@ -28,6 +28,7 @@ import { UploadSheet } from "@/components/upload-sheet";
 import { type UploadDue, dueLabel, shortDate } from "@/lib/accounts";
 import { api } from "@/lib/api";
 import { type ColorName, type Goal, type GoalsState, monthYear } from "@/lib/goals";
+import type { CardPayment } from "@/lib/cards";
 import { type LinkedHousehold, type Maturing, resetHousehold, useApi, useHousehold } from "@/lib/household";
 import { GROUP_COLOR, type NetWorth, type NetWorthWindow } from "@/lib/networth";
 import { monthOf } from "@/lib/search";
@@ -672,8 +673,48 @@ export function Movers({ h, className }: { h: LinkedHousehold; className?: strin
 export type Upcoming = {
   as_of: string;
   days: number;
-  events: { date: string; kind: "pay" | "card" | "cd" | "dividend" | "offer"; title: string; detail: string; cents: number | null; href: string | null }[];
+  events: {
+    date: string;
+    kind: "pay" | "card" | "cd" | "dividend" | "offer";
+    title: string;
+    detail: string;
+    cents: number | null;
+    href: string | null;
+    /** Card payments: paid since the statement, and what's left (backend cardpay.py). */
+    payment?: CardPayment & { minimum_cents: number | null };
+  }[];
 };
+
+/** A card payment's second line: paid in full, how much is paid so far, or not paid yet with the minimum. Amounts
+ * go through Money so Hide amounts covers them. */
+function cardDetail(p: NonNullable<Upcoming["events"][number]["payment"]>) {
+  const late = p.state === "late" && <span className="font-medium text-negative">Past due · </span>;
+  if (p.state === "paid")
+    return (
+      <>
+        <Money cents={p.statement_cents} /> statement paid in full
+      </>
+    );
+  if (p.paid_cents > 0)
+    return (
+      <>
+        {late}
+        <Money cents={p.paid_cents} /> of <Money cents={p.statement_cents} /> paid
+      </>
+    );
+  return (
+    <>
+      {late}
+      Not paid yet
+      {p.minimum_cents ? (
+        <>
+          {" · "}
+          <Money cents={p.minimum_cents} /> minimum
+        </>
+      ) : null}
+    </>
+  );
+}
 
 const weekday = new Intl.DateTimeFormat("en-US", { weekday: "short", timeZone: "UTC" });
 const monthShort = new Intl.DateTimeFormat("en-US", { month: "short", timeZone: "UTC" });
@@ -706,9 +747,18 @@ export function ComingUp({ data, className }: { data: Upcoming | null; className
                   </span>
                   <span className="min-w-0 flex-1">
                     <span className="block text-sm font-medium wrap-anywhere">{e.title}</span>
-                    <span className="block text-xs text-muted-foreground">{e.detail}</span>
+                    <span className="block text-xs text-muted-foreground">{e.payment ? cardDetail(e.payment) : e.detail}</span>
                   </span>
-                  {e.cents !== null && (
+                  {e.payment?.state === "paid" ? (
+                    <span className="flex shrink-0 items-center gap-1 rounded-full bg-positive/12 px-2 py-0.5 text-xs font-medium text-positive">
+                      <CheckCircle2 className="size-3.5" aria-hidden /> Paid
+                    </span>
+                  ) : e.payment ? (
+                    <span className="shrink-0 text-right leading-tight">
+                      <Money cents={-e.payment.left_cents} className={cn("block text-sm font-medium", e.payment.state === "late" && "text-negative")} />
+                      <span className="text-[11px] text-muted-foreground">left to pay</span>
+                    </span>
+                  ) : e.cents !== null && (
                     <Money cents={e.cents} signed={e.cents > 0} className={cn("text-sm font-medium", e.cents > 0 && "text-positive")} />
                   )}
                 </>

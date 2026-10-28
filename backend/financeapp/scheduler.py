@@ -3,8 +3,8 @@ prices every QUOTE_INTERVAL_MINUTES while markets are open (each followed by a c
 concentration alerts; after the close, a year of daily prices for the dip alerts' trends), funds' holdings for
 look-through once a week, each holding's dividend history and the market's deposit rates once a day, the morning
 brief at the time the owner picked, whether a newer version is out every few hours, and once an hour whether an
-uploaded or typed-in account is due a new statement (reminders.py), a CD is about to mature (deposits.py) or a card
-offer at a store you shop at is about to end (offers.py).
+uploaded or typed-in account is due a new statement (reminders.py), a CD is about to mature (deposits.py), a card
+offer at a store you shop at is about to end (offers.py) or a card statement is due and not paid (cardpay.py).
 
 It checks every minute whether each is due, from what's saved in the database, so restarts and updates don't cause
 extra runs, and the sync's own database lock means two copies of the app never sync at once. It also clears out
@@ -17,7 +17,20 @@ from datetime import datetime, timedelta
 
 from sqlalchemy import delete, select
 
-from financeapp import alerts, brief, deposits, income, lookthrough, offers, quotes, rates, reminders, sync, updates
+from financeapp import (
+    alerts,
+    brief,
+    cardpay,
+    deposits,
+    income,
+    lookthrough,
+    offers,
+    quotes,
+    rates,
+    reminders,
+    sync,
+    updates,
+)
 from financeapp.config import Settings
 from financeapp.db import Database
 from financeapp.models import Challenge, Connection, Session, SyncRun, now
@@ -78,7 +91,7 @@ class Scheduler:
             self.reminders_checked = now()
             with self.database.session() as db:
                 on = reminders.local_today(db)
-                if reminders.queue(db, on) + deposits.queue(db, on) + offers.queue(db, on):
+                if reminders.queue(db, on) + deposits.queue(db, on) + offers.queue(db, on) + cardpay.queue(db, on):
                     alerts.send_pending(db, self.settings)
         brief.run(self.database, self.settings)
 

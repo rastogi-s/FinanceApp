@@ -1,7 +1,8 @@
 """What's coming up in the next two weeks, for Home: paydays, card payments due, CDs maturing, expected dividends and
 card offers about to end. Each comes from the page that already works it out:
 - paydays: each person's latest pay stub that says how often they're paid (budget.next_payday), for what it paid.
-- card payments: each card's latest statement with a due date (CardStatement, from Plaid's liabilities).
+- card payments: each card's latest statement with a due date (CardStatement, from Plaid's liabilities), and whether
+  it's been paid since (cardpay): paid, part paid with what's left, or not yet.
 - CDs: deposits.maturing, the same list Home's "Needs you" shows (out to 30 days, since a CD needs deciding early).
 - dividends: Dividends & interest's expected payments (income.build), at each holding's usual amount.
 - offers: card offers ending within a week (offers.load).
@@ -13,7 +14,7 @@ from datetime import date, timedelta
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
 
-from financeapp import budget, cards, deposits, household, income, offers
+from financeapp import budget, cardpay, cards, deposits, household, income, offers
 from financeapp.models import Account, CardLink, CardStatement, Paycheck, User
 
 DAYS = 14
@@ -58,15 +59,31 @@ def paydays(stubs: list[Paycheck], people: dict[int, str], today: date) -> list[
     return out
 
 
-def card_dues(statements: list[tuple[str, CardStatement]], today: date, end: date) -> list[dict]:
+def card_dues(
+    statements: list[tuple[int, str, CardStatement]], payments: dict[int, cardpay.Payment], today: date, end: date
+) -> list[dict]:
+    """Each card statement due in the window, or gone by unpaid in the last few days, with whether it's been paid
+    (cardpay). The amount is what's left to pay; a paid one has none. `payment` carries the numbers so the page can
+    show them (and hide them with the rest)."""
     out = []
-    for name, s in statements:
-        if not s.due_date or not today <= s.due_date <= end or not s.statement_cents or s.statement_cents <= 0:
+    for account_id, name, s in statements:
+        p = payments.get(account_id)
+        if p is None or not s.due_date:
             continue
-        detail = "Statement balance"
-        if s.minimum_cents:
-            detail += f", ${s.minimum_cents / 100:,.0f} minimum"
-        out.append(event(s.due_date, "card", f"{name} due", detail, -s.statement_cents, "/cards"))
+        late = p.state == "late" and (today - s.due_date).days <= cardpay.LATE_DAYS
+        if not (today <= s.due_date <= end or late):
+            continue
+        if p.state == "paid":
+            title, detail, cents = f"{name} paid", "Statement paid in full", None
+        elif p.state == "partial":
+            title, detail, cents = f"{name} due", "Part paid, the rest is left", -p.left_cents
+        elif p.state == "late":
+            title, detail, cents = f"{name} past due", "Not paid in full yet", -p.left_cents
+        else:
+            title, detail, cents = f"{name} due", "Statement balance, not paid yet", -p.left_cents
+        row = event(s.due_date, "card", title, detail, cents, f"/cards?card={account_id}")
+        row["payment"] = {**p.json(), "minimum_cents": s.minimum_cents}
+        out.append(row)
     return out
 
 
@@ -128,9 +145,10 @@ def build(db: DbSession, today: date) -> dict:
     links = {link.account_id: link for link in db.scalars(select(CardLink).where(CardLink.account_id.in_(card_ids)))}
     card_names = {a.id: cards.label_of(a, links.get(a.id)) for a in accounts if a.id in card_ids}
     statements = [
-        (card_names[s.account_id], s)
+        (s.account_id, card_names[s.account_id], s)
         for s in db.scalars(select(CardStatement).where(CardStatement.account_id.in_(card_ids)))
     ]
+    payments = cardpay.load(db, today, card_ids)
 
     cd_accounts: list[Account] = [a for a in accounts if deposits.kind_of(a) == "cd"]
     maturing = deposits.maturing(deposits.build(db, cd_accounts, today), names) if cd_accounts else []
@@ -142,7 +160,7 @@ def build(db: DbSession, today: date) -> dict:
         "days": DAYS,
         "events": merge(
             paydays(stubs, people, today),
-            card_dues(statements, today, end),
+            card_dues(statements, payments, today, end),
             cds(maturing),
             dividends(expected, today, end),
             ending_offers(offers.load(db, today), card_names, today),

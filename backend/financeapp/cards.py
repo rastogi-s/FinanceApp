@@ -24,6 +24,7 @@ from functools import cache
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
 
+from financeapp import cardpay
 from financeapp import offers as card_offers
 from financeapp.categorize import merchant_key, normalize_merchant
 from financeapp.config import PACKAGE_DIR
@@ -1058,7 +1059,7 @@ class CardAccount:
     statement: dict | None = None
 
 
-def statement_json(s: CardStatement) -> dict:
+def statement_json(s: CardStatement, payment: cardpay.Payment | None = None) -> dict:
     def iso(d: date | None) -> str | None:
         return d.isoformat() if d else None
 
@@ -1073,6 +1074,7 @@ def statement_json(s: CardStatement) -> dict:
         "last_payment_date": iso(s.last_payment_date),
         "overdue": s.overdue,
         "as_of": iso(s.as_of),
+        "payment": payment.json() if payment else None,  # paid since the statement, and what's left (cardpay)
     }
 
 
@@ -1081,6 +1083,7 @@ def page(db: DbSession, on: date) -> dict:
     w = wallet(db, on)
     _, accounts, links = load_cards(db)
     statements = {s.account_id: s for s in db.scalars(select(CardStatement))}
+    payments = cardpay.load(db, on)
     rows = []
     for a in accounts:
         bal = db.scalar(select(Balance).where(Balance.account_id == a.id).order_by(Balance.date.desc()).limit(1))
@@ -1095,7 +1098,7 @@ def page(db: DbSession, on: date) -> dict:
                 balance_cents=bal.current_cents if bal else None,
                 balance_as_of=bal.date if bal else None,
                 limit_cents=a.credit_limit_cents,
-                statement=statement_json(s) if s else None,
+                statement=statement_json(s, payments.get(a.id)) if s else None,
             )
         )
     return assemble(w, rows)

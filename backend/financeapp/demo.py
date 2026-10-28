@@ -220,9 +220,21 @@ def upcoming_events(today: date | None = None) -> dict:
     today = today or datetime.now(UTC).date()
     end = today + timedelta(days=upcoming.DAYS)
     stub = Paycheck(user_id=0, frequency="biweekly", date=today - timedelta(days=4), net_cents=_cents(2_600))
-    statement = CardStatement(
-        due_date=today + timedelta(days=6), statement_cents=_cents(2_140), minimum_cents=_cents(40)
-    )
+    from financeapp import cardpay
+
+    # One card part paid, one paid in full.
+    gold = CardStatement(
+        due_date=today + timedelta(days=6), statement_cents=_cents(2_140), minimum_cents=_cents(40),
+        statement_date=today - timedelta(days=19),
+    )  # fmt: skip
+    sapphire = CardStatement(
+        due_date=today + timedelta(days=3), statement_cents=_cents(1_312), minimum_cents=_cents(35),
+        statement_date=today - timedelta(days=22),
+    )  # fmt: skip
+    payments = {
+        4: cardpay.work_out(gold, _cents(800), None, today),
+        2: cardpay.work_out(sapphire, _cents(1_312), None, today),
+    }
     bnd = {
         "symbol": "BND", "pay_date": (today + timedelta(days=5)).isoformat(), "cents": _cents(118), "reinvesting": True
     }  # fmt: skip
@@ -231,7 +243,9 @@ def upcoming_events(today: date | None = None) -> dict:
         "days": upcoming.DAYS,
         "events": upcoming.merge(
             upcoming.paydays([stub], {0: "Sample"}, today),
-            upcoming.card_dues([("Amex Gold ••1008", statement)], today, end),
+            upcoming.card_dues(
+                [(4, "Amex Gold ••1008", gold), (2, "Sapphire Preferred ••9012", sapphire)], payments, today, end
+            ),
             upcoming.cds(deposits.maturing(_deposit_details(today), {9: "Marcus 12-month CD ••7781"})),
             upcoming.dividends([bnd], today, end),
             upcoming.ending_offers(demo_offers(today), {2: "Sapphire Preferred ••9012"}, today),
@@ -1778,7 +1792,7 @@ def cards_key(name: str) -> str:
 
 
 def cards_page(today: date | None = None) -> dict:
-    from financeapp import cards
+    from financeapp import cardpay, cards
     from financeapp.models import CardLink
 
     w = cards_wallet(today)
@@ -1816,6 +1830,13 @@ def cards_page(today: date | None = None) -> dict:
                     "last_payment_date": (closed - timedelta(days=2)).isoformat(),
                     "overdue": False,
                     "as_of": on.isoformat(),
+                    # The Sapphire is paid in full since its statement; the Gold has nothing paid yet.
+                    "payment": cardpay.work_out(
+                        CardStatement(due_date=due, statement_cents=last, statement_date=closed + timedelta(days=4)),
+                        last if aid == 2 else 0,
+                        None,
+                        on,
+                    ).json(),
                 },
             )
         )
