@@ -1,5 +1,27 @@
 [
   {
+    "version": "0.55.0",
+    "title": "A bell for your alerts, and a laptop Refresh",
+    "features": [
+      {
+        "id": "alerts-bell",
+        "title": "Alerts are one tap away",
+        "body": "A bell now sits in the top bar next to Hide amounts and Settings, on every page. A red count shows how many alerts you haven't read. Tap it to see the last month's alerts, tap one to open the page it's about (it's marked read), or mark them all read at once. Alert rules is one tap from there too.",
+        "tryIt": "/"
+      },
+      {
+        "id": "bigger-top-bar",
+        "title": "Bigger top bar buttons",
+        "body": "The bell, Hide amounts and Settings buttons are larger and easier to tap on a phone, with bigger icons."
+      },
+      {
+        "id": "laptop-refresh",
+        "title": "Refresh on a laptop",
+        "body": "On a laptop, a Refresh button in the top bar syncs with your banks and brings fresh numbers to every page, the same as pulling down on your phone. The app icon at the top left always takes you back to Home."
+      }
+    ]
+  },
+  {
     "version": "0.54.0",
     "title": "Home: what's coming up, and today's movers",
     "features": [

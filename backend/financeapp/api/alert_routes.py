@@ -5,7 +5,7 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field, model_validator
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session as DbSession
 
 from financeapp import alerts, budget, demo, lookthrough, notify, quotes
@@ -15,6 +15,8 @@ from financeapp.models import AlertEvent, AlertRule, Category, Goal, Preference,
 router = APIRouter(prefix="/api")
 MAX_RULES = 100
 TEST_EVERY = timedelta(seconds=30)
+INBOX_DAYS = 30  # what the bell in the top bar lists
+INBOX_SIZE = 40
 HHMM = r"^([01]\d|2[0-3]):[0-5]\d$"
 
 
@@ -117,6 +119,10 @@ RuleIn = Annotated[PriceRule | DipRule | BudgetRule | ConcentrationRule | GoalRu
 class RuleBody(BaseModel):
     rule: RuleIn
     enabled: bool = True
+
+
+class ReadIn(BaseModel):
+    ids: list[str] | None = Field(default=None, max_length=INBOX_SIZE)  # None: every alert
 
 
 class EnabledIn(BaseModel):
@@ -293,11 +299,29 @@ def set_quiet(body: QuietIn, request: Request, who: Signed = Depends(signed_in))
     return state(db, request)
 
 
+@router.get("/alerts/inbox")
+def inbox(request: Request, who: Signed = Depends(signed_in)) -> dict:
+    """The bell in the top bar: the last month's alerts, newest first, and how many are unread."""
+    if who.demo:
+        events = demo.alerts()["events"]
+        return {"events": events, "unread": sum(not e["read"] for e in events)}
+    db = db_of(request)
+    since = AlertEvent.fired_at > now() - timedelta(days=INBOX_DAYS)
+    events = db.scalars(select(AlertEvent).where(since).order_by(AlertEvent.fired_at.desc()).limit(INBOX_SIZE)).all()
+    unread = db.scalar(select(func.count()).select_from(AlertEvent).where(since, AlertEvent.read_at.is_(None)))
+    return {"events": [alerts.event_json(e) for e in events], "unread": unread or 0}
+
+
 @router.post("/alerts/read")
-def mark_read(request: Request, who: Signed = Depends(signed_in)) -> dict:
+def mark_read(request: Request, body: ReadIn | None = None, who: Signed = Depends(signed_in)) -> dict:
+    """Marks every alert read, or just the ones listed (an alert someone tapped)."""
     no_demo(who)
     db = db_of(request)
-    db.execute(update(AlertEvent).where(AlertEvent.read_at.is_(None)).values(read_at=now()))
+    which = AlertEvent.read_at.is_(None)
+    if body is not None and body.ids is not None:
+        ids = [int(i) for i in body.ids if i.isdigit()]
+        which = which & AlertEvent.id.in_(ids)
+    db.execute(update(AlertEvent).where(which).values(read_at=now()))
     return {"ok": True}
 
 

@@ -133,6 +133,7 @@ export function resetHousehold(reload = false) {
   cached = null;
   forgetPortfolio();
   if (reload) listeners.forEach((l) => l());
+  window.dispatchEvent(new Event("household-reset")); // e.g. alerts read on Home: the bell's count follows
 }
 
 /** Pull to refresh: sync with the banks, then fresh numbers on every page, including the ones that fetch their own. */

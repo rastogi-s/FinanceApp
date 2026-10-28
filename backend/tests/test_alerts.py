@@ -327,6 +327,37 @@ def test_rules_api(client, home, sent):
 
 
 @needs_db
+def test_inbox_lists_the_last_month_and_marks_read(client, home):
+    home.setup()
+    h = csrf(client)
+    with db_of(client).session() as db:
+        db.execute(delete(AlertEvent))
+        for i, days in enumerate((0, 3, 40)):
+            db.add(
+                AlertEvent(
+                    kind="price",
+                    title=f"Alert {i}",
+                    body="",
+                    dedup_key=f"inbox-{i}",
+                    fired_at=datetime.now(UTC) - timedelta(days=days),
+                    status="sent",
+                    link="/portfolio",
+                )
+            )
+    r = client.get("/api/alerts/inbox").json()
+    assert [e["title"] for e in r["events"]] == ["Alert 0", "Alert 1"]  # over a month old: not in the bell
+    assert r["unread"] == 2
+    tapped = r["events"][1]["id"]
+    assert client.post("/api/alerts/read", json={"ids": [tapped, "nope"]}, headers=h).status_code == 200
+    r = client.get("/api/alerts/inbox").json()
+    assert r["unread"] == 1 and [e["read"] for e in r["events"]] == [False, True]
+    assert client.post("/api/alerts/read", json={}, headers=h).status_code == 200  # no list: all of them
+    assert client.get("/api/alerts/inbox").json()["unread"] == 0
+    assert client.post("/api/alerts/read", json={"ids": ["1"] * 41}, headers=h).status_code == 422
+    assert client.post("/api/alerts/read").status_code == 403  # CSRF
+
+
+@needs_db
 def test_test_message_rate_limited(client, home, sent):
     home.setup()
     h = csrf(client)
@@ -341,6 +372,8 @@ def test_demo_alerts(tmp_path):
     with make_client(tmp_path, "", demo_mode=True) as c:
         r = c.get("/api/alerts")
         assert r.status_code == 200 and r.json()["rules"]
+        inbox = c.get("/api/alerts/inbox").json()
+        assert inbox["events"] and inbox["unread"] == sum(not e["read"] for e in inbox["events"])
         assert c.post("/api/alerts/rules", json={"rule": {"kind": "concentration", "percent": 5}}).status_code == 403
 
 

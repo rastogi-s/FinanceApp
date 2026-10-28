@@ -197,6 +197,44 @@ try {
       fail(`${size} net worth sheet`, ["couldn't open it: " + e.message.split("\n")[0], ...errors]);
     }
 
+    // 5. The bell in the top bar: big enough to tap, shows the unread count, opens the alerts, and an alert opens
+    // the page it's about.
+    await page.goto(BASE + "/");
+    errors = [];
+    try {
+      const problems = [];
+      const bell = page.getByRole("button", { name: /^Alerts, \d+ unread$/ });
+      await bell.waitFor();
+      const minimum = SIZES[size].isMobile ? 44 : 40;
+      for (const name of [/^Alerts/, /amounts$/]) {
+        const box = await page.locator("header").getByRole("button", { name }).boundingBox();
+        if (!box || box.width < minimum || box.height < minimum) problems.push(`${name} is ${box?.width}x${box?.height}px`);
+      }
+      await bell.click();
+      const sheet = page.getByRole("dialog", { name: "Alerts" });
+      await sheet.getByRole("list", { name: "Recent alerts" }).getByRole("link").first().waitFor();
+      await page.screenshot({ path: join(OUT, `${size}-alerts-bell.png`) });
+      const axe = await new AxeBuilder({ page }).include("[role=dialog]").withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"]).analyze();
+      for (const v of axe.violations.filter((v) => v.impact === "serious" || v.impact === "critical")) problems.push(`${v.id}: ${v.help}`);
+      await sheet.getByRole("link", { name: /AAPL is up/ }).click();
+      await page.waitForURL(/\/portfolio\/holding\?s=AAPL/);
+      // The app icon goes Home; a laptop also gets a Refresh button (a phone pulls to refresh instead).
+      await page.getByRole("link", { name: "Finance" }).filter({ visible: true }).first().click();
+      await page.waitForURL(BASE + "/");
+      const refresh = page.locator("header").getByRole("button", { name: "Refresh" });
+      if (SIZES[size].isMobile) {
+        if (await refresh.isVisible()) problems.push("the Refresh button shows on a phone");
+      } else {
+        await refresh.click();
+        await refresh.waitFor(); // back to "Refresh" once it's done
+      }
+      problems.push(...errors);
+      if (problems.length) fail(`${size} alerts bell`, problems);
+      else console.log(`ok   ${size} alerts bell`);
+    } catch (e) {
+      fail(`${size} alerts bell`, ["couldn't use it: " + e.message.split("\n")[0], ...errors]);
+    }
+
     await context.close();
   }
 } finally {
