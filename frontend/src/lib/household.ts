@@ -33,11 +33,11 @@ export type Holding = {
   live?: boolean;
 };
 /** The dot beside an alert, by what kind of rule sent it. */
-export const KIND_DOT = { price: "bg-chart-2", dip: "bg-chart-3", budget: "bg-warning", concentration: "bg-chart-4", goal: "bg-positive", upload: "bg-primary", account: "bg-chart-1", card: "bg-negative" } as const;
+export const KIND_DOT = { price: "bg-chart-2", dip: "bg-chart-3", budget: "bg-warning", concentration: "bg-chart-4", goal: "bg-positive", upload: "bg-primary", account: "bg-chart-1", card: "bg-negative", bill: "bg-warning" } as const;
 
 export type Alert = {
   id: string;
-  kind: "budget" | "price" | "dip" | "concentration" | "goal" | "upload" | "account" | "card";
+  kind: "budget" | "price" | "dip" | "concentration" | "goal" | "upload" | "account" | "card" | "bill";
   title: string;
   body: string;
   at: string;
@@ -60,6 +60,23 @@ export type Maturing = {
   status: "open" | "grace";
   auto_renew: boolean | null;
   value_cents: number | null;
+};
+/** A utility bill whose usual payment hasn't shown up (backend bills.status). */
+export type BillDue = {
+  key: string;
+  name: string;
+  cadence: "monthly" | "every two months" | "quarterly";
+  usual_cents: number;
+  last_cents: number;
+  last_paid: string;
+  /** The day of the month it usually comes, for a monthly bill that keeps to one. */
+  usual_day: number | null;
+  expected: string;
+  late_on: string;
+  days_late: number;
+  account_id: number;
+  /** Spending, searched for this biller: the payments so far. */
+  href: string;
 };
 export type AccountRow = { id?: number; name: string; type?: string; cents: number; as_of?: string | null };
 
@@ -93,6 +110,7 @@ export type LinkedHousehold = {
     last_sync_ok: boolean | null;
     uploads?: UploadDue[];
     maturing?: Maturing[];
+    bills?: BillDue[];
   };
 };
 

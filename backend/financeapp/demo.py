@@ -9,7 +9,7 @@ import statistics
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
-from financeapp import deposits, forecast, goals, kinds, networth, plan, rates, reminders
+from financeapp import bills, deposits, forecast, goals, kinds, networth, plan, rates, reminders
 from financeapp.models import CardStatement, Goal, GoalFunding, Paycheck
 
 SEED = 20261019
@@ -195,6 +195,7 @@ def household(today: date | None = None) -> dict:
             "last_sync_ok": True,
             "uploads": [_upload_due()],
             "maturing": deposits.maturing(_deposit_details(today), {9: "Marcus 12-month CD ••7781"}),
+            "bills": _bills(today)["late"],
         },
         "holdings": [
             {
@@ -249,6 +250,7 @@ def upcoming_events(today: date | None = None) -> dict:
             upcoming.cds(deposits.maturing(_deposit_details(today), {9: "Marcus 12-month CD ••7781"})),
             upcoming.dividends([bnd], today, end),
             upcoming.ending_offers(demo_offers(today), {2: "Sapphire Preferred ••9012"}, today),
+            upcoming.utility_bills(_bills(today)["soon"], today),
         ),
     }
 
@@ -372,6 +374,24 @@ def _upload_reminder() -> dict:
     due = reminders.due_on("monthly", None, newest)
     return {"every": "monthly", "day": None, "newest": newest.isoformat(), "statement": statement.isoformat(),
             "due": due.isoformat(), "is_due": True, "days_late": (today - due).days, "snoozed_until": None}  # fmt: skip
+
+
+def _bills(today: date) -> dict[str, list[dict]]:
+    """Utility bills in demo mode: the power bill a few days late, the water bill coming up (bills.py's sums)."""
+
+    def bill(name: str, usual: float, expected: date) -> dict:
+        dates = [expected - timedelta(days=30 * n) for n in range(6, 0, -1)]
+        b = bills.Bill(
+            key=name.lower(), name=name, category_id=None, cadence="monthly", period=30, dates=dates,
+            usual_cents=_cents(usual), last_cents=_cents(usual), account_id=1, expected=expected,
+            grace=bills.GRACE_DAYS,
+        )  # fmt: skip
+        return b.json(today)
+
+    return {
+        "late": [bill("City Power & Light", 141, today - timedelta(days=6))],
+        "soon": [bill("City Water & Sewer", 61.80, today + timedelta(days=9))],
+    }
 
 
 def _upload_due() -> dict:
@@ -1198,6 +1218,16 @@ def alerts() -> dict:
             },
         ],
         "events": [
+            {
+                "id": "a0",
+                "kind": "bill",
+                **dict(zip(("title", "body"), bills.wording(_bills(at.date())["late"][0]), strict=True)),
+                "at": (at - timedelta(hours=1)).isoformat(),
+                "status": "sent",
+                "channel": "ntfy",
+                "read": False,
+                "link": "/",
+            },
             {
                 "id": "a1",
                 "kind": "budget",

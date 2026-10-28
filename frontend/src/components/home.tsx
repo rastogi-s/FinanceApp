@@ -12,6 +12,7 @@ import {
   FileUp,
   Landmark,
   PencilLine,
+  Receipt,
   Sparkles,
   Sunrise,
 } from "lucide-react";
@@ -29,7 +30,7 @@ import { type UploadDue, dueLabel, shortDate } from "@/lib/accounts";
 import { api } from "@/lib/api";
 import { type ColorName, type Goal, type GoalsState, monthYear } from "@/lib/goals";
 import type { CardPayment } from "@/lib/cards";
-import { type LinkedHousehold, type Maturing, resetHousehold, useApi, useHousehold } from "@/lib/household";
+import { type BillDue, type LinkedHousehold, type Maturing, resetHousehold, useApi, useHousehold } from "@/lib/household";
 import { GROUP_COLOR, type NetWorth, type NetWorthWindow } from "@/lib/networth";
 import { monthOf } from "@/lib/search";
 import { cn } from "@/lib/utils";
@@ -145,12 +146,14 @@ const TONE = {
 };
 
 /**
- * What needs you, each with the button that deals with it: a bank that stopped syncing, a statement to upload, a CD
- * about to mature, a budget at its limit, categories to check. Says so when there's nothing.
+ * What needs you, each with the button that deals with it: a bank that stopped syncing, a utility bill not paid yet,
+ * a statement to upload, a CD about to mature, a budget at its limit, categories to check. Says so when there's
+ * nothing.
  */
 export function NeedsYou({ h, className }: { h: LinkedHousehold; className?: string }) {
   const [uploading, setUploading] = useState<number | null>(null);
   const [later, setLater] = useState<number[]>([]);
+  const [paid, setPaid] = useState<string[]>([]);
   const items: Item[] = [];
 
   for (const s of h.health?.stale ?? []) {
@@ -164,6 +167,43 @@ export function NeedsYou({ h, className }: { h: LinkedHousehold; className?: str
         <Button size="sm" variant="secondary" asChild>
           <Link href="/settings/accounts">Fix</Link>
         </Button>
+      ),
+    });
+  }
+
+  const markPaid = async (b: BillDue) => {
+    if (h.demo) return toast("Bills stay put while the app shows sample data.");
+    try {
+      await api("/api/bills/paid", { body: { key: b.key } });
+      setPaid((p) => [...p, b.key]);
+      toast(`Okay. ${b.name} is paid for this time.`);
+    } catch (e) {
+      toast((e as Error).message, "error");
+    }
+  };
+  for (const b of (h.health?.bills ?? []).filter((b) => !paid.includes(b.key))) {
+    items.push({
+      key: `bill-${b.key}`,
+      icon: <Receipt />,
+      tone: "warning",
+      title: `Check ${b.name}`,
+      detail: (
+        <>
+          {billWhen(b)}, nothing yet · usually <Money cents={b.usual_cents} />
+        </>
+      ),
+      wide: true,
+      actions: (
+        <>
+          <Button size="sm" variant="ghost" onClick={() => markPaid(b)} aria-label={`I paid ${b.name} already`}>
+            Paid
+          </Button>
+          <Button size="sm" variant="secondary" asChild>
+            <Link href={b.href} aria-label={`See ${b.name} payments`}>
+              See
+            </Link>
+          </Button>
+        </>
       ),
     });
   }
@@ -283,7 +323,7 @@ export function NeedsYou({ h, className }: { h: LinkedHousehold; className?: str
         <CheckCircle2 className="size-4 shrink-0 text-positive" aria-hidden />
         <span>
           <span className="font-medium">Nothing needs you today.</span>{" "}
-          <span className="text-muted-foreground">Uploads, CDs and budgets are all in order.</span>
+          <span className="text-muted-foreground">Bills, uploads, CDs and budgets are all in order.</span>
         </span>
       </div>
     );
@@ -325,6 +365,13 @@ export function NeedsYou({ h, className }: { h: LinkedHousehold; className?: str
       />
     </Card>
   );
+}
+
+const ordinal = (n: number) => n + (n % 100 >= 11 && n % 100 <= 13 ? "th" : ({ 1: "st", 2: "nd", 3: "rd" }[n % 10] ?? "th"));
+
+/** "Usually paid around the 14th", or the date for a bill that wanders or comes every few months. */
+function billWhen(b: BillDue) {
+  return `Usually paid around ${b.usual_day ? `the ${ordinal(b.usual_day)}` : shortDate(b.expected)}`;
 }
 
 function cdTitle(m: Maturing) {
@@ -675,7 +722,7 @@ export type Upcoming = {
   days: number;
   events: {
     date: string;
-    kind: "pay" | "card" | "cd" | "dividend" | "offer";
+    kind: "pay" | "card" | "bill" | "cd" | "dividend" | "offer";
     title: string;
     detail: string;
     cents: number | null;
@@ -719,7 +766,7 @@ function cardDetail(p: NonNullable<Upcoming["events"][number]["payment"]>) {
 const weekday = new Intl.DateTimeFormat("en-US", { weekday: "short", timeZone: "UTC" });
 const monthShort = new Intl.DateTimeFormat("en-US", { month: "short", timeZone: "UTC" });
 
-/** The next two weeks: paydays, card payments, CDs, dividends, offers ending (backend upcoming.py). */
+/** The next two weeks: paydays, card payments, utility bills, CDs, dividends, offers ending (backend upcoming.py). */
 export function ComingUp({ data, className }: { data: Upcoming | null; className?: string }) {
   if (!data) return null;
   // This week's days by name (Fri 31), later ones by month (Nov 14).
@@ -732,7 +779,7 @@ export function ComingUp({ data, className }: { data: Upcoming | null; className
       </CardHeader>
       <CardContent className="pt-1">
         {data.events.length === 0 ? (
-          <p className="py-2 text-sm text-muted-foreground">No paydays, payments or dividends due in the next {data.days} days.</p>
+          <p className="py-2 text-sm text-muted-foreground">No paydays, bills or dividends due in the next {data.days} days.</p>
         ) : (
           <ul className="grid grid-cols-1">
             {data.events.map((e, i) => {

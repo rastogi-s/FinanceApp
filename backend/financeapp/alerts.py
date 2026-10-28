@@ -34,7 +34,8 @@ back; low arrives without a sound or banner. Several alerts at once go at the lo
 that what was held over quiet hours goes out no louder than default, so the morning roundup doesn't break through
 a Sleep Focus.
 
-Upload reminders (reminders.py) come through the same queue without a rule, at default priority.
+Upload reminders (reminders.py) come through the same queue without a rule, at default priority. Card payments due
+(cardpay.py) and late utility bills (bills.py) come without a rule too, at high: a missed bill costs money.
 
 Lock screens. Messages name a market price, a share of the budget or of the portfolio, never balances or dollar
 amounts of the household's own money.
