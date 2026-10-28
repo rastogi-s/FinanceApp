@@ -274,6 +274,18 @@ def test_an_offer_can_change_the_best_card():
     assert other["offers"] == []
 
 
+def test_capital_one_miles_include_the_cards_own_rate():
+    c1 = offers.Offer(1, 2, "capital_one", "CVS", "cvs", "multiplier", 13, up_to=False)
+    assert offers.adds(c1, 100_00, 1.0, earned=2_00) == 11_00  # 13X in all, the card's 2X already counted
+    assert offers.adds(c1, 100_00, 1.0, earned=20_00) == 0
+    up_to = offers.Offer(1, 2, "capital_one", "CVS", "cvs", "multiplier", 13, up_to=True)
+    assert offers.adds(up_to, 100_00, 1.0, earned=2_00) == 5_50  # halfway: 7.5X in all
+    chase = offer(1, "x", value=10)
+    assert offers.adds(chase, 100_00, 1.25, earned=1_25) == 10_00  # cash back on top of the points
+    amex = offers.Offer(1, 2, "amex", "Hilton", "hilton", "multiplier", 3)
+    assert offers.adds(amex, 100_00, 1.0, earned=1_00) == 3_00  # "+3 points per dollar" is extra
+
+
 @pytest.fixture
 def fixed_today(monkeypatch):
     monkeypatch.setattr(card_routes, "today", lambda: TODAY)
