@@ -1,6 +1,6 @@
 [
   {
-    "version": "0.53.0",
+    "version": "0.55.0",
     "title": "A bell for your alerts, and a laptop Refresh",
     "features": [
       {
@@ -18,6 +18,24 @@
         "id": "laptop-refresh",
         "title": "Refresh on a laptop",
         "body": "On a laptop, a Refresh button in the top bar syncs with your banks and brings fresh numbers to every page, the same as pulling down on your phone. The app icon at the top left always takes you back to Home."
+      }
+    ]
+  },
+  {
+    "version": "0.54.0",
+    "title": "Home: what's coming up, and today's movers",
+    "features": [
+      {
+        "id": "home-coming-up",
+        "title": "Coming up in the next two weeks",
+        "body": "Home now lists what's on the way: your next paycheck (from your last pay stub), card payments due with the statement balance, CDs maturing, expected dividends, and card offers that end this week. Tap one to open it.",
+        "tryIt": "/"
+      },
+      {
+        "id": "home-movers",
+        "title": "Today's movers and where your money sits",
+        "body": "See which holdings moved your portfolio most today, in dollars and percent, each stock or fund once even when it's in several accounts. Lower down, one bar shows how your money splits across cash, investments and retirement, with what's owed on cards. The full account list is in Settings, Accounts.",
+        "tryIt": "/"
       }
     ]
   },

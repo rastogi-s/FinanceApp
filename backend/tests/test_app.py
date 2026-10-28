@@ -129,6 +129,12 @@ def test_demo_household_adds_up(site):
     assert h["projection"]["start_cents"] > 0 and h["projection"]["target_cents"] > 0
 
 
+def test_demo_coming_up(site):
+    r = client(site, demo_mode=True).get("/api/upcoming").json()
+    assert {e["kind"] for e in r["events"]} == {"pay", "card", "cd", "dividend", "offer"}
+    assert [e["date"] for e in r["events"]] == sorted(e["date"] for e in r["events"])
+
+
 def test_whats_new_is_valid():
     entries = json.loads((PACKAGE_DIR / "data" / "whats-new.json").read_text())
     versions = [e["version"] for e in entries]

@@ -10,7 +10,7 @@ from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 from financeapp import deposits, forecast, goals, kinds, networth, plan, rates, reminders
-from financeapp.models import Goal, GoalFunding
+from financeapp.models import CardStatement, Goal, GoalFunding, Paycheck
 
 SEED = 20261019
 
@@ -210,6 +210,32 @@ def household(today: date | None = None) -> dict:
         ],
         "allocation": [{"asset_class": k, "cents": v} for k, v in sorted(by_class.items(), key=lambda kv: -kv[1])],
         "projection": plan.projection(_plan_inputs(today, net_worth)),
+    }
+
+
+def upcoming_events(today: date | None = None) -> dict:
+    """Home's "Coming up" in demo mode: the real helpers (upcoming.py) on sample stubs, statements and offers."""
+    from financeapp import upcoming
+
+    today = today or datetime.now(UTC).date()
+    end = today + timedelta(days=upcoming.DAYS)
+    stub = Paycheck(user_id=0, frequency="biweekly", date=today - timedelta(days=4), net_cents=_cents(2_600))
+    statement = CardStatement(
+        due_date=today + timedelta(days=6), statement_cents=_cents(2_140), minimum_cents=_cents(40)
+    )
+    bnd = {
+        "symbol": "BND", "pay_date": (today + timedelta(days=5)).isoformat(), "cents": _cents(118), "reinvesting": True
+    }  # fmt: skip
+    return {
+        "as_of": today.isoformat(),
+        "days": upcoming.DAYS,
+        "events": upcoming.merge(
+            upcoming.paydays([stub], {0: "Sample"}, today),
+            upcoming.card_dues([("Amex Gold ••1008", statement)], today, end),
+            upcoming.cds(deposits.maturing(_deposit_details(today), {9: "Marcus 12-month CD ••7781"})),
+            upcoming.dividends([bnd], today, end),
+            upcoming.ending_offers(demo_offers(today), {2: "Sapphire Preferred ••9012"}, today),
+        ),
     }
 
 
