@@ -5,7 +5,7 @@ import { useState } from "react";
 import { CalendarClock, Check, ChevronRight, ExternalLink, FileText, Landmark, Pencil, ReceiptText, RotateCcw } from "lucide-react";
 import { HsaCard } from "@/components/hsa-card";
 import { Money, formatMoney } from "@/components/money";
-import { BackLink, Notice, PageTitle } from "@/components/page";
+import { BackLink, Column, Columns, Notice, PageTitle, Wide } from "@/components/page";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -27,6 +27,7 @@ export default function Taxes() {
   const t = local ?? data;
   return (
     <>
+      <Wide />
       <BackLink href="/plan">Plan</BackLink>
       <PageTitle
         title="Taxes"
@@ -75,48 +76,53 @@ function TaxView({ t, onSaved }: { t: TaxState; onSaved: (t: TaxState) => void }
     }
   };
 
+  // Laptop: the answer and what to do about it on the left, the line-by-line math on the right.
   return (
-    <div className="grid grid-cols-1 gap-4">
-      {!t.answered && <FirstQuestions t={t} save={save} saving={saving} />}
-      <Bottom t={t} />
-      <Hints t={t} />
-      <HsaCard h={t.hsa} busy={saving} onCoverage={(c) => save({ hsa_coverage: c }, c === "none" ? "Noted: no HSA." : "Coverage saved.")} />
-      <Answers t={t} onEdit={() => setAnswersOpen(true)} />
-      <ItemCard title="Income" icon={<ReceiptText className="size-4 text-muted-foreground" aria-hidden />} items={pick(INCOME)} onEdit={setEditing}>
-        {t.people.length === 0 && (
+    <Columns>
+      <Column>
+        {!t.answered && <FirstQuestions t={t} save={save} saving={saving} />}
+        <Bottom t={t} />
+        <Hints t={t} />
+        <HsaCard h={t.hsa} busy={saving} onCoverage={(c) => save({ hsa_coverage: c }, c === "none" ? "Noted: no HSA." : "Coverage saved.")} />
+        <Answers t={t} onEdit={() => setAnswersOpen(true)} />
+      </Column>
+      <Column>
+        <ItemCard title="Income" icon={<ReceiptText className="size-4 text-muted-foreground" aria-hidden />} items={pick(INCOME)} onEdit={setEditing}>
+          {t.people.length === 0 && (
+            <p className="mb-2 text-sm text-muted-foreground">
+              No pay stubs yet.{" "}
+              <Link href="/budget#pay" className="font-medium text-primary">
+                Add one on Budget
+              </Link>{" "}
+              and pay, withholding and pre-tax savings fill in by themselves.
+            </p>
+          )}
           <p className="mb-2 text-sm text-muted-foreground">
-            No pay stubs yet.{" "}
-            <Link href="/budget#pay" className="font-medium text-primary">
-              Add one on Budget
-            </Link>{" "}
-            and pay, withholding and pre-tax savings fill in by themselves.
+            Interest, dividends and fund gain distributions come from{" "}
+            <Link href="/portfolio/income" className="font-medium text-primary">
+              Dividends &amp; interest
+            </Link>
+            .
           </p>
-        )}
-        <p className="mb-2 text-sm text-muted-foreground">
-          Interest, dividends and fund gain distributions come from{" "}
-          <Link href="/portfolio/income" className="font-medium text-primary">
-            Dividends &amp; interest
-          </Link>
-          .
-        </p>
-      </ItemCard>
-      {pick(DEDUCTIONS).length > 0 && <ItemCard title="Deductions and credits" items={pick(DEDUCTIONS)} onEdit={setEditing} />}
-      <Federal t={t} />
-      <Fica t={t} />
-      <StateCard t={t} />
-      <ItemCard title="Already paid" icon={<Check className="size-4 text-muted-foreground" aria-hidden />} items={pick(PAID)} onEdit={setEditing}>
-        {t.people.map((p) => (
-          <p key={p.name} className="mb-2 text-sm text-muted-foreground">
-            {t.people.length > 1 && <span className="font-medium text-foreground">{p.name}: </span>}
-            Latest stub {day.format(new Date(p.latest))}, {p.paychecks_left} paycheck{p.paychecks_left === 1 ? "" : "s"} left this year.
-            {p.split_estimated && " Some stubs only had total taxes, so they're split by the usual rates."}
-          </p>
-        ))}
-      </ItemCard>
-      <Assumptions t={t} />
+        </ItemCard>
+        {pick(DEDUCTIONS).length > 0 && <ItemCard title="Deductions and credits" items={pick(DEDUCTIONS)} onEdit={setEditing} />}
+        <Federal t={t} />
+        <Fica t={t} />
+        <StateCard t={t} />
+        <ItemCard title="Already paid" icon={<Check className="size-4 text-muted-foreground" aria-hidden />} items={pick(PAID)} onEdit={setEditing}>
+          {t.people.map((p) => (
+            <p key={p.name} className="mb-2 text-sm text-muted-foreground">
+              {t.people.length > 1 && <span className="font-medium text-foreground">{p.name}: </span>}
+              Latest stub {day.format(new Date(p.latest))}, {p.paychecks_left} paycheck{p.paychecks_left === 1 ? "" : "s"} left this year.
+              {p.split_estimated && " Some stubs only had total taxes, so they're split by the usual rates."}
+            </p>
+          ))}
+        </ItemCard>
+        <Assumptions t={t} />
+      </Column>
       <AmountSheet item={editing} onClose={() => setEditing(null)} save={save} saving={saving} />
       <AnswersSheet t={t} open={answersOpen} onOpenChange={setAnswersOpen} save={save} saving={saving} />
-    </div>
+    </Columns>
   );
 }
 

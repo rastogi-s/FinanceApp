@@ -1,5 +1,5 @@
-// Smoke test: opens every page of a demo-mode copy of the app the way you would, on a laptop and on a phone
-// (light and dark), and fails on a JavaScript error, a console error (which includes anything the
+// Smoke test: opens every page of a demo-mode copy of the app the way you would, on a laptop, a wide screen and a
+// phone (light and dark), and fails on a JavaScript error, a console error (which includes anything the
 // Content-Security-Policy blocked), a failed API call, a page without a heading, an empty page, sideways
 // scrolling on the phone, or a serious accessibility problem. Every page is screenshotted to OUT_DIR, so a pull
 // request shows how it looks. Runs in CI on every pull request.
@@ -15,6 +15,8 @@ const BASE = process.env.APP_URL || "http://localhost:8080";
 const OUT = process.env.OUT_DIR || "smoke-results";
 const SIZES = {
   "laptop-light": { viewport: { width: 1366, height: 768 }, colorScheme: "light" },
+  // A big laptop or external screen, where pages lay out in two columns and use the width.
+  "wide-dark": { viewport: { width: 1920, height: 1080 }, colorScheme: "dark" },
   "phone-light": { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2, colorScheme: "light" },
   "phone-dark": { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2, colorScheme: "dark" },
 };

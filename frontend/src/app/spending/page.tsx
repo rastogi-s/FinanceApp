@@ -6,7 +6,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeftRight, ChevronRight, CreditCard, Search, SlidersHorizontal, Sparkles, X } from "lucide-react";
 import { CategorySheet } from "@/components/category-sheet";
 import { Money } from "@/components/money";
-import { BackLink, HouseholdPage } from "@/components/page";
+import { BackLink, Column, Columns, HouseholdPage } from "@/components/page";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -61,6 +61,7 @@ function SpendingWithBack() {
     <>
       {fromBudget && <BackLink href="/budget">Budget</BackLink>}
       <HouseholdPage
+        wide
         title="Spending"
         subtitle="Transfers between your own accounts are left out of every total. Tap one to change its category."
       >
@@ -162,81 +163,87 @@ function Spending({ h, fromBudget }: { h: LinkedHousehold; fromBudget: boolean }
         <ActiveChips f={f} set={set} categories={categories} accounts={results?.accounts} review={review} />
       </div>
 
-      <div className="grid grid-cols-1 gap-4">
-        {!filtered ? (
-          <>
-            <ThisMonth h={h} />
-            <Link
-              href="/cards"
-              className="flex items-center gap-3 rounded-xl border bg-card px-4 py-3.5 text-sm shadow-sm transition-colors hover:bg-muted/60"
-            >
-              <span className="grid size-9 shrink-0 place-items-center rounded-full bg-accent text-accent-foreground">
-                <CreditCard className="size-4" aria-hidden />
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="block font-medium">Credit cards</span>
-                <span className="block text-xs text-muted-foreground">Which card earns the most where, and what you&apos;re missing</span>
-              </span>
-              <ChevronRight className="size-4 text-muted-foreground" aria-hidden />
-            </Link>
-          </>
-        ) : categoryMonth(f) ? (
-          <CategoryMonth f={f} r={results} name={categoryName(categoryMonth(f)!, categories)} />
-        ) : (
-          <Summary f={f} r={results} />
-        )}
-
-        {error && <p className="px-1 text-sm text-negative">{error}</p>}
-        {!results && !error && <Skeleton className="h-64 rounded-xl" />}
-        {results && results.transactions.length === 0 && (
-          <div className="px-1 py-8 text-center">
-            <p className="text-sm text-muted-foreground">
-              {f.kind === "review" && isEmpty({ ...f, kind: "" }) ? "Nothing left to sort. Nicely done." : "Nothing matches that."}
-            </p>
-            {filtered && f.kind !== "review" && (
-              <Button variant="outline" size="sm" className="mt-3" onClick={() => setF(EMPTY)}>
-                Clear search and filters
-              </Button>
-            )}
-          </div>
-        )}
-
-        <div className={cn("grid grid-cols-1 gap-4 transition-opacity", stale && "opacity-60")} aria-busy={stale}>
-          {results && !byDate(f) && results.transactions.length > 0 && (
-            <section aria-label={SORTS.find((x) => x.id === f.sort)!.chip}>
-              <Card>
-                <ul className="divide-y">
-                  {results.transactions.map((t) => (
-                    <Row key={t.id} t={t} onPick={() => setPicking(t)} showDate />
-                  ))}
-                </ul>
-              </Card>
-            </section>
+      {/* Laptop: the month's summary beside the transactions. */}
+      <Columns className="xl:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+        {/* Below the pinned search bar (and its filter chips), so the summary stays in view down a long list. */}
+        <Column className="xl:sticky xl:top-[10.5rem]">
+          {!filtered ? (
+            <>
+              <ThisMonth h={h} />
+              <Link
+                href="/cards"
+                className="flex items-center gap-3 rounded-xl border bg-card px-4 py-3.5 text-sm shadow-sm transition-colors hover:bg-muted/60"
+              >
+                <span className="grid size-9 shrink-0 place-items-center rounded-full bg-accent text-accent-foreground">
+                  <CreditCard className="size-4" aria-hidden />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block font-medium">Credit cards</span>
+                  <span className="block text-xs text-muted-foreground">Which card earns the most where, and what you&apos;re missing</span>
+                </span>
+                <ChevronRight className="size-4 text-muted-foreground" aria-hidden />
+              </Link>
+            </>
+          ) : categoryMonth(f) ? (
+            <CategoryMonth f={f} r={results} name={categoryName(categoryMonth(f)!, categories)} />
+          ) : (
+            <Summary f={f} r={results} />
           )}
-          {results &&
-            byDate(f) &&
-            byDay(results.transactions).map(([date, items]) => (
-              <section key={date} aria-label={day.format(new Date(date))}>
-                <h2 className="mb-2 px-1 text-xs font-medium tracking-wide text-muted-foreground uppercase">
-                  {day.format(new Date(date))}
-                </h2>
+        </Column>
+
+        <Column>
+          {error && <p className="px-1 text-sm text-negative">{error}</p>}
+          {!results && !error && <Skeleton className="h-64 rounded-xl" />}
+          {results && results.transactions.length === 0 && (
+            <div className="px-1 py-8 text-center">
+              <p className="text-sm text-muted-foreground">
+                {f.kind === "review" && isEmpty({ ...f, kind: "" }) ? "Nothing left to sort. Nicely done." : "Nothing matches that."}
+              </p>
+              {filtered && f.kind !== "review" && (
+                <Button variant="outline" size="sm" className="mt-3" onClick={() => setF(EMPTY)}>
+                  Clear search and filters
+                </Button>
+              )}
+            </div>
+          )}
+
+          <div className={cn("grid grid-cols-1 gap-4 transition-opacity", stale && "opacity-60")} aria-busy={stale}>
+            {results && !byDate(f) && results.transactions.length > 0 && (
+              <section aria-label={SORTS.find((x) => x.id === f.sort)!.chip}>
                 <Card>
                   <ul className="divide-y">
-                    {items.map((t) => (
-                      <Row key={t.id} t={t} onPick={() => setPicking(t)} />
+                    {results.transactions.map((t) => (
+                      <Row key={t.id} t={t} onPick={() => setPicking(t)} showDate />
                     ))}
                   </ul>
                 </Card>
               </section>
-            ))}
-        </div>
+            )}
+            {results &&
+              byDate(f) &&
+              byDay(results.transactions).map(([date, items]) => (
+                <section key={date} aria-label={day.format(new Date(date))}>
+                  <h2 className="mb-2 px-1 text-xs font-medium tracking-wide text-muted-foreground uppercase">
+                    {day.format(new Date(date))}
+                  </h2>
+                  <Card>
+                    <ul className="divide-y">
+                      {items.map((t) => (
+                        <Row key={t.id} t={t} onPick={() => setPicking(t)} />
+                      ))}
+                    </ul>
+                  </Card>
+                </section>
+              ))}
+          </div>
 
-        {results?.next_offset != null && (
-          <Button variant="outline" className="mx-auto" onClick={loadMore} disabled={more}>
-            {more ? "Loading…" : `Show more · ${results.count - results.transactions.length} left`}
-          </Button>
-        )}
-      </div>
+          {results?.next_offset != null && (
+            <Button variant="outline" className="mx-auto" onClick={loadMore} disabled={more}>
+              {more ? "Loading…" : `Show more · ${results.count - results.transactions.length} left`}
+            </Button>
+          )}
+        </Column>
+      </Columns>
 
       <FilterSheet
         open={sheet}

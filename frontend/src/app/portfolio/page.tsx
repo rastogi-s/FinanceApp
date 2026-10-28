@@ -23,7 +23,7 @@ import {
 import { ExposureGraph } from "@/components/exposure-graph";
 import { HoldingsTable } from "@/components/holdings-table";
 import { Money } from "@/components/money";
-import { HouseholdPage } from "@/components/page";
+import { Column, Columns, HouseholdPage } from "@/components/page";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -59,7 +59,7 @@ export default function PortfolioPage() {
   // Starts the portfolio's own numbers alongside the household's, instead of after them.
   useEffect(() => void loadPortfolio().catch(() => {}), []);
   return (
-    <HouseholdPage title="Portfolio" subtitle="Every account combined, at live prices.">
+    <HouseholdPage title="Portfolio" wide subtitle="Every account combined, at live prices.">
       {(h) => <Body h={h} />}
     </HouseholdPage>
   );
@@ -94,7 +94,9 @@ function Body({ h }: { h: LinkedHousehold }) {
     : "Prices from the last sync";
 
   return (
-    <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+    // Laptop: the summary cards on the left, what's inside the funds on the right, then the wide graph and table.
+    // In between (tablet widths) the columns dissolve into the two-across grid the page has always used there.
+    <Columns className="md:grid-cols-2">
       <Card className="md:col-span-2">
         <CardHeader>
           <CardTitle>Invested</CardTitle>
@@ -116,11 +118,15 @@ function Body({ h }: { h: LinkedHousehold }) {
         </CardContent>
       </Card>
 
-      {h.holdings.length > 0 && <MovesLink />}
-      <IncomeLink />
-      <Allocation h={h} />
-      {p ? <Largest p={p} /> : <ListSkeleton title="Largest positions" rows={6} />}
-      {p ? <RealExposure p={p} /> : <ListSkeleton title="Your real exposure" rows={5} wide />}
+      <Column className="md:contents xl:grid">
+        {h.holdings.length > 0 && <MovesLink />}
+        <IncomeLink />
+        <Allocation h={h} />
+        {p ? <Largest p={p} /> : <ListSkeleton title="Largest positions" rows={6} />}
+      </Column>
+      <Column className="md:contents xl:grid">
+        {p ? <RealExposure p={p} /> : <ListSkeleton title="Your real exposure" rows={5} wide />}
+      </Column>
       {p && p.exposure.companies.length > 0 && (
         <Card className="md:col-span-2">
           <CardHeader>
@@ -129,21 +135,21 @@ function Body({ h }: { h: LinkedHousehold }) {
           </CardHeader>
           <CardContent>
             {/* Drawn once it's nearly on screen: laying out a hundred bubbles shouldn't hold up the rest. */}
-            <WhenNear placeholder={<Skeleton className="aspect-[4/3] w-full rounded-xl sm:aspect-[16/9]" />}>
+            <WhenNear placeholder={<Skeleton className="aspect-[4/3] max-h-[36rem] w-full rounded-xl sm:aspect-[16/9]" />}>
               <ExposureGraph exposure={p.exposure} />
             </WhenNear>
           </CardContent>
         </Card>
       )}
       <Holdings holdings={h.holdings} trends={p?.trends} />
-    </div>
+    </Columns>
   );
 }
 
 /** A card the shape of the one on its way: its title, and a row placeholder for each row it will have. */
 function ListSkeleton({ title, rows, wide }: { title: string; rows: number; wide?: boolean }) {
   return (
-    <Card className={cn(wide && "md:col-span-2")} aria-busy="true">
+    <Card className={cn(wide && "md:max-xl:col-span-2")} aria-busy="true">
       <CardHeader>
         <CardTitle>{title}</CardTitle>
       </CardHeader>
@@ -185,7 +191,7 @@ function MovesLink() {
   return (
     <Link
       href="/portfolio/moves"
-      className="group flex items-center gap-4 rounded-xl border bg-card px-5 py-4 shadow-[0_1px_2px_rgb(0_0_0/0.04)] hover:bg-muted/40 md:col-span-2"
+      className="group flex items-center gap-4 rounded-xl border bg-card px-5 py-4 shadow-[0_1px_2px_rgb(0_0_0/0.04)] hover:bg-muted/40 md:max-xl:col-span-2"
     >
       <span className="grid size-10 shrink-0 place-items-center rounded-full bg-accent text-primary">
         <Sparkles className="size-5" aria-hidden />
@@ -213,7 +219,7 @@ function IncomeLink() {
   return (
     <Link
       href="/portfolio/income"
-      className="group flex items-center gap-4 rounded-xl border bg-card px-5 py-4 shadow-[0_1px_2px_rgb(0_0_0/0.04)] hover:bg-muted/40 md:col-span-2"
+      className="group flex items-center gap-4 rounded-xl border bg-card px-5 py-4 shadow-[0_1px_2px_rgb(0_0_0/0.04)] hover:bg-muted/40 md:max-xl:col-span-2"
     >
       <span className="grid size-10 shrink-0 place-items-center rounded-full bg-accent text-accent-foreground">
         <Coins className="size-5" aria-hidden />
@@ -340,7 +346,7 @@ function RealExposure({ p }: { p: Portfolio }) {
   const newest = dates.length ? dates.reduce((a, b) => (a > b ? a : b)) : null;
 
   return (
-    <Card className="md:col-span-2">
+    <Card className="md:max-xl:col-span-2">
       <CardHeader>
         <CardTitle>Your real exposure</CardTitle>
         <Layers className="size-4 text-muted-foreground sm:hidden" aria-hidden />

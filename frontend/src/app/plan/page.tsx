@@ -6,7 +6,7 @@ import { Briefcase, ChevronRight, Landmark, Pencil, RotateCcw, Scissors, Target,
 import { HsaCard } from "@/components/hsa-card";
 import { PlanChart } from "@/components/plan-chart";
 import { Money, formatMoney } from "@/components/money";
-import { Notice, PageTitle } from "@/components/page";
+import { Column, Columns, Notice, PageTitle, Wide } from "@/components/page";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -46,6 +46,7 @@ export default function Plan() {
   const state = local ?? data;
   return (
     <>
+      <Wide />
       <PageTitle
         title="Plan"
         subtitle="Where today's savings take you, and when work becomes optional. A range, because no one knows future returns."
@@ -157,31 +158,35 @@ function PlanView({ p, onSaved }: { p: Linked; onSaved: (p: PlanState) => void }
 
   if (i.monthly_savings_cents === null && !changed) {
     return (
-      <div className="grid grid-cols-1 gap-4">
-        <Notice
-          icon={<Telescope className="size-5" />}
-          title="How much do you save a month?"
-          action={
-            <div className="mt-3 flex flex-wrap gap-2">
-              <Button asChild size="sm">
-                <Link href="/budget#pay">Add a pay stub</Link>
-              </Button>
-              <Button size="sm" variant="outline" onClick={() => setAboutOpen(true)}>
-                Type it in
-              </Button>
-            </div>
-          }
-        >
-          The app works it out from your pay stubs, or from paychecks landing in a linked account, against what you spend. It hasn&apos;t
-          seen any pay yet.
-        </Notice>
-        <GoalsCard />
-        <IncomeLink />
-        <TaxesLink />
-        {p.ideas.hsa && <HsaCard h={p.ideas.hsa} />}
-        <Ideas p={p} s={s} />
+      <Columns>
+        <Column>
+          <Notice
+            icon={<Telescope className="size-5" />}
+            title="How much do you save a month?"
+            action={
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Button asChild size="sm">
+                  <Link href="/budget#pay">Add a pay stub</Link>
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => setAboutOpen(true)}>
+                  Type it in
+                </Button>
+              </div>
+            }
+          >
+            The app works it out from your pay stubs, or from paychecks landing in a linked account, against what you spend. It hasn&apos;t
+            seen any pay yet.
+          </Notice>
+          <GoalsCard />
+          <IncomeLink />
+          <TaxesLink />
+        </Column>
+        <Column>
+          {p.ideas.hsa && <HsaCard h={p.ideas.hsa} />}
+          <Ideas p={p} s={s} />
+        </Column>
         <About open={aboutOpen} onOpenChange={setAboutOpen} p={p} save={save} saving={saving} askSavings />
-      </div>
+      </Columns>
     );
   }
 
@@ -190,235 +195,241 @@ function PlanView({ p, onSaved }: { p: Linked; onSaved: (p: PlanState) => void }
   const horizon = Math.min(30, Math.max(12, (fire.low ?? fire.mid ?? i.year + 25) - i.year + 3));
   const in10 = result.bands[10]!;
 
+  // Laptop: the projection on the left with the what-if sliders beside it, so moving one shows its effect at once.
   return (
-    <div className="grid grid-cols-1 gap-4">
-      <Card className="overflow-hidden">
-        <CardHeader>
-          <CardTitle>Work becomes optional</CardTitle>
-          <Button variant="ghost" size="sm" onClick={() => setAboutOpen(true)} className="-mt-1.5 -mr-2">
-            <Pencil /> {i.birth_year ? "Your details" : "Add your age"}
-          </Button>
-        </CardHeader>
-        <CardContent>
-          {result.target === null ? (
-            <p className="text-lg font-semibold">Set the spending you&apos;d like later to see a date.</p>
-          ) : fire.mid === null ? (
-            <>
-              <p className="text-3xl font-semibold tracking-tight">Not within 60 years</p>
-              <p className="mt-1 text-sm text-muted-foreground">Saving more, or planning to spend less later, brings it into view.</p>
-            </>
-          ) : fire.mid <= i.year ? (
-            <>
-              <p className="text-3xl font-semibold tracking-tight">You&apos;re there</p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                <Money cents={i.start_cents} style="compact" /> already covers <Money cents={s.yearly} style="compact" /> a year at a{" "}
-                {s.withdrawal}% withdrawal.
-              </p>
-            </>
-          ) : (
-            <>
-              <p className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-                <span className="text-4xl font-semibold tracking-tight">Around {fire.mid}</span>
-                {age(fire.mid) !== null && <span className="text-lg font-medium text-muted-foreground">at age {age(fire.mid)}</span>}
-              </p>
-              <p className="mt-1.5 text-sm text-muted-foreground">
-                {fire.high !== null && fire.low !== null && fire.high !== fire.low ? (
-                  <>
-                    Between {fire.high} and {fire.low}, depending on markets.{" "}
-                  </>
-                ) : fire.low === null ? (
-                  <>Later, or never, if markets disappoint. </>
-                ) : null}
-                That&apos;s when about <Money cents={result.target} style="compact" /> covers <Money cents={s.yearly} style="compact" /> a
-                year, taking out {s.withdrawal}% a year.
-              </p>
-            </>
-          )}
-          <div className="mt-5">
-            <PlanChart
-              history={p.history}
-              bands={result.bands}
-              target={result.target}
-              fireYear={fire.mid}
-              birthYear={i.birth_year}
-              years={horizon}
-            />
-          </div>
-          <p className="mt-3 text-xs text-muted-foreground">
-            In today&apos;s dollars: returns are after inflation ({result.returns.low}% to {result.returns.high}% a year). The solid line is
-            your net worth so far
-            {p.history.length < 30 ? "; it grows a day at a time from when you linked your accounts" : ""}.
-          </p>
-        </CardContent>
-      </Card>
-
-      <div className="grid grid-cols-2 gap-4">
-        <Card>
+    <Columns>
+      {/* Stays in view while the sliders on the right move, so each change shows on the chart. */}
+      <Column className="xl:sticky xl:top-[4.5rem]">
+        <Card className="overflow-hidden">
           <CardHeader>
-            <CardTitle>In 10 years</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-2xl font-semibold tracking-tight">
-              <Money cents={in10.mid} style="compact" />
-            </p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              <Money cents={in10.low} style="compact" /> to <Money cents={in10.high} style="compact" />
-            </p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle>Saving a month</CardTitle>
-            <TrendingUp className="size-4 text-positive" aria-hidden />
-          </CardHeader>
-          <CardContent>
-            <p className="text-2xl font-semibold tracking-tight">
-              <Money cents={s.monthly} />
-            </p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              {s.monthly === i.measured_savings_cents
-                ? i.savings_source.short
-                : i.savings_typed && s.monthly === i.monthly_savings_cents
-                  ? "the number you typed in"
-                  : "what if"}
-            </p>
-          </CardContent>
-        </Card>
-      </div>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>What if</CardTitle>
-          {changed && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="-mt-1.5 -mr-2"
-              onClick={() => {
-                setS(saved);
-                setLevel(i.level);
-              }}
-            >
-              <RotateCcw /> Reset
+            <CardTitle>Work becomes optional</CardTitle>
+            <Button variant="ghost" size="sm" onClick={() => setAboutOpen(true)} className="-mt-1.5 -mr-2">
+              <Pencil /> {i.birth_year ? "Your details" : "Add your age"}
             </Button>
-          )}
-        </CardHeader>
-        <CardContent className="grid grid-cols-1 gap-6">
-          <Slider
-            label="Saving each month"
-            value={s.monthly}
-            display={<Money cents={s.monthly} />}
-            min={0}
-            max={Math.max(1_000_000, Math.ceil(((i.measured_savings_cents ?? s.monthly) * 2.5) / 50_000) * 50_000)}
-            step={5_000}
-            onChange={(v) => setS({ ...s, monthly: v })}
-            hint={
-              <Source
-                note={i.savings_source.note}
-                breakdown={i.savings_source.breakdown}
-                excluded={i.savings_source.excluded}
-                months={i.savings_source.months}
-                moneyIn={i.savings_source.money_in ?? []}
-                onCountAs={countAs}
-                differs={i.measured_savings_cents !== null && s.monthly !== i.measured_savings_cents}
-                typed={i.savings_typed && s.monthly === i.monthly_savings_cents}
-                derived={i.measured_savings_cents !== null ? <Money cents={i.measured_savings_cents} /> : null}
-                onUse={() => i.measured_savings_cents !== null && setS({ ...s, monthly: i.measured_savings_cents })}
+          </CardHeader>
+          <CardContent>
+            {result.target === null ? (
+              <p className="text-lg font-semibold">Set the spending you&apos;d like later to see a date.</p>
+            ) : fire.mid === null ? (
+              <>
+                <p className="text-3xl font-semibold tracking-tight">Not within 60 years</p>
+                <p className="mt-1 text-sm text-muted-foreground">Saving more, or planning to spend less later, brings it into view.</p>
+              </>
+            ) : fire.mid <= i.year ? (
+              <>
+                <p className="text-3xl font-semibold tracking-tight">You&apos;re there</p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  <Money cents={i.start_cents} style="compact" /> already covers <Money cents={s.yearly} style="compact" /> a year at a{" "}
+                  {s.withdrawal}% withdrawal.
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                  <span className="text-4xl font-semibold tracking-tight">Around {fire.mid}</span>
+                  {age(fire.mid) !== null && <span className="text-lg font-medium text-muted-foreground">at age {age(fire.mid)}</span>}
+                </p>
+                <p className="mt-1.5 text-sm text-muted-foreground">
+                  {fire.high !== null && fire.low !== null && fire.high !== fire.low ? (
+                    <>
+                      Between {fire.high} and {fire.low}, depending on markets.{" "}
+                    </>
+                  ) : fire.low === null ? (
+                    <>Later, or never, if markets disappoint. </>
+                  ) : null}
+                  That&apos;s when about <Money cents={result.target} style="compact" /> covers <Money cents={s.yearly} style="compact" /> a
+                  year, taking out {s.withdrawal}% a year.
+                </p>
+              </>
+            )}
+            <div className="mt-5">
+              <PlanChart
+                history={p.history}
+                bands={result.bands}
+                target={result.target}
+                fireYear={fire.mid}
+                birthYear={i.birth_year}
+                years={horizon}
               />
-            }
-          />
-          <div className="grid grid-cols-1 gap-2">
-            <p className="text-sm font-medium" id="level-label">
-              Spending, once work is optional
+            </div>
+            <p className="mt-3 text-xs text-muted-foreground">
+              In today&apos;s dollars: returns are after inflation ({result.returns.low}% to {result.returns.high}% a year). The solid line is
+              your net worth so far
+              {p.history.length < 30 ? "; it grows a day at a time from when you linked your accounts" : ""}.
             </p>
-            <div role="radiogroup" aria-labelledby="level-label" className="grid grid-cols-3 gap-2">
-              {LEVELS.map((l) => (
-                <button
-                  key={l}
-                  type="button"
-                  role="radio"
-                  aria-checked={level === l}
-                  onClick={() => {
-                    setLevel(l);
-                    setS({ ...s, yearly: i.levels[l].yearly_cents });
-                  }}
-                  className={cn(
-                    "rounded-xl border px-2.5 py-2.5 text-left transition-colors",
-                    level === l ? "border-primary bg-accent text-accent-foreground" : "hover:bg-muted",
-                  )}
-                >
-                  <span className="block text-sm font-medium">{LEVEL_NAMES[l].title}</span>
-                  <span className="block text-xs opacity-80">
-                    <Money cents={i.levels[l].yearly_cents} style="compact" />
-                    /yr
-                  </span>
-                </button>
-              ))}
-            </div>
-          </div>
-          <Slider
-            label="Yearly spending"
-            value={s.yearly}
-            display={<Money cents={s.yearly} />}
-            min={0}
-            max={Math.max(20_000_000, Math.ceil((i.levels.fat.yearly_cents * 1.5) / 1_000_000) * 1_000_000)}
-            step={100_000}
-            onChange={(v) => setS({ ...s, yearly: v })}
-            hint={
-              <Source
-                note={`${LEVEL_NAMES[level].title}: ${i.levels[level].note.charAt(0).toLowerCase()}${i.levels[level].note.slice(1)}`}
-                differs={s.yearly !== i.levels[level].derived_cents}
-                typed={i.levels[level].typed && s.yearly === i.levels[level].yearly_cents}
-                derived={<Money cents={i.levels[level].derived_cents} />}
-                onUse={() => setS({ ...s, yearly: i.levels[level].derived_cents })}
-              />
-            }
-          />
-          <Slider
-            label="Market return, after inflation"
-            value={s.ret}
-            display={`${s.ret}% a year`}
-            min={1}
-            max={10}
-            step={0.5}
-            onChange={(v) => setS({ ...s, ret: v })}
-            hint={
-              <Source
-                note={i.returns_source.note}
-                differs={s.ret !== i.returns_source.derived_mid}
-                typed={i.returns_source.typed && s.ret === i.returns.mid}
-                derived={`${i.returns_source.derived_mid}%`}
-                onUse={() => setS({ ...s, ret: i.returns_source.derived_mid })}
-              />
-            }
-          />
-          <Slider
-            label="Taking out each year"
-            value={s.withdrawal}
-            display={`${s.withdrawal}%`}
-            min={3}
-            max={5}
-            step={0.25}
-            onChange={(v) => setS({ ...s, withdrawal: v })}
-            hint="4% is the common rule of thumb for a 30-year retirement; 3.5% is safer for a longer one."
-          />
-          {changed && (
-            <div className="flex flex-wrap items-center gap-3">
-              <Button onClick={saveScenario} disabled={saving}>
-                Save as my plan
-              </Button>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
 
-      <Ideas p={p} s={s} />
-      <GoalsCard />
-      <IncomeLink />
-      <TaxesLink />
-      {p.ideas.hsa && <HsaCard h={p.ideas.hsa} />}
+        <div className="grid grid-cols-2 gap-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>In 10 years</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-2xl font-semibold tracking-tight">
+                <Money cents={in10.mid} style="compact" />
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                <Money cents={in10.low} style="compact" /> to <Money cents={in10.high} style="compact" />
+              </p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle>Saving a month</CardTitle>
+              <TrendingUp className="size-4 text-positive" aria-hidden />
+            </CardHeader>
+            <CardContent>
+              <p className="text-2xl font-semibold tracking-tight">
+                <Money cents={s.monthly} />
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {s.monthly === i.measured_savings_cents
+                  ? i.savings_source.short
+                  : i.savings_typed && s.monthly === i.monthly_savings_cents
+                    ? "the number you typed in"
+                    : "what if"}
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+      </Column>
+
+      <Column>
+        <Card>
+          <CardHeader>
+            <CardTitle>What if</CardTitle>
+            {changed && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="-mt-1.5 -mr-2"
+                onClick={() => {
+                  setS(saved);
+                  setLevel(i.level);
+                }}
+              >
+                <RotateCcw /> Reset
+              </Button>
+            )}
+          </CardHeader>
+          <CardContent className="grid grid-cols-1 gap-6">
+            <Slider
+              label="Saving each month"
+              value={s.monthly}
+              display={<Money cents={s.monthly} />}
+              min={0}
+              max={Math.max(1_000_000, Math.ceil(((i.measured_savings_cents ?? s.monthly) * 2.5) / 50_000) * 50_000)}
+              step={5_000}
+              onChange={(v) => setS({ ...s, monthly: v })}
+              hint={
+                <Source
+                  note={i.savings_source.note}
+                  breakdown={i.savings_source.breakdown}
+                  excluded={i.savings_source.excluded}
+                  months={i.savings_source.months}
+                  moneyIn={i.savings_source.money_in ?? []}
+                  onCountAs={countAs}
+                  differs={i.measured_savings_cents !== null && s.monthly !== i.measured_savings_cents}
+                  typed={i.savings_typed && s.monthly === i.monthly_savings_cents}
+                  derived={i.measured_savings_cents !== null ? <Money cents={i.measured_savings_cents} /> : null}
+                  onUse={() => i.measured_savings_cents !== null && setS({ ...s, monthly: i.measured_savings_cents })}
+                />
+              }
+            />
+            <div className="grid grid-cols-1 gap-2">
+              <p className="text-sm font-medium" id="level-label">
+                Spending, once work is optional
+              </p>
+              <div role="radiogroup" aria-labelledby="level-label" className="grid grid-cols-3 gap-2">
+                {LEVELS.map((l) => (
+                  <button
+                    key={l}
+                    type="button"
+                    role="radio"
+                    aria-checked={level === l}
+                    onClick={() => {
+                      setLevel(l);
+                      setS({ ...s, yearly: i.levels[l].yearly_cents });
+                    }}
+                    className={cn(
+                      "rounded-xl border px-2.5 py-2.5 text-left transition-colors",
+                      level === l ? "border-primary bg-accent text-accent-foreground" : "hover:bg-muted",
+                    )}
+                  >
+                    <span className="block text-sm font-medium">{LEVEL_NAMES[l].title}</span>
+                    <span className="block text-xs opacity-80">
+                      <Money cents={i.levels[l].yearly_cents} style="compact" />
+                      /yr
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+            <Slider
+              label="Yearly spending"
+              value={s.yearly}
+              display={<Money cents={s.yearly} />}
+              min={0}
+              max={Math.max(20_000_000, Math.ceil((i.levels.fat.yearly_cents * 1.5) / 1_000_000) * 1_000_000)}
+              step={100_000}
+              onChange={(v) => setS({ ...s, yearly: v })}
+              hint={
+                <Source
+                  note={`${LEVEL_NAMES[level].title}: ${i.levels[level].note.charAt(0).toLowerCase()}${i.levels[level].note.slice(1)}`}
+                  differs={s.yearly !== i.levels[level].derived_cents}
+                  typed={i.levels[level].typed && s.yearly === i.levels[level].yearly_cents}
+                  derived={<Money cents={i.levels[level].derived_cents} />}
+                  onUse={() => setS({ ...s, yearly: i.levels[level].derived_cents })}
+                />
+              }
+            />
+            <Slider
+              label="Market return, after inflation"
+              value={s.ret}
+              display={`${s.ret}% a year`}
+              min={1}
+              max={10}
+              step={0.5}
+              onChange={(v) => setS({ ...s, ret: v })}
+              hint={
+                <Source
+                  note={i.returns_source.note}
+                  differs={s.ret !== i.returns_source.derived_mid}
+                  typed={i.returns_source.typed && s.ret === i.returns.mid}
+                  derived={`${i.returns_source.derived_mid}%`}
+                  onUse={() => setS({ ...s, ret: i.returns_source.derived_mid })}
+                />
+              }
+            />
+            <Slider
+              label="Taking out each year"
+              value={s.withdrawal}
+              display={`${s.withdrawal}%`}
+              min={3}
+              max={5}
+              step={0.25}
+              onChange={(v) => setS({ ...s, withdrawal: v })}
+              hint="4% is the common rule of thumb for a 30-year retirement; 3.5% is safer for a longer one."
+            />
+            {changed && (
+              <div className="flex flex-wrap items-center gap-3">
+                <Button onClick={saveScenario} disabled={saving}>
+                  Save as my plan
+                </Button>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Ideas p={p} s={s} />
+        <GoalsCard />
+        <IncomeLink />
+        <TaxesLink />
+        {p.ideas.hsa && <HsaCard h={p.ideas.hsa} />}
+      </Column>
       <About open={aboutOpen} onOpenChange={setAboutOpen} p={p} save={save} saving={saving} />
-    </div>
+    </Columns>
   );
 }
 

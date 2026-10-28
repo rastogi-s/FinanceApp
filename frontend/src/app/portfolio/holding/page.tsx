@@ -6,7 +6,7 @@ import { useSearchParams } from "next/navigation";
 import { AlertTriangle, ArrowDownRight, ArrowUpRight, Bell, ChevronRight, Layers, Plus } from "lucide-react";
 import { RuleSheet, type RuleIn } from "@/components/alert-sheets";
 import { Money } from "@/components/money";
-import { BackLink, Notice } from "@/components/page";
+import { BackLink, Notice, Wide } from "@/components/page";
 import { PriceChart, pointLabel } from "@/components/price-chart";
 import { TaxLotsCard } from "@/components/tax-lots";
 import { Badge } from "@/components/ui/badge";
@@ -30,7 +30,12 @@ export default function HoldingPage() {
 }
 
 function Back() {
-  return <BackLink href="/portfolio">Portfolio</BackLink>;
+  return (
+    <>
+      <Wide />
+      <BackLink href="/portfolio">Portfolio</BackLink>
+    </>
+  );
 }
 
 function Loading() {

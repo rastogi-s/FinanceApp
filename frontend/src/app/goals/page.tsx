@@ -6,7 +6,7 @@ import { useSearchParams } from "next/navigation";
 import { ChevronRight, Flag, Plus, Target } from "lucide-react";
 import { GoalSheet } from "@/components/goal-sheet";
 import { Money } from "@/components/money";
-import { BackLink, Notice } from "@/components/page";
+import { BackLink, Notice, Wide } from "@/components/page";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -25,6 +25,7 @@ export default function GoalsPage() {
 
   return (
     <>
+      <Wide />
       <div className="mb-5">
         <BackLink href="/plan">Plan</BackLink>
         <div className="flex items-end justify-between gap-3">
