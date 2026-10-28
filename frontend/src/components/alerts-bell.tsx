@@ -32,7 +32,8 @@ export function AlertsBell({ demo, className }: { demo: boolean; className?: str
   const [open, setOpen] = useState(false);
 
   const load = useCallback(() => {
-    api<Inbox>("/api/alerts/inbox").then(setInbox, () => {});
+    // quiet401: signing out resets the household, which reloads this; that 401 isn't an expired session.
+    api<Inbox>("/api/alerts/inbox", { quiet401: true }).then(setInbox, () => {});
   }, []);
 
   // Fresh on every page, when the app comes back to the front, after a refresh, and after alerts are read elsewhere (Home's Clear).
