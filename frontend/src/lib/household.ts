@@ -50,6 +50,17 @@ export type Alert = {
 
 /** Where tapping an alert goes, when it's about one page of the app. */
 export const alertHref = (a: Alert): string | null => (a.link?.startsWith("/") && !a.link.startsWith("//") ? a.link : null);
+/** A CD maturing within 30 days, or in its grace period (backend deposits.maturing). */
+export type Maturing = {
+  account_id: number;
+  name: string;
+  maturity: string;
+  days_left: number;
+  grace_ends: string | null;
+  status: "open" | "grace";
+  auto_renew: boolean | null;
+  value_cents: number | null;
+};
 export type AccountRow = { id?: number; name: string; type?: string; cents: number; as_of?: string | null };
 
 export type LinkedHousehold = {
@@ -69,11 +80,19 @@ export type LinkedHousehold = {
   holdings: Holding[];
   prices_as_of?: string | null;
   allocation: { asset_class: string; cents: number }[];
-  projection: { monthly_savings_cents: number; bands: { year: number; low: number; mid: number; high: number }[] } | null;
+  projection: {
+    monthly_savings_cents: number;
+    /** What the projection starts from (invested and saved money), and the amount that covers your spending for good. */
+    start_cents?: number;
+    target_cents?: number | null;
+    fire_year?: { low: number | null; mid: number | null; high: number | null } | null;
+    bands: { year: number; low: number; mid: number; high: number }[];
+  } | null;
   health?: {
     stale: { id: number; institution: string; error: string | null }[];
     last_sync_ok: boolean | null;
     uploads?: UploadDue[];
+    maturing?: Maturing[];
   };
 };
 

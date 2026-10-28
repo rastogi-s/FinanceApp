@@ -58,12 +58,15 @@ export function SubPageTitle({ title, subtitle, back }: { title: string; subtitl
 export function HouseholdPage({
   title,
   subtitle,
+  heading,
   before,
   wide,
   children,
 }: {
   title: string;
   subtitle?: string;
+  /** Shown in place of the title (Home's greeting). */
+  heading?: React.ReactNode;
   /** Lays out in columns on a laptop, so it takes the screen's width from the first frame (see Columns). */
   wide?: boolean;
   /** Shown above the page whether or not an account is linked yet (Home's setup guide). */
@@ -74,7 +77,7 @@ export function HouseholdPage({
   return (
     <>
       {wide && <Wide />}
-      <PageTitle title={title} subtitle={subtitle} />
+      {heading ?? <PageTitle title={title} subtitle={subtitle} />}
       {before && <div className="mb-4">{before}</div>}
       {state.status === "loading" && <LoadingCards />}
       {state.status === "error" && (

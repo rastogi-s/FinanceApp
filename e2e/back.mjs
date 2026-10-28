@@ -76,8 +76,11 @@ for (const [name, opts] of Object.entries(sizes)) {
   await page.setViewportSize({ width: size.width, height: Math.min(size.height, 480) });
   await page.goto(BASE + "/"); await page.waitForTimeout(1200);
   await page.mouse.wheel(0, 500); await page.waitForTimeout(400);
+  // The Budget link on Home's budget card, scrolled to first, so clicking it doesn't move the page.
+  const budgetLink = page.locator('a[href="/budget"]').filter({ visible: true }).last();
+  await budgetLink.scrollIntoViewIfNeeded(); await page.waitForTimeout(400);
   const h0 = await page.evaluate(() => scrollY);
-  await page.locator('a[href="/budget"]').filter({ visible: true }).last().click();
+  await budgetLink.click();
   await page.waitForURL(/budget/); await page.waitForTimeout(800);
   await page.goBack(); await page.waitForTimeout(1500);
   const h1 = await page.evaluate(() => scrollY);

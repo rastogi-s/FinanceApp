@@ -1,5 +1,29 @@
 [
   {
+    "version": "0.52.0",
+    "title": "A new Home",
+    "features": [
+      {
+        "id": "home-needs-you",
+        "title": "Good morning, and what needs you",
+        "body": "Home now opens with the day, a greeting and today's morning brief (tap Morning brief for its points). Below it, Needs you gathers everything waiting on you, each with its button: a statement to upload, a CD maturing in the next 30 days, a budget at 90% or more, a bank that stopped syncing, categories to check. When there's nothing, it says so.",
+        "tryIt": "/"
+      },
+      {
+        "id": "home-net-worth-chart",
+        "title": "A real net worth chart",
+        "body": "Net worth is now a chart over 1W, 1M, 3M, YTD or 1Y. Drag across it, or use the arrow keys, to read any day. Under it, how much of the change came from markets and how much from saving and spending. Tap Net worth or How it adds up for the full breakdown.",
+        "tryIt": "/"
+      },
+      {
+        "id": "home-tiles",
+        "title": "Financial independence and your top goal on Home",
+        "body": "Beside safe to spend and savings rate, two new tiles: how far your invested and saved money goes toward covering your spending for good (the Plan page's target), and your highest-priority goal. Tap either to open it.",
+        "tryIt": "/"
+      }
+    ]
+  },
+  {
     "version": "0.51.0",
     "title": "Pages use the whole laptop screen",
     "features": [

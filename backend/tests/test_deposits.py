@@ -95,6 +95,24 @@ def test_cd_notices():
     assert deposits.notices("Marcus CD", c, date(2026, 10, 1)) == []
 
 
+def test_maturing_soon_for_home():
+    def cd(maturity, **kw):
+        inputs = CdInputs(balance_cents=5_000_00, apy=4.0, opened=date(2025, 10, 1), maturity=maturity, **kw)
+        return {"cd": deposits.cd(inputs, TODAY)}
+
+    details = {
+        1: cd(date(2026, 11, 20)),  # 24 days: listed
+        2: cd(date(2027, 1, 20)),  # months away: not yet
+        3: cd(date(2026, 10, 24)),  # matured 3 days ago, in its grace period: listed first
+        4: cd(date(2026, 9, 1), auto_renew=True),  # renewed long ago: done
+        5: {"cd": None},  # a savings account
+    }
+    rows = deposits.maturing(details, {i: f"CD {i}" for i in details})
+    assert [r["account_id"] for r in rows] == [3, 1]
+    assert rows[0]["status"] == "grace" and rows[1]["days_left"] == 24 and rows[1]["name"] == "CD 1"
+    assert rows[1]["value_cents"] > 5_000_00
+
+
 def test_benchmarks():
     assert rates.benchmark(rates.BUNDLED, "savings")["national"] == 0.38
     b = rates.benchmark(rates.BUNDLED, "cd", 12)
@@ -196,6 +214,9 @@ def test_cd_and_rate_pushes(client, home):
         json={"apy": 4.0, "maturity": maturity.isoformat(), "term_months": 12, "auto_renew": False},
         headers=csrf(client),
     )
+    # Home's "Needs you" lists it, with the button to decide.
+    [soon] = client.get("/api/household").json()["health"]["maturing"]
+    assert soon["account_id"] == cd["id"] and soon["days_left"] == 7 and soon["auto_renew"] is False
     last_month = deposits.add_months(date(today.year, today.month, 1), -1)
     with db_of(client).session() as db:
         db.add(AccountTerms(account_id=savings["id"], bank_apy=3.5, rates={f"{last_month:%Y-%m}": 4.0}))

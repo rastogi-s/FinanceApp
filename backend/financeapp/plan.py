@@ -561,6 +561,7 @@ def projection(i: dict) -> dict | None:
         fire = {k: (i["year"] * 12 + m) // 12 if m is not None else None for k, m in reached.items()}
     return {
         "monthly_savings_cents": monthly,
+        "start_cents": i["start_cents"],
         "bands": bands(i["start_cents"], monthly, i["year"], i["returns"]),
         "target_cents": target,
         "fire_year": fire,

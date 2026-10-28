@@ -124,6 +124,9 @@ def test_demo_household_adds_up(site):
     debts = sum(d["cents"] for d in h["accounts"]["debts"])
     assert allocation - debts == h["net_worth"]["cents"]
     assert all(isinstance(t["amount_cents"], int) for t in h["transactions"])
+    # Home's "Needs you" has the sample CD, and the FI tile has what the projection starts from.
+    assert [m["name"] for m in h["health"]["maturing"]] == ["Marcus 12-month CD ••7781"]
+    assert h["projection"]["start_cents"] > 0 and h["projection"]["target_cents"] > 0
 
 
 def test_whats_new_is_valid():
