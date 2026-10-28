@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { type ReactNode, useEffect, useRef, useState } from "react";
-import { ArrowDown, ArrowUp, Layers } from "lucide-react";
+import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, Layers } from "lucide-react";
 import { Money } from "@/components/money";
 import { type Group, dayCents, gain, gainCents, priceOf, shareChange } from "@/lib/holdings";
 import type { Holding } from "@/lib/household";
@@ -60,12 +60,31 @@ export function HoldingsTable({
 }) {
   const box = useRef<HTMLDivElement>(null);
   const [scrolled, setScrolled] = useState(false);
+  // Whether more columns wait off the right edge: a fade and an arrow say so, since a mouse can't swipe.
+  const [more, setMore] = useState(false);
+  const measure = () => {
+    const el = box.current;
+    if (!el) return;
+    setScrolled(el.scrollLeft > 0);
+    setMore(el.scrollLeft + el.clientWidth < el.scrollWidth - 1);
+  };
   useEffect(() => {
     const el = box.current;
     if (!el) return;
     el.scrollLeft = scrolledX;
-    setScrolled(el.scrollLeft > 0);
+    measure();
+    const seen = new ResizeObserver(measure);
+    seen.observe(el);
+    if (el.firstElementChild) seen.observe(el.firstElementChild);
+    return () => seen.disconnect();
   }, []);
+  const nudge = (dir: 1 | -1) => {
+    const el = box.current;
+    if (!el) return;
+    // Most of a screen's worth, less the pinned symbol column, so a column stays in view for context.
+    const step = Math.max(160, el.clientWidth - 260);
+    el.scrollBy({ left: dir * step, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+  };
 
   const columns: {
     id: string;
@@ -147,46 +166,75 @@ export function HoldingsTable({
   );
 
   return (
-    <div
-      ref={box}
-      onScroll={(e) => {
-        scrolledX = e.currentTarget.scrollLeft;
-        const s = scrolledX > 0;
-        if (s !== scrolled) setScrolled(s);
-      }}
-      className="relative overflow-x-auto overscroll-x-contain pb-2 [scrollbar-width:thin]"
-      role="region"
-      aria-label="Holdings table, scrolls sideways"
-      tabIndex={0}
-    >
-      <table className="w-max min-w-full border-separate border-spacing-0 text-sm">
-        <thead>{head}</thead>
-        {sections ? (
-          sections.map((s) => (
-            <tbody key={s.account}>
-              <tr>
-                <th
-                  scope="rowgroup"
-                  colSpan={shown.length + 1}
-                  className="border-b bg-muted/40 p-0 text-left text-xs font-medium text-muted-foreground"
-                >
-                  {/* Pinned like the symbols, so the account's name stays in view while the numbers scroll. */}
-                  <span className="sticky left-0 inline-flex max-w-[100vw] gap-2 px-5 py-2">
-                    <span className="truncate">{s.account}</span>
-                    <span className="shrink-0">
-                      · {s.rows.length} · <Money cents={s.cents} />
+    <div className="relative">
+      <div
+        ref={box}
+        onScroll={(e) => {
+          scrolledX = e.currentTarget.scrollLeft;
+          measure();
+        }}
+        className="relative overflow-x-auto overscroll-x-contain pb-2 [scrollbar-color:var(--border)_transparent] [scrollbar-width:thin]"
+        role="region"
+        aria-label={more || scrolled ? "Holdings table, scrolls sideways" : "Holdings table"}
+        tabIndex={0}
+      >
+        <table className="w-max min-w-full border-separate border-spacing-0 text-sm">
+          <thead>{head}</thead>
+          {sections ? (
+            sections.map((s) => (
+              <tbody key={s.account}>
+                <tr>
+                  <th
+                    scope="rowgroup"
+                    colSpan={shown.length + 1}
+                    className="border-b bg-muted/40 p-0 text-left text-xs font-medium text-muted-foreground"
+                  >
+                    {/* Pinned like the symbols, so the account's name stays in view while the numbers scroll. */}
+                    <span className="sticky left-0 inline-flex max-w-[100vw] gap-2 px-5 py-2">
+                      <span className="truncate">{s.account}</span>
+                      <span className="shrink-0">
+                        · {s.rows.length} · <Money cents={s.cents} />
+                      </span>
                     </span>
-                  </span>
-                </th>
-              </tr>
-              {s.rows.map((x) => line(x, `${x.symbol}-${x.account}`))}
-            </tbody>
-          ))
-        ) : (
-          <tbody>{rows!.map((x) => line(x, x.symbol))}</tbody>
-        )}
-      </table>
+                  </th>
+                </tr>
+                {s.rows.map((x) => line(x, `${x.symbol}-${x.account}`))}
+              </tbody>
+            ))
+          ) : (
+            <tbody>{rows!.map((x) => line(x, x.symbol))}</tbody>
+          )}
+        </table>
+      </div>
+      {more && (
+        <div
+          className="pointer-events-none absolute inset-y-0 right-0 bottom-2 w-12 bg-gradient-to-l from-card to-transparent"
+          aria-hidden
+        />
+      )}
+      {/* With a mouse: arrows to page the columns. Touch screens swipe, and Shift+wheel works too. */}
+      {scrolled && <ScrollArrow side="left" onClick={() => nudge(-1)} />}
+      {more && <ScrollArrow side="right" onClick={() => nudge(1)} />}
     </div>
+  );
+}
+
+function ScrollArrow({ side, onClick }: { side: "left" | "right"; onClick: () => void }) {
+  const Icon = side === "left" ? ChevronLeft : ChevronRight;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      tabIndex={-1}
+      aria-label={side === "left" ? "Show earlier columns" : "Show more columns"}
+      title={side === "left" ? "Earlier columns" : "More columns (or Shift + scroll)"}
+      className={cn(
+        "absolute top-1 z-30 hidden size-8 place-items-center rounded-full border bg-card text-muted-foreground shadow-sm transition-colors hover:bg-muted hover:text-foreground pointer-fine:grid",
+        side === "left" ? "left-[calc(8.5rem+0.25rem)] sm:left-[calc(14rem+0.25rem)] 2xl:left-[calc(13rem+0.25rem)]" : "right-1",
+      )}
+    >
+      <Icon className="size-4" aria-hidden />
+    </button>
   );
 }
 
@@ -244,7 +292,7 @@ function Line({ x, trend, total, hasGain, scrolled }: { x: Row; trend?: Trend; t
       <th
         scope="row"
         className={cn(
-          "sticky left-0 z-10 w-[8.5rem] max-w-[8.5rem] border-b bg-card py-2.5 pr-3 pl-5 text-left font-normal sm:w-56 sm:max-w-56",
+          "sticky left-0 z-10 w-[8.5rem] max-w-[8.5rem] border-b bg-card py-2.5 pr-3 pl-5 text-left font-normal sm:w-56 sm:max-w-56 2xl:w-52 2xl:max-w-52",
           "transition-colors group-hover:bg-[color-mix(in_oklab,var(--muted)_50%,var(--card))]",
           scrolled && "shadow-[6px_0_8px_-6px_rgb(0_0_0/0.25)]",
         )}

@@ -8,6 +8,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useHousehold, type LinkedHousehold } from "@/lib/household";
 import { cameFrom } from "@/lib/nav";
+import { cn } from "@/lib/utils";
 
 export function PageTitle({ title, subtitle }: { title: string; subtitle?: React.ReactNode }) {
   return (
@@ -58,10 +59,13 @@ export function HouseholdPage({
   title,
   subtitle,
   before,
+  wide,
   children,
 }: {
   title: string;
   subtitle?: string;
+  /** Lays out in columns on a laptop, so it takes the screen's width from the first frame (see Columns). */
+  wide?: boolean;
   /** Shown above the page whether or not an account is linked yet (Home's setup guide). */
   before?: React.ReactNode;
   children: (h: LinkedHousehold) => React.ReactNode;
@@ -69,6 +73,7 @@ export function HouseholdPage({
   const state = useHousehold();
   return (
     <>
+      {wide && <Wide />}
       <PageTitle title={title} subtitle={subtitle} />
       {before && <div className="mb-4">{before}</div>}
       {state.status === "loading" && <LoadingCards />}
@@ -93,6 +98,29 @@ export function HouseholdPage({
       {state.status === "ready" && state.household.linked && children(state.household)}
     </>
   );
+}
+
+/** Marks the page as one laid out for a laptop's width; the shell widens to fit. */
+export function Wide() {
+  return <span data-wide hidden />;
+}
+
+/**
+ * A page's cards on a laptop: one column on a phone and a narrow window, two side by side from 1280px. Each child is
+ * a Column, stacked in reading order on a phone, so the phone layout is what it always was. Full-width cards go
+ * after the columns, or before them, as siblings with `xl:col-span-2`.
+ */
+export function Columns({ children, className }: { children: React.ReactNode; className?: string }) {
+  return (
+    <div data-wide className={cn("grid grid-cols-1 gap-4 xl:grid-cols-2 xl:items-start", className)}>
+      {children}
+    </div>
+  );
+}
+
+/** One column of Columns. Empty columns take no space, so conditional cards don't leave a double gap. */
+export function Column({ children, className }: { children: React.ReactNode; className?: string }) {
+  return <div className={cn("grid min-w-0 grid-cols-1 gap-4 empty:hidden", className)}>{children}</div>;
 }
 
 function LoadingCards() {

@@ -6,7 +6,7 @@ import { ArrowDownRight, ArrowUpRight, Briefcase, FileUp, Minus, NotebookPen, Pe
 import { AIOfferCard, shrinkPicture, type AIOffer } from "@/components/ai-offer";
 import { YearBars } from "@/components/earnings-chart";
 import { Money, formatMoney } from "@/components/money";
-import { BackLink, Notice, PageTitle } from "@/components/page";
+import { BackLink, Notice, PageTitle, Wide } from "@/components/page";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -40,6 +40,7 @@ export default function Earnings() {
   const e = local ?? data;
   return (
     <>
+      <Wide />
       <BackLink href="/plan">Plan</BackLink>
       <PageTitle
         title="Income over time"

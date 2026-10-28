@@ -5,7 +5,7 @@ import { AlertTriangle, ChevronRight, CreditCard, Globe, Search, Sparkles, Store
 import { CardFace, CardSheet, ValuesSheet, Chip, setPrefer } from "@/components/card-sheets";
 import { BookmarkSheet, ImportSheet, NearSheet, OffersCard } from "@/components/offer-sheets";
 import { Money } from "@/components/money";
-import { BackLink, Notice } from "@/components/page";
+import { BackLink, Notice, Wide } from "@/components/page";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -42,6 +42,7 @@ export default function CardsPageView() {
 
   return (
     <>
+      <Wide />
       <div className="mb-5">
         <BackLink href="/spending">Spending</BackLink>
         <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">Credit cards</h1>
@@ -67,7 +68,7 @@ export default function CardsPageView() {
         </Notice>
       )}
       {s && s.cards.length > 0 && (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:items-start">
           <StoreLookup hasCards={s.cards.some((c) => c.linked && c.role === "active")} />
           <Wallet s={s} onOpen={setOpen} />
           <OffersCard
@@ -332,7 +333,7 @@ function Wallet({ s, onOpen }: { s: CardsPage; onOpen: (id: number) => void }) {
         {unlinked > 0 && <Badge variant="warning">{unlinked === 1 ? "1 to set up" : `${unlinked} to set up`}</Badge>}
       </CardHeader>
       <CardContent>
-        <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
           {s.cards.map((c) => (
             <li key={c.account_id}>
               <WalletCard c={c} asOf={s.as_of} onOpen={() => onOpen(c.account_id)} />

@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, ArrowLeftRight, Check, ChevronDown, CreditCard, EyeOff, LineChart, ShieldCheck, Sparkles } from "lucide-react";
 import { Money } from "@/components/money";
-import { BackLink, Notice } from "@/components/page";
+import { BackLink, Notice, Wide } from "@/components/page";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -80,6 +80,7 @@ export default function ReviewPage() {
 
   return (
     <>
+      <Wide />
       <div className="mb-5">
         <BackLink href="/budget">Budget</BackLink>
         <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">Check categories</h1>

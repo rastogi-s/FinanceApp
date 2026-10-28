@@ -45,6 +45,11 @@
   }
 }
 
+/* 3xl: big screens (1800px+), where wide pages take the whole width. */
+@theme {
+  --breakpoint-3xl: 112.5rem;
+}
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);

@@ -1,5 +1,23 @@
 [
   {
+    "version": "0.51.0",
+    "title": "Pages use the whole laptop screen",
+    "features": [
+      {
+        "id": "wide-pages",
+        "title": "Two columns on a laptop",
+        "body": "On a laptop or big screen, Home, Spending, Budget, Portfolio, Plan, Taxes, Credit Cards, Accounts and the other main pages now spread out side by side instead of sitting in a narrow strip. On Plan the chart stays beside the what-if sliders, and on Spending and Budget the month's summary stays in view as you scroll. The phone layout is unchanged.",
+        "tryIt": "/portfolio"
+      },
+      {
+        "id": "holdings-scroll",
+        "title": "Holdings table fits, or says there's more",
+        "body": "On a wide screen the whole holdings table fits without scrolling. When it doesn't, a fade and an arrow at the right edge show there are more columns: click the arrow, drag the scrollbar, or hold Shift while scrolling the mouse wheel.",
+        "tryIt": "/portfolio"
+      }
+    ]
+  },
+  {
     "version": "0.50.0",
     "title": "Tap a notification to open what it's about",
     "features": [

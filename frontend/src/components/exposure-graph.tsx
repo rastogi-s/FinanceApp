@@ -139,7 +139,7 @@ export function ExposureGraph({ exposure, onSelect }: { exposure: Exposure; onSe
     <div>
       <svg
         viewBox={`0 0 ${W} ${H}`}
-        className="h-auto w-full touch-manipulation select-none"
+        className="h-auto max-h-[36rem] w-full touch-manipulation select-none"
         role="group"
         aria-label={`Your top ${count} companies and the funds they reach you through. Each is a button; the list below has the same numbers.`}
         onClick={() => pick(null)}

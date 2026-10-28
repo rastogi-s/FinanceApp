@@ -5,7 +5,7 @@ import { useMemo, useState } from "react";
 import { CalendarDays, ChevronDown, ChevronRight, Coins, Landmark, Pencil, Receipt, Repeat } from "lucide-react";
 import { MonthBars, TwoLines } from "@/components/income-charts";
 import { Money, formatMoney } from "@/components/money";
-import { BackLink, Notice } from "@/components/page";
+import { BackLink, Notice, Wide } from "@/components/page";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -50,6 +50,7 @@ export default function IncomePage() {
   const p = local ?? data;
   return (
     <>
+      <Wide />
       <BackLink href="/portfolio">Portfolio</BackLink>
       <div className="mb-5">
         <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">Dividends & interest</h1>

@@ -29,7 +29,7 @@ import {
 import { DepositDetails, DepositNote } from "@/components/deposit-details";
 import { Money, formatMoney } from "@/components/money";
 import { FlipCard } from "@/components/flip-card";
-import { SubPageTitle } from "@/components/page";
+import { SubPageTitle, Wide } from "@/components/page";
 import { UploadSheet } from "@/components/upload-sheet";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -192,6 +192,7 @@ function Accounts() {
 
   return (
     <>
+      <Wide />
       <SubPageTitle title="Accounts" back="/settings" subtitle="Every account, how it connects, and its backup." />
       {params.get("welcome") && linkedCount === 0 && (
         <Card className="mb-4 border-primary/30 bg-accent/40">
@@ -260,22 +261,25 @@ function Accounts() {
             </div>
           )}
 
-          {view === "type" && linkedCount > 0 ? (
-            <ByType data={data} onEdit={(account, connection) => setEditing({ account, connection })} onRelink={relink} onUpload={upload} />
-          ) : (
-            data.connections.map((c) => (
-              <ConnectionCard
-                key={c.id}
-                connection={c}
-                kinds={data.kinds}
-                onEdit={(account) => setEditing({ account, connection: c })}
-                onRelink={() => relink(c)}
-                onUpload={upload}
-              />
-            ))
-          )}
+          {/* Laptop: the account cards two across. */}
+          <div className="grid grid-cols-1 gap-4 empty:hidden xl:grid-cols-2 xl:items-start">
+            {view === "type" && linkedCount > 0 ? (
+              <ByType data={data} onEdit={(account, connection) => setEditing({ account, connection })} onRelink={relink} onUpload={upload} />
+            ) : (
+              data.connections.map((c) => (
+                <ConnectionCard
+                  key={c.id}
+                  connection={c}
+                  kinds={data.kinds}
+                  onEdit={(account) => setEditing({ account, connection: c })}
+                  onRelink={() => relink(c)}
+                  onUpload={upload}
+                />
+              ))
+            )}
 
-          {data.revoked.length > 0 && <DisconnectedCard revoked={data.revoked} disabled={demo} onRemoved={changed} />}
+            {data.revoked.length > 0 && <DisconnectedCard revoked={data.revoked} disabled={demo} onRemoved={changed} />}
+          </div>
         </div>
       )}
 

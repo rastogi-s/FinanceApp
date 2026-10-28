@@ -23,7 +23,7 @@ import { AIBudgetSheet } from "@/components/ai-budget-sheet";
 import { AddSheet, FREQUENCY_LABEL, LineSheet, PaycheckSheet } from "@/components/budget-sheets";
 import { Money, formatMoney } from "@/components/money";
 import { SavingsSheet } from "@/components/savings-sheet";
-import { HouseholdPage, Notice } from "@/components/page";
+import { Column, Columns, HouseholdPage, Notice } from "@/components/page";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select } from "@/components/ui/input";
@@ -43,7 +43,7 @@ const stamp = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric",
 
 export default function BudgetPage() {
   return (
-    <HouseholdPage title="Budget" subtitle="Every category's monthly limit, drafted from your own spending. Tap one to see what went into it this month.">
+    <HouseholdPage title="Budget" wide subtitle="Every category's monthly limit, drafted from your own spending. Tap one to see what went into it this month.">
       {() => <Budget />}
     </HouseholdPage>
   );
@@ -115,10 +115,11 @@ function Budget() {
     setAdding(false);
   };
 
+  // Laptop: how the month is going on the left, the categories and what's set aside on the right.
   return (
-    <div className="grid grid-cols-1 gap-4">
+    <Columns className="xl:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
       {!data.saved && data.lines.length > 0 && (
-        <Card className="border-primary/30 bg-accent/40">
+        <Card className="border-primary/30 bg-accent/40 xl:col-span-2">
           <CardContent className="flex gap-4 pt-5">
             <div className="grid size-10 shrink-0 place-items-center rounded-full bg-accent text-accent-foreground">
               <Sparkles className="size-5" aria-hidden />
@@ -139,170 +140,176 @@ function Budget() {
       )}
 
       {data.lines.length === 0 && (
-        <Notice
-          icon={<PiggyBank className="size-5" />}
-          title={data.months_used ? "Nothing to budget yet" : "Your budget needs a full month of spending"}
-        >
-          {data.months_used
-            ? "No bills or everyday spending in the last few months. Add a category to set a limit by hand."
-            : "Once a whole month of transactions is in, the app drafts a budget from it. You can add categories by hand meanwhile."}
-        </Notice>
+        <div className="xl:col-span-2">
+          <Notice
+            icon={<PiggyBank className="size-5" />}
+            title={data.months_used ? "Nothing to budget yet" : "Your budget needs a full month of spending"}
+          >
+            {data.months_used
+              ? "No bills or everyday spending in the last few months. Add a category to set a limit by hand."
+              : "Once a whole month of transactions is in, the app drafts a budget from it. You can add categories by hand meanwhile."}
+          </Notice>
+        </div>
       )}
 
-      <div className="grid grid-cols-2 gap-4">
-        <Card className="h-full">
-          <CardHeader>
-            <CardTitle>Safe to spend</CardTitle>
-            <Wallet className="size-4 text-muted-foreground" aria-hidden />
-          </CardHeader>
-          <CardContent>
-            {data.safe_to_spend ? (
-              <>
-                <p className="text-2xl font-semibold tracking-tight">
-                  <Money cents={data.safe_to_spend.cents} />
-                </p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  left for {data.safe_to_spend.days_left} day{data.safe_to_spend.days_left === 1 ? "" : "s"} of everyday spending
-                </p>
-              </>
-            ) : (
-              <p className="text-sm text-muted-foreground">Set an everyday budget to see this.</p>
-            )}
-          </CardContent>
-        </Card>
-        {data.savings_rate ? (
-          <button
-            type="button"
-            onClick={() => setSaving(true)}
-            aria-haspopup="dialog"
-            className="rounded-xl text-left focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-          >
-            <Card className="h-full transition-colors hover:bg-muted/40">
+      <Column className="xl:sticky xl:top-[4.5rem]">
+        <div className="grid grid-cols-2 gap-4">
+          <Card className="h-full">
+            <CardHeader>
+              <CardTitle>Safe to spend</CardTitle>
+              <Wallet className="size-4 text-muted-foreground" aria-hidden />
+            </CardHeader>
+            <CardContent>
+              {data.safe_to_spend ? (
+                <>
+                  <p className="text-2xl font-semibold tracking-tight">
+                    <Money cents={data.safe_to_spend.cents} />
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    left for {data.safe_to_spend.days_left} day{data.safe_to_spend.days_left === 1 ? "" : "s"} of everyday spending
+                  </p>
+                </>
+              ) : (
+                <p className="text-sm text-muted-foreground">Set an everyday budget to see this.</p>
+              )}
+            </CardContent>
+          </Card>
+          {data.savings_rate ? (
+            <button
+              type="button"
+              onClick={() => setSaving(true)}
+              aria-haspopup="dialog"
+              className="rounded-xl text-left focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+            >
+              <Card className="h-full transition-colors hover:bg-muted/40">
+                <CardHeader>
+                  <CardTitle>Savings rate</CardTitle>
+                  <PiggyBank className="size-4 text-muted-foreground" aria-hidden />
+                </CardHeader>
+                <CardContent>
+                  <p className={cn("text-2xl font-semibold tracking-tight", data.savings_rate.percent < 0 && "text-negative")}>
+                    {data.savings_rate.percent.toFixed(0)}%
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    of {data.savings_rate.basis === "gross" ? "gross" : "take-home"} pay in{" "}
+                    {monthName.format(new Date(data.savings_rate.month))}
+                  </p>
+                  <p className="mt-2 flex items-center gap-0.5 text-xs font-medium text-primary">
+                    See how it adds up <ChevronRight className="size-3.5" aria-hidden />
+                  </p>
+                </CardContent>
+              </Card>
+            </button>
+          ) : (
+            <Card>
               <CardHeader>
                 <CardTitle>Savings rate</CardTitle>
                 <PiggyBank className="size-4 text-muted-foreground" aria-hidden />
               </CardHeader>
               <CardContent>
-                <p className={cn("text-2xl font-semibold tracking-tight", data.savings_rate.percent < 0 && "text-negative")}>
-                  {data.savings_rate.percent.toFixed(0)}%
-                </p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  of {data.savings_rate.basis === "gross" ? "gross" : "take-home"} pay in{" "}
-                  {monthName.format(new Date(data.savings_rate.month))}
-                </p>
-                <p className="mt-2 flex items-center gap-0.5 text-xs font-medium text-primary">
-                  See how it adds up <ChevronRight className="size-3.5" aria-hidden />
-                </p>
+                <p className="text-sm text-muted-foreground">Shows up after a month with income in it.</p>
               </CardContent>
             </Card>
-          </button>
-        ) : (
+          )}
+        </div>
+
+        <CategoryCheck />
+
+        {data.forecast && <MonthEnd data={data} />}
+      </Column>
+
+      <Column>
+        {data.lines.length > 3 && (
+          <div className="-mb-1 flex items-center justify-between gap-3 px-1">
+            <h2 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">Categories</h2>
+            <Select
+              aria-label="Sort categories"
+              value={sort}
+              onChange={(e) => {
+                const v = e.target.value as LineSort;
+                setSort(v);
+                try {
+                  localStorage.setItem(SORT_KEY, v);
+                } catch {
+                  // storage blocked: the choice lasts until the page closes
+                }
+              }}
+              className="h-9 rounded-full pr-9 text-sm md:h-9"
+            >
+              {LINE_SORTS.map((x) => (
+                <option key={x.id} value={x.id}>
+                  {x.label}
+                </option>
+              ))}
+            </Select>
+          </div>
+        )}
+
+        {(["flexible", "fixed"] as const).map((kind) => {
+          const lines = sortLines(
+            data.lines.filter((l) => l.kind === kind),
+            sort,
+          );
+          return lines.length ? (
+            <Group key={kind} title={kind === "fixed" ? "Bills" : "Everyday"} lines={lines} month={data.month} onPick={setEditing} />
+          ) : null;
+        })}
+
+        {data.unbudgeted.length > 0 && (
           <Card>
             <CardHeader>
-              <CardTitle>Savings rate</CardTitle>
-              <PiggyBank className="size-4 text-muted-foreground" aria-hidden />
+              <CardTitle>Outside the budget</CardTitle>
+              <span className="text-sm text-muted-foreground">
+                <Money cents={data.unbudgeted.reduce((s, u) => s + u.spent_cents, 0)} />
+              </span>
             </CardHeader>
-            <CardContent>
-              <p className="text-sm text-muted-foreground">Shows up after a month with income in it.</p>
+            <CardContent className="pt-0">
+              <p className="mb-2 text-sm text-muted-foreground">
+                Spent this month in categories without a limit. It comes out of safe to spend.
+              </p>
+              <ul className="divide-y">
+                {data.unbudgeted.map((u) => (
+                  <li key={u.category} className="flex items-center gap-3 py-1 text-sm">
+                    <Link
+                      href={monthOf(u.category_id ?? "none")}
+                      className="-ml-2 flex min-w-0 flex-1 items-center gap-3 rounded-lg px-2 py-2 transition-colors hover:bg-muted/50"
+                      aria-label={`${u.category}: see this month's transactions`}
+                    >
+                      <span className="min-w-0 flex-1 truncate font-medium">{u.category}</span>
+                      <Money cents={u.spent_cents} />
+                    </Link>
+                    {u.category_id && data.categories.some((c) => c.id === u.category_id) ? (
+                      <button type="button" onClick={() => pick(u.category_id!)} className="py-2 text-xs font-medium text-primary">
+                        Set a limit
+                      </button>
+                    ) : u.category === "Uncategorized" ? (
+                      <Link href="/review" className="py-2 text-xs font-medium text-primary">
+                        Sort them
+                      </Link>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
             </CardContent>
           </Card>
         )}
-      </div>
 
-      <CategoryCheck />
-
-      {data.forecast && <MonthEnd data={data} />}
-
-      {data.lines.length > 3 && (
-        <div className="-mb-1 flex items-center justify-between gap-3 px-1">
-          <h2 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">Categories</h2>
-          <Select
-            aria-label="Sort categories"
-            value={sort}
-            onChange={(e) => {
-              const v = e.target.value as LineSort;
-              setSort(v);
-              try {
-                localStorage.setItem(SORT_KEY, v);
-              } catch {
-                // storage blocked: the choice lasts until the page closes
-              }
-            }}
-            className="h-9 rounded-full pr-9 text-sm md:h-9"
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" onClick={() => setAdding(true)}>
+            <Plus /> Add a category
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => (demo ? toast("Drafting with AI is off while the app shows sample data.") : setDrafting(true))}
           >
-            {LINE_SORTS.map((x) => (
-              <option key={x.id} value={x.id}>
-                {x.label}
-              </option>
-            ))}
-          </Select>
+            <Sparkles /> Draft with AI
+          </Button>
         </div>
-      )}
 
-      {(["flexible", "fixed"] as const).map((kind) => {
-        const lines = sortLines(
-          data.lines.filter((l) => l.kind === kind),
-          sort,
-        );
-        return lines.length ? (
-          <Group key={kind} title={kind === "fixed" ? "Bills" : "Everyday"} lines={lines} month={data.month} onPick={setEditing} />
-        ) : null;
-      })}
-
-      {data.unbudgeted.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Outside the budget</CardTitle>
-            <span className="text-sm text-muted-foreground">
-              <Money cents={data.unbudgeted.reduce((s, u) => s + u.spent_cents, 0)} />
-            </span>
-          </CardHeader>
-          <CardContent className="pt-0">
-            <p className="mb-2 text-sm text-muted-foreground">
-              Spent this month in categories without a limit. It comes out of safe to spend.
-            </p>
-            <ul className="divide-y">
-              {data.unbudgeted.map((u) => (
-                <li key={u.category} className="flex items-center gap-3 py-1 text-sm">
-                  <Link
-                    href={monthOf(u.category_id ?? "none")}
-                    className="-ml-2 flex min-w-0 flex-1 items-center gap-3 rounded-lg px-2 py-2 transition-colors hover:bg-muted/50"
-                    aria-label={`${u.category}: see this month's transactions`}
-                  >
-                    <span className="min-w-0 flex-1 truncate font-medium">{u.category}</span>
-                    <Money cents={u.spent_cents} />
-                  </Link>
-                  {u.category_id && data.categories.some((c) => c.id === u.category_id) ? (
-                    <button type="button" onClick={() => pick(u.category_id!)} className="py-2 text-xs font-medium text-primary">
-                      Set a limit
-                    </button>
-                  ) : u.category === "Uncategorized" ? (
-                    <Link href="/review" className="py-2 text-xs font-medium text-primary">
-                      Sort them
-                    </Link>
-                  ) : null}
-                </li>
-              ))}
-            </ul>
-          </CardContent>
-        </Card>
-      )}
-
-      <div className="flex flex-wrap gap-2">
-        <Button variant="outline" onClick={() => setAdding(true)}>
-          <Plus /> Add a category
-        </Button>
-        <Button
-          variant="outline"
-          onClick={() => (demo ? toast("Drafting with AI is off while the app shows sample data.") : setDrafting(true))}
-        >
-          <Sparkles /> Draft with AI
-        </Button>
-      </div>
-
-      <Savings data={data} onAdd={() => setPaying(true)} run={run} />
-      <Emergency data={data} run={run} />
-      <Versions data={data} run={run} />
+        <Savings data={data} onAdd={() => setPaying(true)} run={run} />
+        <Emergency data={data} run={run} />
+        <Versions data={data} run={run} />
+      </Column>
 
       <LineSheet line={editing} budget={data} change={change} onClose={() => setEditing(null)} />
       <AddSheet open={adding} budget={data} onClose={() => setAdding(false)} onPick={pick} />
@@ -314,7 +321,7 @@ function Budget() {
       />
       <SavingsSheet months={data.savings_history} open={saving && !!data.savings_rate} onOpenChange={setSaving} />
       <PaycheckSheet open={paying} budget={data} change={change} onClose={() => setPaying(false)} />
-    </div>
+    </Columns>
   );
 }
 

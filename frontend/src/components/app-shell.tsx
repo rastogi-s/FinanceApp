@@ -113,6 +113,13 @@ function Waiting() {
   );
 }
 
+// Wide pages: 72rem from 1280px screens, 88rem from 1536px, and the whole width from 1800px (where the holdings
+// table fits without scrolling sideways), with the gutters growing a little too.
+const WIDE_MAIN =
+  "xl:has-[[data-wide]]:max-w-6xl xl:has-[[data-wide]]:px-6 2xl:has-[[data-wide]]:max-w-[88rem] 2xl:has-[[data-wide]]:px-8 3xl:has-[[data-wide]]:max-w-none";
+const WIDE_HEADER =
+  "xl:group-has-[[data-wide]]/shell:max-w-6xl xl:group-has-[[data-wide]]/shell:px-6 2xl:group-has-[[data-wide]]/shell:max-w-[88rem] 2xl:group-has-[[data-wide]]/shell:px-8 3xl:group-has-[[data-wide]]/shell:max-w-none";
+
 function PrivateShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const meta = useMeta();
@@ -160,9 +167,10 @@ function PrivateShell({ children }: { children: React.ReactNode }) {
         <div className="mt-auto px-3 text-xs text-muted-foreground">{meta && `Version ${meta.version}`}</div>
       </aside>
 
-      <div className="flex min-w-0 flex-col">
+      {/* A page that lays out in columns (it marks itself data-wide) gets the laptop's width; forms stay narrow. */}
+      <div className="group/shell flex min-w-0 flex-col">
         <header className="sticky top-0 z-30 border-b bg-background/80 pt-[env(safe-area-inset-top)] backdrop-blur-lg md:border-b-0 md:bg-transparent md:backdrop-blur-none">
-          <div className="mx-auto flex h-14 w-full max-w-3xl items-center gap-2 px-4">
+          <div className={cn("mx-auto flex h-14 w-full max-w-3xl items-center gap-2 px-4", WIDE_HEADER)}>
             <Link href="/" className="flex items-center gap-2 font-semibold tracking-tight md:hidden">
               <Logo /> Finance
             </Link>
@@ -189,7 +197,7 @@ function PrivateShell({ children }: { children: React.ReactNode }) {
           </div>
         </header>
 
-        <main id="main" className="mx-auto w-full max-w-3xl flex-1 px-4 pt-4 pb-28 md:pb-12">
+        <main id="main" className={cn("mx-auto w-full max-w-3xl flex-1 px-4 pt-4 pb-28 md:pb-12", WIDE_MAIN)}>
           <UpdateBanner />
           {children}
         </main>
