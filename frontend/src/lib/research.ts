@@ -28,6 +28,14 @@ export type ResearchEntry = {
   answer: ResearchAnswer;
 };
 
+export type ResearchJob = {
+  state: "running" | "done" | "failed";
+  question: string;
+  started: string;
+  finished: string | null;
+  error: string | null;
+};
+
 export type ResearchOffer = {
   available: boolean;
   problem: string | null;
@@ -40,6 +48,7 @@ export type ResearchOffer = {
   preview: string | null;
   suggested: string[];
   thread: ResearchEntry[];
+  job: ResearchJob | null;
 };
 
 export const SENTIMENT_TEXT: Record<Sentiment, string> = {

@@ -1894,11 +1894,10 @@ def research_offer(symbol: str, today: date | None = None) -> dict:
             "headline": "Mostly positive on the business, more cautious on the price: it already trades at a premium.",
             "answer": (
                 "Sentiment toward Apple is broadly positive but not euphoric. Services keep growing faster than "
-                "hardware and carry much higher margins, and the installed base of devices keeps expanding, which is "
-                "why most analysts stay on Buy or Overweight.\n\nThe caution is about price, not quality. The stock "
-                "trades near the top of its 52-week range at roughly 30 times earnings, above its own 10-year average, "
-                "so a lot of good news is already expected. Regulation of the App Store and the search deal, and China "
-                "demand, are the risks most often named."
+                "hardware and earn much higher margins [2].\n\nThe caution is about price, not quality. The stock "
+                "trades near the top of its 52-week range at roughly 30 times earnings, so a lot of good news is "
+                "already expected [1].\n\nThe risks named most often:\n- App Store and search-deal regulation [2]\n"
+                "- Slower iPhone upgrades and China demand [3]"
             ),
             "points": [
                 {"side": "bull", "text": "Services revenue keeps growing at double digits with gross margins above "
@@ -1911,13 +1910,14 @@ def research_offer(symbol: str, today: date | None = None) -> dict:
                 {"side": "neutral", "text": "iPhone sales are steady rather than growing fast; upgrades drive most "
                  "of the year-to-year change.", "sources": [3]},
             ],
-            "analysts": "Most analysts covering Apple rate it Buy or Overweight, with average price targets a little "
-            "above today's price. A sample answer: with your own accounts, the AI looks up the latest ratings.",
-            "fundamentals": "Revenue grows in the mid single digits, services faster; operating margin around 30%; "
-            "P/E around 30, above the S&P 500's.",
-            "for_you": "Apple is about 10% of your portfolio and about 13% once your index funds are counted, all in "
-            "your taxable E*TRADE account at a large gain. If you want less of it, adding new money to your index "
-            "funds lowers the weight without a tax bill; if you do sell, the long-term lots cost the least tax.",
+            "analysts": "- Most analysts covering Apple rate it Buy or Overweight [1]\n- Average price targets sit a "
+            "little above today's price [1]\n- A sample answer: with your own accounts, the AI looks up the latest "
+            "ratings",
+            "fundamentals": "- Revenue grows in the mid single digits, services faster [2]\n- Operating margin around "
+            "30% [2]\n- P/E around 30, above the S&P 500's [1]",
+            "for_you": "Apple is about 10% of your portfolio, and about 13% once your index funds are counted, all in "
+            "your taxable E*TRADE account at a large gain.\n\n- Want less of it? New money into your index funds "
+            "lowers the weight with no tax bill\n- If you sell, the long-term lots cost the least tax",
             "watch": ["Next quarterly earnings and services growth", "App Store rulings in the US and EU"],
             "sources": [
                 {"n": 1, "title": "Apple Inc. (AAPL) quote and statistics", "url": "https://finance.yahoo.com/quote/AAPL/",
@@ -1984,4 +1984,5 @@ def research_offer(symbol: str, today: date | None = None) -> dict:
         "preview": None,
         "suggested": suggested,
         "thread": thread,
+        "job": None,
     }

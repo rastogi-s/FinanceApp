@@ -193,26 +193,43 @@ class AskIn(BaseModel):
     question: str = Field("", max_length=research.MAX_QUESTION)
 
 
-@router.post("/securities/{symbol}/ask")
+@router.post("/securities/{symbol}/ask", status_code=202)
 def research_ask(symbol: str, body: AskIn, request: Request, who: Signed = Depends(signed_in)) -> dict:
-    """Researches the ticker (news and, with Claude, the web) and answers. An educated take, not advice."""
+    """Starts researching the question (news and, with Claude, the web). It runs in the background: the page checks
+    on it with GET .../ask/job. An educated take, not advice."""
     symbol = ticker(symbol)
     if who.demo:
         raise HTTPException(403, "Not available with sample data.")
-    db = db_of(request)
+    user_id = who.user.id
+    ip_request = request  # the audit row keeps who asked from where, written once the answer is in
+
+    def done(db: DbSession, entry: dict) -> None:
+        audit(
+            db,
+            ip_request,
+            "ticker_researched",
+            user_id,
+            symbol=symbol,
+            model=entry["model"],
+            searches=entry["searched"],
+        )
+
     try:
-        result = research.ask(request.app.state.db, db, settings_of(request), who.user.id, symbol, body.question)
+        job = research.start(request.app.state.db, settings_of(request), user_id, symbol, body.question, done)
     except AIUnavailable as e:
         raise HTTPException(409, str(e)) from None
-    except ProviderError as e:
-        raise HTTPException(502, e.message) from None
     except research.NotAvailable as e:
-        raise HTTPException(422, e.message) from None
-    entry = result["entry"]
-    audit(
-        db, request, "ticker_researched", who.user.id, symbol=symbol, model=entry["model"], searches=entry["searched"]
-    )
-    return result
+        raise HTTPException(409, e.message) from None
+    return {"job": job}
+
+
+@router.get("/securities/{symbol}/ask/job")
+def research_job(symbol: str, request: Request, who: Signed = Depends(signed_in)) -> dict:
+    """How the latest question is going, and the kept conversation. Cheap: nothing is fetched or sent."""
+    symbol = ticker(symbol)
+    if who.demo:
+        return {"job": None, "thread": demo.research_offer(symbol)["thread"]}
+    return {"job": research.job(symbol), "thread": research.thread(db_of(request), symbol)}
 
 
 @router.delete("/securities/{symbol}/ask")

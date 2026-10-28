@@ -1,5 +1,22 @@
 [
   {
+    "version": "0.59.0",
+    "title": "Ask AI: easier to read, and it keeps working",
+    "features": [
+      {
+        "id": "ask-ai-readable",
+        "title": "Answers start where you begin reading",
+        "body": "When an answer arrives, Ask AI now shows its first line instead of jumping to the end. Answers are laid out in short paragraphs and bullet lists, with a sentiment gauge, for-and-against cards, sections for analysts, the numbers and your shares, and a small numbered chip right after each claim that opens its source.",
+        "tryIt": "/portfolio"
+      },
+      {
+        "id": "ask-ai-background",
+        "title": "Research keeps going if the connection drops",
+        "body": "Research now runs on your server while the page checks in every few seconds, so locking your phone, switching apps or a weak signal no longer ends in \"Can't reach the server\". The answer is there when you come back, and if something really goes wrong you see why."
+      }
+    ]
+  },
+  {
     "version": "0.58.0",
     "title": "A heads-up when a utility bill hasn't been paid",
     "features": [
