@@ -150,6 +150,35 @@ In-Store & Online
     assert found["Walmart"].up_to and found["Sephora"].value == 25
 
 
+def test_capital_one_logos_name_the_store_by_website():
+    # What the bookmark sends from capitaloneoffers.com: each logo's website, the tile's tagline, the amount.
+    page = """Capital One Offers
+Venture X ...8868
+Featured Offers for You
+Logo for www.sephora.com
+Up to 13X miles
+Logo for officedepot.com
+Office
+5X miles
+Logo for ulta.com
+12 Piece Holiday Beauty Box!
+12X miles
+Venture X Exclusive
+Logo for stubhub.com
+Up to 6X miles
+Logo for walmart.com
+Your seat at the World Series awaits. ...
+6X miles
+Members get free shipping always.
+4X miles
+Introducing ScoreCard+
+3X miles
+"""
+    found = offers.parse(page, TODAY)
+    assert [r.merchant for r in found] == ["sephora.com", "officedepot.com", "ulta.com", "stubhub.com", "walmart.com"]
+    assert offers.same_store(cards.merchant_key("officedepot.com"), cards.merchant_key("OFFICE DEPOT #1234"))
+
+
 def test_pages_with_no_offers_and_odd_text():
     assert offers.parse("Sign in\nUsername\nPassword", TODAY) == []
     assert offers.parse("Purchase APR 24.99%\nBalance $1,204.17", TODAY) == []
