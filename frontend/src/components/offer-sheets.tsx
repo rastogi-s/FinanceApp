@@ -12,7 +12,7 @@ import { Sheet } from "@/components/ui/sheet";
 import { toast } from "@/components/ui/toast";
 import { api } from "@/lib/api";
 import { type CardsPage, shortDay } from "@/lib/cards";
-import { type Near, type OfferItem, type ReadOffers, type Sent, OFFER_PAGES, bookmarklet } from "@/lib/offers";
+import { type Near, type OfferItem, type ReadOffers, type Sent, OFFER_PAGES, OTHER_OFFER_PAGES, bookmarklet } from "@/lib/offers";
 import { cn } from "@/lib/utils";
 
 const DEMO = "Saving offers is off while the app shows sample data.";
@@ -260,7 +260,7 @@ function ImportForm({ page, sent, onSaved, onDone }: { page: CardsPage; sent: Se
             <Field
               id="offers-text"
               label="The offers page's text"
-              hint="On the Chase Offers or Capital One Offers page: select all, copy, and paste here. Only the offers are kept, not the page."
+              hint="On your card's offers page (Chase Offers, Capital One Offers, Amex Offers...): select all, copy, and paste here. Only the offers are kept, not the page."
             >
               <textarea
                 value={text}
@@ -291,7 +291,7 @@ function ImportForm({ page, sent, onSaved, onDone }: { page: CardsPage; sent: Se
         <div className="flex items-start gap-2 rounded-2xl bg-warning/10 p-4 text-sm text-warning" role="status">
           <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden />
           <span>
-            No offers found on that page. Open the offers list itself (Chase Offers under a card, or Capital One Offers), scroll so the
+            No offers found on that page. Open the offers list itself (like Chase Offers under a card, Capital One Offers or Amex Offers), scroll so the
             offers load, and send again.
           </span>
         </div>
@@ -455,6 +455,9 @@ function BookmarkSteps() {
             </li>
           ))}
         </ul>
+        <p className="text-xs text-muted-foreground">
+          The same bookmark works on {OTHER_OFFER_PAGES}, or any other bank&apos;s offers page.
+        </p>
         <ol start={2} className="grid list-decimal gap-1.5 pl-5 text-muted-foreground">
           <li>Scroll to the bottom so every offer loads.</li>
           <li>

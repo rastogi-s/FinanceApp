@@ -1,5 +1,5 @@
-"""Card offers: Chase Offers and Capital One Offers, the extra cash back or miles a bank gives on one card at one
-store ("Food Lion, 5% cash back").
+"""Card offers: Chase Offers, Capital One Offers, Amex Offers and the like, the extra cash back or points a bank gives
+on one card at one store ("Food Lion, 5% cash back"). Any bank's offers page works (see BANKS).
 
 Banks don't share these through Plaid or any API, so they come from the offers page itself: the "Send to Finance"
 bookmark copies the text of the Chase Offers or Capital One Offers page you have open (in your own browser, signed in
@@ -32,13 +32,41 @@ MAX_OFFERS = 300  # per card
 SOON_DAYS = 7  # "ends soon" on the page
 PUSH_DAYS = 3  # the push, this many days before an offer you'd likely use ends
 PUSH_MIN_VISITS = 2  # purchases at the store in the last year for it to count as a store you shop at
-ISSUERS = {"chase": "Chase", "capital_one": "Capital One", "other": "Card"}
-OFFER_NAMES = {"chase": "Chase Offer", "capital_one": "Capital One Offer", "other": "Card offer"}
-WHERE = {
-    "chase": "Add it in the Chase app or on chase.com first.",
-    "capital_one": "Start from Capital One Offers so it counts.",
-    "other": "Add it to the card first.",
-}
+
+
+@dataclass(frozen=True)
+class Bank:
+    name: str
+    offer: str  # what one offer is called
+    where: str  # what to do before it counts
+    sites: tuple[str, ...]  # the offers page's web addresses
+    words: tuple[str, ...]  # how the bank shows in an account's institution name
+    heading: str  # words near the top of its offers page, when the page didn't say its address
+
+
+# Any bank's offers page works: these only name the offers and say how to add them. A page from a bank not listed
+# is read the same way, as "Card offer".
+BANKS = {
+    "chase": Bank("Chase", "Chase Offer", "Add it in the Chase app or on chase.com first.", ("chase.com",),
+                  ("chase",), "chase offers"),
+    "capital_one": Bank("Capital One", "Capital One Offer", "Start from Capital One Offers so it counts.",
+                        ("capitalone.com", "capitaloneoffers.com"), ("capital one",), "capital one offers"),
+    "amex": Bank("Amex", "Amex Offer", "Add it in the Amex app or on americanexpress.com first.",
+                 ("americanexpress.com",), ("american express", "amex"), "amex offers"),
+    "citi": Bank("Citi", "Citi Merchant Offer", "Enroll it in the Citi app or on citi.com first.", ("citi.com",),
+                 ("citi",), "citi merchant offers"),
+    "bofa": Bank("Bank of America", "BankAmeriDeal", "Activate it in the Bank of America app first.",
+                 ("bankofamerica.com",), ("bank of america",), "bankamerideals"),
+    "wells_fargo": Bank("Wells Fargo", "Wells Fargo Deal", "Activate it in the Wells Fargo app first.",
+                        ("wellsfargo.com",), ("wells fargo",), "wells fargo deals"),
+    "us_bank": Bank("U.S. Bank", "U.S. Bank Deal", "Add it in the U.S. Bank app first.", ("usbank.com",),
+                    ("u.s. bank", "us bank"), "u.s. bank deals"),
+    "discover": Bank("Discover", "Discover Deal", "Start from Discover Deals so it counts.", ("discover.com",),
+                     ("discover",), "discover deals"),
+}  # fmt: skip
+ISSUERS = {**{k: b.name for k, b in BANKS.items()}, "other": "Card"}
+OFFER_NAMES = {**{k: b.offer for k, b in BANKS.items()}, "other": "Card offer"}
+WHERE = {**{k: b.where for k, b in BANKS.items()}, "other": "Add it to the card first."}
 MONTHS = {
     m: i + 1 for i, m in enumerate(["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"])
 }
@@ -47,6 +75,12 @@ _UP_TO = r"(?P<up>up to )?"
 PERCENT = re.compile(_UP_TO + r"(?P<n>\d{1,2}(?:\.\d{1,2})?) ?% ?(?:in )?(?:cash ?back|back|off|rewards?)\b", re.I)
 AMOUNT = re.compile(_UP_TO + r"\$(?P<n>\d{1,4}(?:\.\d{2})?) ?(?:in )?(?:cash ?back|back|statement credit|off)\b", re.I)
 MULTIPLIER = re.compile(_UP_TO + r"(?P<n>\d{1,2}(?:\.\d)?) ?x ?(?:the )?(?:miles|points)\b", re.I)
+# "5 points per dollar", "+3 Membership Rewards points per eligible dollar" (Amex, Citi): the same as 5X.
+PER_DOLLAR = re.compile(
+    _UP_TO + r"\+?(?P<n>\d{1,2}(?:\.\d)?) (?:additional |extra |bonus )?(?:membership rewards® |membership rewards "
+    r"|thankyou® |thankyou )?(?:points|miles|pts) (?:per|for every|on every) (?:eligible )?(?:dollar|\$1)\b",
+    re.I,
+)
 DAYS_LEFT = re.compile(r"\b(\d{1,3}) days? (?:left|remaining)\b", re.I)
 ENDS = r"\b(?:exp(?:ires|iring|\.)?|ends|valid (?:until|through|thru)) ?(?:on )?"
 ENDS_DATE = re.compile(ENDS + r"(\d{1,2})/(\d{1,2})(?:/(\d{2,4}))?", re.I)
@@ -55,8 +89,10 @@ ENDS_NAMED = re.compile(
     re.I,
 )
 SOON = re.compile(r"\b(?:expiring|ends|ending) soon\b|\blast day\b|\bends today\b", re.I)
-ADDED = re.compile(r"^(?:added|added to card|activated|enrolled|offer added|✓|✔)$", re.I)
-NOT_ADDED = re.compile(r"^(?:add|add to card|add offer|activate|\+|⊕)$", re.I)
+ADDED = re.compile(r"^(?:added|added to card|activated|enrolled|offer added|deal added|✓|✔)$", re.I)
+NOT_ADDED = re.compile(
+    r"^(?:add|add to card|add offer|add deal|activate|activate deal|enroll|enroll offer|\+|⊕)$", re.I
+)
 ONLINE = re.compile(r"\bonline(?: only)?\b", re.I)
 IN_STORE = re.compile(r"\bin[- ]store(?: only)?\b", re.I)
 IN_APP = re.compile(r"\bin[- ]app\b", re.I)
@@ -65,14 +101,20 @@ MIN_SPEND = re.compile(
     r"\b(?:spend|purchases? of|purchase of|on (?:a )?(?:single )?purchase of) \$(\d{1,5})(?:\.\d{2})?(?: or more|\+)?",
     re.I,
 )
-MAX_BACK = re.compile(r"\b(?:max(?:imum)?(?: of)?|up to) \$(\d{1,5})(?:\.\d{2})? ?(?:cash ?back|back|total)", re.I)
+MAX_BACK = re.compile(
+    r"\b(?:(?:max(?:imum)?(?: of)?|up to) \$(\d{1,5})(?:\.\d{2})? ?(?:cash ?back|back|total)"
+    r"|up to a total of \$(\d{1,5}))",
+    re.I,
+)
 # The card's last four digits: "(...9791)", "…9791", "ending in 9791". The card's name is the text before it.
-MASK = re.compile(r"(?:\.{2,3}|…|ending in|x{2,4}) ?(\d{4})\b", re.I)
+# Amex shows five digits ("-41007"); the last four are the account's mask.
+MASK = re.compile(r"(?:\.{2,3}|…|•{2,4}|ending in|x{2,4}| -) ?(\d{4,5})\b", re.I)
 # Lines that are page furniture, not a store: section names, buttons, filters.
 NOISE = re.compile(
     r"^(?:new|all|all offers|featured|recommended|for you|just for you|shopping|groceries|grocery|home|home & garden|"
     r"dining|restaurants|travel|entertainment|gas|health|health & wellness|beauty|fashion|electronics|services|"
     r"expiring soon|expiring|ending soon|added|added to card|add|add to card|add offer|activate|online|in-store|"
+    r"enroll|enroll offer|enrolled|add deal|activate deal|deal added|"
     r"in store|online only|in-store only|online & in-store|details|view details|see details|terms|shop now|"
     r"chase offers|capital one offers|offers|my offers|earned|search|filter|sort|sort by|show more|load more|"
     r"view all|see all|back|menu|close|\+|⊕|✓|✔|[\d$.,% ]+|.*\bearned\b.*|.*\boffers?\b.*\bavailable\b.*|"
@@ -134,21 +176,17 @@ def on_site(host: str, domain: str) -> bool:
 
 def issuer_of(site: str, text: str) -> str:
     host = (site or "").lower()
-    if on_site(host, "chase.com"):
-        return "chase"
-    if on_site(host, "capitalone.com") or on_site(host, "capitaloneoffers.com"):
-        return "capital_one"
+    for key, bank in BANKS.items():
+        if any(on_site(host, d) for d in bank.sites):
+            return key
     head = text[:5000].lower()
-    if "chase offers" in head:
-        return "chase"
-    if "capital one" in head:
-        return "capital_one"
-    return "other"
+    return next((key for key, bank in BANKS.items() if bank.heading in head), "other")
 
 
 def _value(line: str) -> tuple[re.Match, str] | None:
     """The first offer amount on a line, earliest match first."""
-    found = [(m, kind) for kind, rx in (("percent", PERCENT), ("amount", AMOUNT), ("multiplier", MULTIPLIER))
+    found = [(m, kind) for kind, rx in (("percent", PERCENT), ("amount", AMOUNT), ("multiplier", MULTIPLIER),
+                                        ("multiplier", PER_DOLLAR))
              if (m := rx.search(line))]  # fmt: skip
     return min(found, key=lambda f: f[0].start()) if found else None
 
@@ -171,6 +209,9 @@ def _store_name(text: str) -> str | None:
     if len(name) < 2 or len(name) > 60 or not re.search(r"[A-Za-z]{2}", name):
         return None
     if NOISE.fullmatch(name) or TAG_LINE.fullmatch(name) or SENTENCE.match(name):
+        return None
+    # "Spend $250 or more, earn $50 back" (Amex): the terms, with the store on a line of its own.
+    if re.search(r"\$\d|^(?:spend|on|purchases?|when you)\b", name, re.I):
         return None
     if _value(name) or DAYS_LEFT.search(name) or ENDS_DATE.search(name) or ENDS_NAMED.search(name):
         return None
@@ -233,7 +274,7 @@ def parse(text: str, today: date) -> list[Read]:
         end = named[n + 1][0] if n + 1 < len(named) else len(lines)
         # The tag lines between the store and the amount ("In-Store & Online"), then the lines after the amount up
         # to the next offer's store (or a few lines).
-        block = [*lines[start + 1 : i], lines[i][m.end() :], *lines[i + 1 : min(end, i + 8)]]
+        block = [*lines[start + 1 : i], lines[i][: m.start()], lines[i][m.end() :], *lines[i + 1 : min(end, i + 8)]]
         for b in block:
             if r.expires is None and (d := _ends(b, today)):
                 r.expires = d
@@ -250,7 +291,7 @@ def parse(text: str, today: date) -> list[Read]:
             if (s := MIN_SPEND.search(b)) and r.min_spend_cents is None:
                 r.min_spend_cents = int(s.group(1)) * 100
             if (x := MAX_BACK.search(b)) and r.max_cents is None and kind == "percent":
-                r.max_cents = int(x.group(1)) * 100
+                r.max_cents = int(x.group(1) or x.group(2)) * 100
         if r.expires is not None and r.expires < today:
             continue
         seen.add(key)
@@ -268,7 +309,7 @@ def card_on_page(text: str) -> tuple[str | None, str | None]:
             continue
         name = re.sub(r"[^A-Za-z®™'& -]", " ", line[: m.start()])
         name = " ".join(name.split()[-5:])
-        return name or None, m.group(1)
+        return name or None, m.group(1)[-4:]
     return None, None
 
 
@@ -278,9 +319,8 @@ def match_account(accounts: list[Account], issuer: str, mask: str | None) -> Acc
         same = [a for a in accounts if a.mask == mask]
         if len(same) == 1:
             return same[0]
-    words = {"chase": "chase", "capital_one": "capital one"}.get(issuer)
-    if words:
-        theirs = [a for a in accounts if words in (a.institution or "").lower()]
+    if bank := BANKS.get(issuer):
+        theirs = [a for a in accounts if any(w in (a.institution or "").lower() for w in bank.words)]
         if len(theirs) == 1:
             return theirs[0]
     return None

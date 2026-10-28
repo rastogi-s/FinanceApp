@@ -179,6 +179,51 @@ Introducing ScoreCard+
     assert offers.same_store(cards.merchant_key("officedepot.com"), cards.merchant_key("OFFICE DEPOT #1234"))
 
 
+AMEX_PAGE = """Amex Offers
+Gold Card ...41007
+Available
+Dell Technologies
+Spend $250 or more, earn $50 back
+Expires 12/31/2026
+Add to Card
+Hilton
+Earn +3 Membership Rewards points per eligible dollar spent
+Expires 11/30/2026
+Added to Card
+Shake Shack
+Earn 20% back on purchases, up to a total of $15
+Expires 12/15/2026
+"""
+
+
+def test_reading_other_banks_offers_pages():
+    found = {r.merchant: r for r in offers.parse(AMEX_PAGE, TODAY)}
+    assert list(found) == ["Dell Technologies", "Hilton", "Shake Shack"]
+    dell, hilton, shack = found.values()
+    assert (dell.kind, dell.value, dell.min_spend_cents, dell.added) == ("amount", 50, 250_00, False)
+    assert (hilton.kind, hilton.value, hilton.added) == ("multiplier", 3, True)
+    assert (shack.kind, shack.value, shack.max_cents) == ("percent", 20, 15_00)
+    assert offers.issuer_of("global.americanexpress.com", AMEX_PAGE) == "amex"
+    assert offers.card_on_page(AMEX_PAGE) == ("Gold Card", "1007")
+    assert offers.card_on_page("Platinum Card® -71003") == ("Platinum Card®", "1003")
+    assert hilton.json("amex")["label"] == "3X points"
+
+    citi = offers.parse("Citi Merchant Offers\nWalgreens\n10% cash back\nOnline only\nEnroll", TODAY)
+    assert [(r.merchant, r.value, r.channel, r.added) for r in citi] == [("Walgreens", 10, "online", False)]
+    bofa = offers.parse("BankAmeriDeals\nStarbucks\n10% Cash Back\n12 days left\nTarget\n5% Cash Back", TODAY)
+    assert [r.merchant for r in bofa] == ["Starbucks", "Target"] and bofa[0].expires == TODAY + timedelta(days=12)
+    wells = offers.parse("My Wells Fargo Deals\nPanera Bread · 15% cash back\nExpires Nov 30", TODAY)
+    assert [(r.merchant, r.value) for r in wells] == [("Panera Bread", 15)]
+    us = offers.parse("Lowe's\nGet $10 back\nwhen you spend $100 or more", TODAY)
+    assert [(r.merchant, r.value, r.min_spend_cents) for r in us] == [("Lowe's", 10, 100_00)]
+    disco = offers.parse("Discover Deals\nWalmart\n5% cashback\nTarget\n3 points per $1", TODAY)
+    assert [(r.merchant, r.kind) for r in disco] == [("Walmart", "percent"), ("Target", "multiplier")]
+    for site, bank in [("online.citi.com", "citi"), ("secure.bankofamerica.com", "bofa"),
+                       ("connect.secure.wellsfargo.com", "wells_fargo"), ("onlinebanking.usbank.com", "us_bank"),
+                       ("card.discover.com", "discover"), ("evil-amex.com", "other")]:  # fmt: skip
+        assert offers.issuer_of(site, "") == bank
+
+
 def test_pages_with_no_offers_and_odd_text():
     assert offers.parse("Sign in\nUsername\nPassword", TODAY) == []
     assert offers.parse("Purchase APR 24.99%\nBalance $1,204.17", TODAY) == []
