@@ -1,5 +1,23 @@
 [
   {
+    "version": "0.54.0",
+    "title": "Home: what's coming up, and today's movers",
+    "features": [
+      {
+        "id": "home-coming-up",
+        "title": "Coming up in the next two weeks",
+        "body": "Home now lists what's on the way: your next paycheck (from your last pay stub), card payments due with the statement balance, CDs maturing, expected dividends, and card offers that end this week. Tap one to open it.",
+        "tryIt": "/"
+      },
+      {
+        "id": "home-movers",
+        "title": "Today's movers and where your money sits",
+        "body": "See which holdings moved your portfolio most today, in dollars and percent, each stock or fund once even when it's in several accounts. Lower down, one bar shows how your money splits across cash, investments and retirement, with what's owed on cards. The full account list is in Settings, Accounts.",
+        "tryIt": "/"
+      }
+    ]
+  },
+  {
     "version": "0.52.0",
     "title": "A new Home",
     "features": [

@@ -29,7 +29,7 @@ import { type UploadDue, dueLabel, shortDate } from "@/lib/accounts";
 import { api } from "@/lib/api";
 import { type ColorName, type Goal, type GoalsState, monthYear } from "@/lib/goals";
 import { type LinkedHousehold, type Maturing, resetHousehold, useApi, useHousehold } from "@/lib/household";
-import type { NetWorth, NetWorthWindow } from "@/lib/networth";
+import { GROUP_COLOR, type NetWorth, type NetWorthWindow } from "@/lib/networth";
 import { monthOf } from "@/lib/search";
 import { cn } from "@/lib/utils";
 
@@ -368,12 +368,11 @@ const RANGES: { key: Range; label: string; name: string }[] = [
  * saving and spending (the same sums as the Net worth sheet, which the title opens). Until those load, the last
  * 90 days from the household.
  */
-export function NetWorthHero({ h, className }: { h: LinkedHousehold; className?: string }) {
+export function NetWorthHero({ h, nw, className }: { h: LinkedHousehold; nw: NetWorth | null; className?: string }) {
   const [sheet, setSheet] = useState(false);
   const [range, setRange] = useState<Range>("month");
   const [scrub, setScrub] = useState<[number, number] | null>(null);
-  const { data } = useApi<NetWorth>("/api/net-worth");
-  const linked = data && data.linked ? data : null;
+  const linked = nw && nw.linked ? nw : null;
   const w = linked?.windows.find((x) => x.key === range) ?? null;
 
   const points = useMemo<[number, number][]>(() => {
@@ -607,4 +606,173 @@ function goalLine(g: Goal) {
   if (g.status === "behind") return g.target_date ? `Behind for ${monthYear.format(new Date(g.target_date))}` : "Behind";
   if (g.projected_month) return `${g.status === "on_track" ? "On track for" : "Around"} ${monthYear.format(new Date(g.projected_month))}`;
   return g.status === "on_track" ? "On track" : "Set a monthly amount";
+}
+
+/** Today's biggest moves in dollars, each symbol once across accounts. */
+export function Movers({ h, className }: { h: LinkedHousehold; className?: string }) {
+  const by = new Map<string, { symbol: string; name: string; value: number; moved: number; percent: number }>();
+  for (const x of h.holdings) {
+    if (!x.change_today_percent || x.asset_class === "Cash") continue;
+    const moved = (x.value_cents * x.change_today_percent) / (100 + x.change_today_percent);
+    const row = by.get(x.symbol) ?? { symbol: x.symbol, name: x.name, value: 0, moved: 0, percent: x.change_today_percent };
+    row.value += x.value_cents;
+    row.moved += moved;
+    by.set(x.symbol, row);
+  }
+  const rows = [...by.values()].sort((a, b) => Math.abs(b.moved) - Math.abs(a.moved)).slice(0, 5);
+  if (rows.length === 0) return null;
+  const top = Math.max(...rows.map((r) => Math.abs(r.moved)));
+  return (
+    <Card className={className}>
+      <CardHeader>
+        <CardTitle>Today&apos;s movers</CardTitle>
+        <Link href="/portfolio" className="flex items-center text-sm font-medium text-primary">
+          Holdings <ChevronRight className="size-4" aria-hidden />
+        </Link>
+      </CardHeader>
+      <CardContent className="pt-1">
+        <ul className="grid grid-cols-1">
+          {rows.map((r) => {
+            const up = r.moved >= 0;
+            return (
+              <li key={r.symbol} className="border-t first:border-t-0">
+                <Link
+                  href={`/portfolio/holding?s=${encodeURIComponent(r.symbol)}`}
+                  className="-mx-2 flex items-center gap-3 rounded-lg px-2 py-2.5 transition-colors hover:bg-muted/60"
+                >
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-semibold">{r.symbol}</p>
+                    <p className="truncate text-xs text-muted-foreground">{r.name}</p>
+                  </div>
+                  <span className="hidden h-1.5 w-16 overflow-hidden rounded-full bg-muted sm:block" aria-hidden>
+                    <span
+                      className={cn("block h-full rounded-full", up ? "bg-positive" : "bg-negative")}
+                      style={{ width: `${Math.max((Math.abs(r.moved) / top) * 100, 6)}%` }}
+                    />
+                  </span>
+                  <div className="w-20 shrink-0 text-right">
+                    <p className={cn("text-sm font-medium tabular-nums", up ? "text-positive" : "text-negative")}>
+                      {up ? "+" : "−"}
+                      {Math.abs(r.percent).toFixed(2)}%
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      <Money cents={Math.round(r.moved)} signed />
+                    </p>
+                  </div>
+                </Link>
+              </li>
+            );
+          })}
+        </ul>
+      </CardContent>
+    </Card>
+  );
+}
+
+export type Upcoming = {
+  as_of: string;
+  days: number;
+  events: { date: string; kind: "pay" | "card" | "cd" | "dividend" | "offer"; title: string; detail: string; cents: number | null; href: string | null }[];
+};
+
+const weekday = new Intl.DateTimeFormat("en-US", { weekday: "short", timeZone: "UTC" });
+const monthShort = new Intl.DateTimeFormat("en-US", { month: "short", timeZone: "UTC" });
+
+/** The next two weeks: paydays, card payments, CDs, dividends, offers ending (backend upcoming.py). */
+export function ComingUp({ data, className }: { data: Upcoming | null; className?: string }) {
+  if (!data) return null;
+  // This week's days by name (Fri 31), later ones by month (Nov 14).
+  const soon = (iso: string) => (Date.parse(iso) - Date.parse(data.as_of)) / 86_400_000 < 7;
+  return (
+    <Card className={className}>
+      <CardHeader>
+        <CardTitle>Coming up</CardTitle>
+        <span className="text-xs text-muted-foreground">Next {data.days} days</span>
+      </CardHeader>
+      <CardContent className="pt-1">
+        {data.events.length === 0 ? (
+          <p className="py-2 text-sm text-muted-foreground">No paydays, payments or dividends due in the next {data.days} days.</p>
+        ) : (
+          <ul className="grid grid-cols-1">
+            {data.events.map((e, i) => {
+              const d = new Date(e.date + "T12:00:00Z");
+              const row = (
+                <>
+                  <span className="w-10 shrink-0 text-center leading-tight">
+                    <span className="block text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+                      {soon(e.date) ? weekday.format(d) : monthShort.format(d)}
+                    </span>
+                    <span className="text-lg font-semibold tabular-nums">{d.getUTCDate()}</span>
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-sm font-medium wrap-anywhere">{e.title}</span>
+                    <span className="block text-xs text-muted-foreground">{e.detail}</span>
+                  </span>
+                  {e.cents !== null && (
+                    <Money cents={e.cents} signed={e.cents > 0} className={cn("text-sm font-medium", e.cents > 0 && "text-positive")} />
+                  )}
+                </>
+              );
+              return (
+                <li key={`${e.kind}-${e.date}-${i}`} className="border-t first:border-t-0">
+                  {e.href ? (
+                    <Link href={e.href} className="-mx-2 flex items-center gap-3 rounded-lg px-2 py-2.5 transition-colors hover:bg-muted/60">
+                      {row}
+                    </Link>
+                  ) : (
+                    <div className="flex items-center gap-3 py-2.5">{row}</div>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+/** Where the money sits: what you own by group as one bar, and what you owe, from the Net worth sheet's sums. */
+export function WhereItSits({ nw, className }: { nw: NetWorth | null; className?: string }) {
+  const [sheet, setSheet] = useState(false);
+  if (!nw || !nw.linked) return null;
+  const owned = nw.groups.filter((g) => !g.owed && g.cents > 0);
+  const owed = nw.groups.filter((g) => g.owed && g.cents !== 0);
+  const total = nw.assets_cents;
+  if (total <= 0) return null;
+  const pct = (c: number) => Math.round((c / total) * 100);
+  return (
+    <Card className={className}>
+      <CardHeader>
+        <CardTitle>Where it sits</CardTitle>
+        <Link href="/settings/accounts" className="flex items-center text-sm font-medium text-primary">
+          Accounts <ChevronRight className="size-4" aria-hidden />
+        </Link>
+      </CardHeader>
+      <CardContent className="grid gap-3">
+        <div
+          role="img"
+          aria-label={owned.map((g) => `${g.label} ${pct(g.cents)}%`).join(", ")}
+          className="flex h-3 gap-0.5 overflow-hidden rounded-full bg-muted"
+        >
+          {owned.map((g) => (
+            <div key={g.key} className={GROUP_COLOR[g.key]} style={{ width: `${(g.cents / total) * 100}%` }} />
+          ))}
+        </div>
+        <ul className="grid grid-cols-1 gap-x-6 gap-y-1.5 text-sm sm:grid-cols-2">
+          {[...owned, ...owed].map((g) => (
+            <li key={g.key} className="flex items-center gap-2">
+              <span className={cn("size-2 shrink-0 rounded-full", g.owed ? "bg-negative" : GROUP_COLOR[g.key])} aria-hidden />
+              <span className="min-w-0 flex-1 truncate text-muted-foreground">{g.label}</span>
+              <Money cents={g.cents} className="font-medium" />
+            </li>
+          ))}
+        </ul>
+        <button type="button" onClick={() => setSheet(true)} className="flex w-max items-center text-xs font-medium text-primary">
+          Every account, and what moved it <ChevronRight className="size-3.5" aria-hidden />
+        </button>
+      </CardContent>
+      <NetWorthSheet open={sheet} onOpenChange={setSheet} />
+    </Card>
+  );
 }
