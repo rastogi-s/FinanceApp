@@ -59,6 +59,8 @@ ADDED = re.compile(r"^(?:added|added to card|activated|enrolled|offer added|✓|
 NOT_ADDED = re.compile(r"^(?:add|add to card|add offer|activate|\+|⊕)$", re.I)
 ONLINE = re.compile(r"\bonline(?: only)?\b", re.I)
 IN_STORE = re.compile(r"\bin[- ]store(?: only)?\b", re.I)
+IN_APP = re.compile(r"\bin[- ]app\b", re.I)
+PUMP = re.compile(r"\bat the pump\b", re.I)
 MIN_SPEND = re.compile(
     r"\b(?:spend|purchases? of|purchase of|on (?:a )?(?:single )?purchase of) \$(\d{1,5})(?:\.\d{2})?(?: or more|\+)?",
     re.I,
@@ -76,6 +78,13 @@ NOISE = re.compile(
     r"view all|see all|back|menu|close|\+|⊕|✓|✔|[\d$.,% ]+|.*\bearned\b.*|.*\boffers?\b.*\bavailable\b.*|"
     r"fresh for \w+|featured offers|popular|trending|ends soon|last day|new offers?|\d+ days? left|"
     r"image|icon|.*\bcard art\b.*|capital one|chase)$",
+    re.I,
+)
+# Capital One's tag lines over an offer: where it works, a banner, or the bonus in miles, never the store.
+TAG_LINE = re.compile(
+    r"^(?:(?:in[- ]store|online|in[- ]app)(?: (?:&|and|or) (?:in[- ]store|online|in[- ]app))*(?: only)?|at the pump|"
+    r"today'?s top offer\b.*|.*\blimited (?:time|availability)\b.*|top offer|limited time|bonus offer|"
+    r"(?:up to |earn )?[\d,]+ (?:bonus )?(?:miles|points))$",
     re.I,
 )
 
@@ -150,10 +159,12 @@ PUNCT = " -\u2013\u2014:|•·,"  # spaces, dashes and bullets around a name
 
 def _store_name(text: str) -> str | None:
     name = " ".join(text.split()).strip(PUNCT)
-    name = re.sub(r"^(?:earn|get|enjoy|save)\b|\b(?:earn|get|enjoy|save)$", "", name, flags=re.I).strip(PUNCT)
+    name = re.sub(r"^(?:earn|get|enjoy|save)\b|\b(?:earn|get|enjoy|save|deals?)$", "", name, flags=re.I).strip(PUNCT)
     # A logo's label, which the bookmark reads as a line: "Walmart logo", "Logo for Walmart".
     name = LOGO.sub("", name).strip(PUNCT)
-    if len(name) < 2 or len(name) > 60 or not re.search(r"[A-Za-z]{2}", name) or NOISE.fullmatch(name):
+    if len(name) < 2 or len(name) > 60 or not re.search(r"[A-Za-z]{2}", name):
+        return None
+    if NOISE.fullmatch(name) or TAG_LINE.fullmatch(name):
         return None
     if _value(name) or DAYS_LEFT.search(name) or ENDS_DATE.search(name) or ENDS_NAMED.search(name):
         return None
@@ -189,17 +200,20 @@ def parse(text: str, today: date) -> list[Read]:
     lines = [ln for ln in lines if ln]
     # A "Max $5 cash back" line is the cap of the offer above it, not an offer.
     hits = [(i, v) for i, ln in enumerate(lines) if not CAP_LINE.match(ln) and (v := _value(ln))]
+    # Each offer's store: on the amount's line, or the nearest name in the few lines above it.
+    named: list[tuple[int, int, re.Match, str, str]] = []  # (store line, amount line, match, kind, store)
+    for n, (i, (m, kind)) in enumerate(hits):
+        start, name = i, _store_name(lines[i][: m.start()])
+        if name is None:
+            for j in range(i - 1, max(i - 5, (hits[n - 1][0] if n else -1)), -1):
+                if name := _store_name(lines[j]):
+                    start = j
+                    break
+        if name is not None:
+            named.append((start, i, m, kind, name))
     out: list[Read] = []
     seen: set[str] = set()
-    for n, (i, (m, kind)) in enumerate(hits):
-        line = lines[i]
-        name = _store_name(line[: m.start()])
-        if name is None:
-            for j in range(i - 1, max(i - 4, (hits[n - 1][0] if n else -1)), -1):
-                if name := _store_name(lines[j]):
-                    break
-        if name is None:
-            continue
+    for n, (start, i, m, kind, name) in enumerate(named):
         key = merchant_key(name)
         if not key or key in seen:
             continue
@@ -207,9 +221,10 @@ def parse(text: str, today: date) -> list[Read]:
         if value <= 0 or (kind == "percent" and value > 50):
             continue
         r = Read(name, kind, value, up_to=bool(m.group("up")))
-        end = hits[n + 1][0] if n + 1 < len(hits) else len(lines)
-        # The lines after the amount, up to the next offer (or a few lines).
-        block = [line[m.end() :], *lines[i + 1 : min(end, i + 8)]]
+        end = named[n + 1][0] if n + 1 < len(named) else len(lines)
+        # The tag lines between the store and the amount ("In-Store & Online"), then the lines after the amount up
+        # to the next offer's store (or a few lines).
+        block = [*lines[start + 1 : i], lines[i][m.end() :], *lines[i + 1 : min(end, i + 8)]]
         for b in block:
             if r.expires is None and (d := _ends(b, today)):
                 r.expires = d
@@ -219,7 +234,8 @@ def parse(text: str, today: date) -> list[Read]:
                 r.added = True
             elif NOT_ADDED.fullmatch(b.strip()) and r.added is None:
                 r.added = False
-            online, store = bool(ONLINE.search(b)), bool(IN_STORE.search(b))
+            online = bool(ONLINE.search(b) or IN_APP.search(b))
+            store = bool(IN_STORE.search(b) or PUMP.search(b))
             if online != store and r.channel is None:
                 r.channel = "online" if online else "in store"
             if (s := MIN_SPEND.search(b)) and r.min_spend_cents is None:

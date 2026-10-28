@@ -112,6 +112,44 @@ Up to $40 back
     assert offers.parse("Venture X Card Art\nUp to 5% back", TODAY) == []
 
 
+def test_capital_one_tag_lines_are_not_stores():
+    # Each tile: the logo's label, a tag line over the amount, the amount. The tag line isn't the store.
+    page = """Capital One Offers
+Venture X ...8868
+Walmart logo
+In-Store & Online
+Up to 13X miles
+Logo for Sephora
+Today's Top Offer. Limited availability.
+25X miles
+Starbucks
+In-Store & In-App
+5X miles
+Shell
+At the Pump
+3X miles
+Expedia
+Up to 3,700 miles
+6X miles
+eBay
+eBay Deals
+Up to 50% back
+Target
+In-Store Only
+5% back
+Old Navy
+Online Only
+10% back
+In-Store & Online
+2X miles
+"""
+    found = {r.merchant: r for r in offers.parse(page, TODAY)}
+    assert list(found) == ["Walmart", "Sephora", "Starbucks", "Shell", "Expedia", "eBay", "Target", "Old Navy"]
+    assert found["Walmart"].channel is None and found["Shell"].channel == "in store"
+    assert found["Target"].channel == "in store" and found["Old Navy"].channel == "online"
+    assert found["Walmart"].up_to and found["Sephora"].value == 25
+
+
 def test_pages_with_no_offers_and_odd_text():
     assert offers.parse("Sign in\nUsername\nPassword", TODAY) == []
     assert offers.parse("Purchase APR 24.99%\nBalance $1,204.17", TODAY) == []
