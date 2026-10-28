@@ -140,7 +140,7 @@ function OfferRow({ o, onRemove }: { o: OfferItem; onRemove: () => void }) {
         </div>
         <p className="text-xs text-muted-foreground">
           {o.name} on {o.card}
-          {o.channel && ` · ${o.channel === "online" ? "online only" : "in store only"}`}
+          {` · ${o.channel === "online" ? "online only" : o.channel === "in store" ? "in store only" : "in store or online"}`}
           {o.max_cents ? ` · up to $${o.max_cents / 100} back` : ""}
           {o.min_spend_cents ? ` · on $${o.min_spend_cents / 100}+` : ""}
         </p>

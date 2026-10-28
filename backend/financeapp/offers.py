@@ -28,7 +28,7 @@ from financeapp.categorize import merchant_key
 from financeapp.models import Account, AlertEvent, CardOffer, now
 
 MAX_TEXT = 200_000  # characters of page text read
-MAX_OFFERS = 300  # per card
+MAX_OFFERS = 1000  # per card (Capital One shows 300+)
 SOON_DAYS = 7  # "ends soon" on the page
 PUSH_DAYS = 3  # the push, this many days before an offer you'd likely use ends
 PUSH_MIN_VISITS = 2  # purchases at the store in the last year for it to count as a store you shop at
