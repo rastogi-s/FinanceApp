@@ -84,6 +84,7 @@ NOISE = re.compile(
 TAG_LINE = re.compile(
     r"^(?:(?:in[- ]store|online|in[- ]app)(?: (?:&|and|or) (?:in[- ]store|online|in[- ]app))*(?: only)?|at the pump|"
     r"today'?s top offer\b.*|.*\blimited (?:time|availability)\b.*|top offer|limited time|bonus offer|"
+    r"featured offers?\b.*|.*\bexclusives?|introducing\b.*|"
     r"(?:up to |earn )?[\d,]+ (?:bonus )?(?:miles|points))$",
     re.I,
 )
@@ -152,6 +153,11 @@ def _value(line: str) -> tuple[re.Match, str] | None:
     return min(found, key=lambda f: f[0].start()) if found else None
 
 
+# Capital One shows a store only as a logo picture whose address names the store's website (…?domain=bestbuy.com);
+# the bookmark sends it as "Logo for bestbuy.com", and that beats any text near the amount.
+LOGO_SITE = re.compile(r"^logo for (?:www\.)?((?:[a-z0-9-]{1,63}\.){1,3}[a-z]{2,6})$", re.I)
+# A tile's tagline ("The Holiday Collection is here.", "12 Piece Holiday Beauty Box!"), not a store's name.
+SENTENCE = re.compile(r"^(?:\S+ ){2,}\S*(?:[.!?…]|\.\.\.)$|^(?:\S+ ){5,}\S+$")
 CAP_LINE = re.compile(r" ?(?:max(?:imum)?|limit|cap)\b", re.I)
 LOGO = re.compile(r"^(?:(?:merchant|brand|store) )?logo(?: (?:for|of))?\b|\b(?:(?:merchant|brand|store) )?logo$", re.I)
 PUNCT = " -\u2013\u2014:|•·,"  # spaces, dashes and bullets around a name
@@ -164,7 +170,7 @@ def _store_name(text: str) -> str | None:
     name = LOGO.sub("", name).strip(PUNCT)
     if len(name) < 2 or len(name) > 60 or not re.search(r"[A-Za-z]{2}", name):
         return None
-    if NOISE.fullmatch(name) or TAG_LINE.fullmatch(name):
+    if NOISE.fullmatch(name) or TAG_LINE.fullmatch(name) or SENTENCE.match(name):
         return None
     if _value(name) or DAYS_LEFT.search(name) or ENDS_DATE.search(name) or ENDS_NAMED.search(name):
         return None
@@ -204,9 +210,12 @@ def parse(text: str, today: date) -> list[Read]:
     named: list[tuple[int, int, re.Match, str, str]] = []  # (store line, amount line, match, kind, store)
     for n, (i, (m, kind)) in enumerate(hits):
         start, name = i, _store_name(lines[i][: m.start()])
+        above = range(i - 1, max(i - 6, (hits[n - 1][0] if n else -1)), -1)
+        if logo := next(((j, x) for j in above if (x := LOGO_SITE.match(lines[j]))), None):
+            start, name = logo[0], logo[1].group(1).lower()
         if name is None:
-            for j in range(i - 1, max(i - 5, (hits[n - 1][0] if n else -1)), -1):
-                if name := _store_name(lines[j]):
+            for j in above:
+                if j >= i - 4 and (name := _store_name(lines[j])):
                     start = j
                     break
         if name is not None:
