@@ -694,7 +694,8 @@ def with_offers(
     for row in rows:
         card = by_id[row["account_id"]]
         cpp = worth(card, values)
-        mine = [(card_offers.worth(o, cents, cpp), o) for o in here if o.account_id == card.account_id]
+        earned = row["value_cents"]
+        mine = [(card_offers.adds(o, cents, cpp, earned), o) for o in here if o.account_id == card.account_id]
         mine = [(v, o) for v, o in mine if card_offers.fits(o, channel)]
         if not mine:
             continue

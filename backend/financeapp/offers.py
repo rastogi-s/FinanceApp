@@ -42,6 +42,7 @@ class Bank:
     sites: tuple[str, ...]  # the offers page's web addresses
     words: tuple[str, ...]  # how the bank shows in an account's institution name
     heading: str  # words near the top of its offers page, when the page didn't say its address
+    total_x: bool = False  # its "13X miles" is everything the card earns there, the card's own rate included
 
 
 # Any bank's offers page works: these only name the offers and say how to add them. A page from a bank not listed
@@ -50,7 +51,8 @@ BANKS = {
     "chase": Bank("Chase", "Chase Offer", "Add it in the Chase app or on chase.com first.", ("chase.com",),
                   ("chase",), "chase offers"),
     "capital_one": Bank("Capital One", "Capital One Offer", "Start from Capital One Offers so it counts.",
-                        ("capitalone.com", "capitaloneoffers.com"), ("capital one",), "capital one offers"),
+                        ("capitalone.com", "capitaloneoffers.com"), ("capital one",), "capital one offers",
+                        total_x=True),
     "amex": Bank("Amex", "Amex Offer", "Add it in the Amex app or on americanexpress.com first.",
                  ("americanexpress.com",), ("american express", "amex"), "amex offers"),
     "citi": Bank("Citi", "Citi Merchant Offer", "Enroll it in the Citi app or on citi.com first.", ("citi.com",),
@@ -407,6 +409,17 @@ def worth(o: Offer, cents: int, cpp: float) -> int:
     if o.kind == "amount":
         return min(round(o.value * 100), cents)
     return round(cents / 100 * o.value * cpp)
+
+
+def adds(o: Offer, cents: int, cpp: float, earned: int) -> int:
+    """What the offer adds on top of the `earned` cents the card makes on the purchase anyway. Capital One's "13X
+    miles" already counts the card's own 2X, so only the rest is extra. An "up to" offer pays its most on only some of
+    what the store sells, so it counts at half its extra."""
+    v = worth(o, cents, cpp)
+    bank = BANKS.get(o.issuer)
+    if o.kind == "multiplier" and bank and bank.total_x:
+        v = max(0, v - earned)
+    return round(v / 2) if o.up_to else v
 
 
 def fits(o: Offer, channel: str | None) -> bool:
