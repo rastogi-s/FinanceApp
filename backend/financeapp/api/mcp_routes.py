@@ -20,9 +20,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
 from starlette.concurrency import run_in_threadpool
 
-from financeapp import agents, auth
+from financeapp import agents, alerts, auth, cards, nearby, offers
 from financeapp.api.deps import Signed, audit, client_ip, owner, recent, signed_in
 from financeapp.models import AgentKey, User, now
+from financeapp.sync import today
 
 router = APIRouter()
 KEY_PREFIX = "fa_agent_"
@@ -221,3 +222,61 @@ async def mcp(request: Request) -> Response:
     except ValueError:
         return rpc_error(None, -32700, "That isn't JSON.", 400)
     return await run_in_threadpool(handle, request, msg)
+
+
+# ---- the "offers here" hook, for an iPhone Shortcuts automation (nearby.py)
+
+
+@router.post("/hook/offers-here", include_in_schema=False)
+async def offers_here(request: Request) -> Response:
+    """Sent by a Shortcuts automation as you arrive somewhere: {"lat": .., "lon": ..} with an agent key. Pushes the
+    card offers at stores around you (once a day each) and says how many. The spot is rounded and not kept."""
+    app = request.app
+    if app.state.settings.demo_mode or app.state.db is None:
+        return JSONResponse({"detail": "Not available with sample data."}, status_code=404)
+    origin = request.headers.get("origin")
+    if origin is not None and origin.split("://", 1)[-1] != request.headers.get("host", ""):
+        return JSONResponse({"detail": "Cross-site request refused."}, status_code=403)
+    if app.state.agent_failures.exceeded(client_ip(request)):
+        return JSONResponse({"detail": "Too many tries with a wrong key. Wait a few minutes."}, status_code=429)
+    body = await request.body()
+    try:
+        spot = json.loads(body) if len(body) <= 1_000 else None
+        lat, lon = float(spot["lat"]), float(spot["lon"])
+        if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+            raise ValueError
+    except (ValueError, TypeError, KeyError):
+        return JSONResponse({"detail": 'Send {"lat": number, "lon": number}.'}, status_code=422)
+    return await run_in_threadpool(_offers_here, request, lat, lon)
+
+
+def _offers_here(request: Request, lat: float, lon: float) -> Response:
+    app = request.app
+    with app.state.db.session() as db:
+        key = find_key(db, request.headers.get("authorization", ""))
+        if key is None:
+            app.state.agent_failures.allow(client_ip(request))
+            return JSONResponse({"detail": NEEDS_KEY}, status_code=401, headers={"WWW-Authenticate": "Bearer"})
+        if not app.state.agent_limiter.allow(str(key.id)):
+            return JSONResponse({"detail": "Too many requests. Slow down a little."}, status_code=429)
+        key.last_used_at = now()
+        key.uses += 1
+        on = today()
+        saved = offers.load(db, on)
+        if not saved:
+            return JSONResponse({"found": 0, "pushed": 0})
+        try:
+            around = nearby.places(lat, lon)
+        except nearby.Unavailable:
+            return JSONResponse({"detail": nearby.UNAVAILABLE}, status_code=502)
+        _, accounts, links = cards.load_cards(db)
+        labels = {a.id: cards.label_of(a, links.get(a.id)) for a in accounts}
+        found = [
+            nearby.describe(o, p, labels[o.account_id], on)
+            for o, p in nearby.matches(saved, around)
+            if o.account_id in labels
+        ]
+        pushed = nearby.queue(db, found, on)
+        if pushed:
+            alerts.send_pending(db, app.state.settings)
+        return JSONResponse({"found": len(found), "pushed": pushed})

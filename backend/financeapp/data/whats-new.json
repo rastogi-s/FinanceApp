@@ -1,5 +1,22 @@
 [
   {
+    "version": "0.49.0",
+    "title": "Card offers near you",
+    "features": [
+      {
+        "id": "offers-near-me",
+        "title": "Offers near me",
+        "body": "On Credit Cards, tap Offers near me to see which of your in-store card offers are at stores within a few minutes' walk. Your location is rounded, used once to look up the stores around you on OpenStreetMap, and not saved.",
+        "tryIt": "/cards"
+      },
+      {
+        "id": "offers-arrive",
+        "title": "A push when you arrive",
+        "body": "Set up an iPhone Shortcuts automation for a store you go to often, and the app pushes any card offer there as you arrive, at most once a day per offer. The steps are under Offers near me."
+      }
+    ]
+  },
+  {
     "version": "0.48.0",
     "title": "Chase Offers and Capital One Offers in the app",
     "features": [

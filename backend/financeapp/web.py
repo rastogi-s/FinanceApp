@@ -168,8 +168,9 @@ class SecurityHeaders:
                 headers["Referrer-Policy"] = "no-referrer"
                 headers["Cross-Origin-Opener-Policy"] = "same-origin"
                 headers["Cross-Origin-Resource-Policy"] = "same-origin"
+                # Location only for this app's own pages (Credit cards, Offers near me), asked each time.
                 headers["Permissions-Policy"] = (
-                    "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), "
+                    "accelerometer=(), camera=(), geolocation=(self), gyroscope=(), magnetometer=(), "
                     "microphone=(), payment=(), usb=(), interest-cohort=()"
                 )
                 if self.hsts:

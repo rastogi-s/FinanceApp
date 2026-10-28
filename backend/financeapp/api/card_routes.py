@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session as DbSession
 
-from financeapp import cards, demo, offers
+from financeapp import cards, demo, nearby, offers
 from financeapp.api.deps import Signed, audit, signed_in
 from financeapp.models import Account, CardLink, CardOffer
 from financeapp.sync import today
@@ -59,6 +59,11 @@ class OfferIn(BaseModel):
 class OffersIn(BaseModel):
     issuer: Literal["chase", "capital_one", "other"]
     offers: list[OfferIn] = Field(max_length=offers.MAX_OFFERS)
+
+
+class SpotIn(BaseModel):
+    lat: float = Field(ge=-90, le=90)
+    lon: float = Field(ge=-180, le=180)
 
 
 class ValuesIn(BaseModel):
@@ -207,3 +212,25 @@ def remove_offer(offer_id: int, request: Request, who: Signed = Depends(signed_i
         db.delete(o)
         db.flush()
     return cards.page(db, today())
+
+
+@router.post("/cards/offers/near")
+def offers_near(body: SpotIn, request: Request, who: Signed = Depends(signed_in)) -> dict:
+    """Your in-store offers at stores around you. The spot is rounded, used for one map lookup and not kept."""
+    db = db_of(request)
+    on = today()
+    saved = offers.load(db, on)
+    if not saved:
+        return {"offers": [], "stores": 0, "radius_m": nearby.RADIUS_M}
+    try:
+        around = nearby.places(body.lat, body.lon)
+    except nearby.Unavailable:
+        raise HTTPException(502, nearby.UNAVAILABLE) from None
+    _, accounts, links = cards.load_cards(db)
+    labels = {a.id: cards.label_of(a, links.get(a.id)) for a in accounts}
+    found = [
+        nearby.describe(o, p, labels.get(o.account_id, "your card"), on)
+        for o, p in nearby.matches(saved, around)
+        if o.account_id in labels
+    ]
+    return {"offers": found, "stores": len(around), "radius_m": nearby.RADIUS_M}

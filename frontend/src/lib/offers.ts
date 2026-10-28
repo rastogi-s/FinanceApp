@@ -74,6 +74,25 @@ export type RankedOffer = {
 
 export type Sent = { text: string; site: string };
 
+/** Offers near me: in-store offers at stores around you. */
+export type Near = {
+  offers: {
+    id: number | string;
+    merchant: string;
+    store: string;
+    meters: number;
+    label: string;
+    name: string;
+    card: string;
+    ends: string | null;
+    added: boolean | null;
+    how: string | null;
+    check_terms: boolean;
+  }[];
+  stores: number;
+  radius_m: number;
+};
+
 const HASH = "#offers=";
 const STASH = "finance.sent-offers";
 

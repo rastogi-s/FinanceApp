@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { AlertTriangle, ChevronRight, CreditCard, Globe, Search, Sparkles, Store, Tag, X } from "lucide-react";
 import { CardFace, CardSheet, ValuesSheet, Chip, setPrefer } from "@/components/card-sheets";
-import { BookmarkSheet, ImportSheet, OffersCard } from "@/components/offer-sheets";
+import { BookmarkSheet, ImportSheet, NearSheet, OffersCard } from "@/components/offer-sheets";
 import { Money } from "@/components/money";
 import { BackLink, Notice } from "@/components/page";
 import { Badge } from "@/components/ui/badge";
@@ -25,6 +25,7 @@ export default function CardsPageView() {
   const [sent, setSent] = useState<Sent | null>(null);
   const [adding, setAdding] = useState(false);
   const [setup, setSetup] = useState(false);
+  const [near, setNear] = useState(false);
   const s = local ?? data;
 
   // Offers sent by the bookmark arrive in the address (#offers=…); take them out of it straight away.
@@ -77,6 +78,7 @@ export default function CardsPageView() {
               setAdding(true);
             }}
             onSetup={() => setSetup(true)}
+            onNear={() => setNear(true)}
           />
           <BestByCategory s={s} onSaved={setLocal} />
           <MissedPoints s={s} />
@@ -89,6 +91,7 @@ export default function CardsPageView() {
           <ValuesSheet page={s} open={values} onOpenChange={setValues} onSaved={setLocal} />
           <ImportSheet page={s} sent={sent} open={adding} onOpenChange={setAdding} onSaved={setLocal} />
           <BookmarkSheet open={setup} onOpenChange={setSetup} />
+          <NearSheet demo={s.demo} open={near} onOpenChange={setNear} />
         </>
       )}
     </>
