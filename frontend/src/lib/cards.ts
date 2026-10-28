@@ -73,6 +73,16 @@ export type Statement = {
   last_payment_date: string | null;
   overdue: boolean | null;
   as_of: string | null;
+  /** Paid since the statement, and what's left (backend cardpay.py). */
+  payment: CardPayment | null;
+};
+
+export type CardPayment = {
+  state: "paid" | "partial" | "due" | "late";
+  statement_cents: number;
+  paid_cents: number;
+  left_cents: number;
+  due_date: string;
 };
 
 export type Role = "active" | "drawer" | "closed";

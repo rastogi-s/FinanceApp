@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { AlertTriangle, ExternalLink } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ExternalLink } from "lucide-react";
 import { Money } from "@/components/money";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -282,7 +282,11 @@ function StatementBlock({ row }: { row: CardRow }) {
       s.statement_date ? `Statement (${shortDay.format(new Date(s.statement_date))})` : "Statement balance",
       <Money key="s" cents={s.statement_cents} style="exact" />,
     ]);
-  if (s.minimum_cents !== null) lines.push(["Minimum payment", <Money key="m" cents={s.minimum_cents} style="exact" />]);
+  const p = s.payment;
+  if (p && p.paid_cents > 0) lines.push(["Paid since statement", <Money key="p" cents={p.paid_cents} style="exact" />]);
+  if (p && p.state !== "paid") lines.push(["Left to pay", <Money key="r" cents={p.left_cents} style="exact" />]);
+  if (s.minimum_cents !== null && p?.state !== "paid")
+    lines.push(["Minimum payment", <Money key="m" cents={s.minimum_cents} style="exact" />]);
   if (s.due_date) lines.push(["Due", longDay.format(new Date(s.due_date))]);
   if (s.last_payment_cents !== null)
     lines.push([
@@ -297,6 +301,16 @@ function StatementBlock({ row }: { row: CardRow }) {
   return (
     <section>
       <Heading>Statement</Heading>
+      {s.payment?.state === "paid" && (
+        <p className="mb-2 flex items-center gap-1.5 text-sm font-medium text-positive">
+          <CheckCircle2 className="size-4" aria-hidden /> Paid in full. Nothing more is due on this statement.
+        </p>
+      )}
+      {s.payment?.state === "late" && !s.overdue && (
+        <p className="mb-2 flex items-center gap-1.5 text-sm font-medium text-negative">
+          <AlertTriangle className="size-4" aria-hidden /> Past its due date and not paid in full.
+        </p>
+      )}
       {s.overdue && (
         <p className="mb-2 flex items-center gap-1.5 text-sm font-medium text-negative">
           <AlertTriangle className="size-4" aria-hidden /> The bank says a payment is overdue.
