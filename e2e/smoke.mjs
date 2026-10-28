@@ -218,6 +218,16 @@ try {
       for (const v of axe.violations.filter((v) => v.impact === "serious" || v.impact === "critical")) problems.push(`${v.id}: ${v.help}`);
       await sheet.getByRole("link", { name: /AAPL is up/ }).click();
       await page.waitForURL(/\/portfolio\/holding\?s=AAPL/);
+      // The app icon goes Home; a laptop also gets a Refresh button (a phone pulls to refresh instead).
+      await page.getByRole("link", { name: "Finance" }).filter({ visible: true }).first().click();
+      await page.waitForURL(BASE + "/");
+      const refresh = page.locator("header").getByRole("button", { name: "Refresh" });
+      if (SIZES[size].isMobile) {
+        if (await refresh.isVisible()) problems.push("the Refresh button shows on a phone");
+      } else {
+        await refresh.click();
+        await refresh.waitFor(); // back to "Refresh" once it's done
+      }
       problems.push(...errors);
       if (problems.length) fail(`${size} alerts bell`, problems);
       else console.log(`ok   ${size} alerts bell`);

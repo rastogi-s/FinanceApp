@@ -2,8 +2,8 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useSyncExternalStore } from "react";
-import { ChartPie, Eye, EyeOff, House, PiggyBank, ReceiptText, Settings, TrendingUp } from "lucide-react";
+import { useEffect, useState, useSyncExternalStore } from "react";
+import { ChartPie, Eye, EyeOff, House, PiggyBank, ReceiptText, RefreshCw, Settings, TrendingUp } from "lucide-react";
 import { AlertsBell } from "@/components/alerts-bell";
 import { PullToRefresh } from "@/components/pull-to-refresh";
 import { ReauthDialog, requestReauth } from "@/components/reauth";
@@ -12,7 +12,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Toaster } from "@/components/ui/toast";
 import { UpdateBanner } from "@/components/updates";
 import { AuthProvider, isPublic, useAuth } from "@/lib/auth";
-import { useMeta } from "@/lib/household";
+import { refreshAll, useMeta } from "@/lib/household";
 import { followHash, installNavMemory, noteNavigation } from "@/lib/nav";
 import { cn } from "@/lib/utils";
 
@@ -148,7 +148,7 @@ function PrivateShell({ children }: { children: React.ReactNode }) {
 
       {/* Laptop: a quiet sidebar. */}
       <aside className="sticky top-0 hidden h-dvh flex-col border-r px-4 py-6 md:flex">
-        <Link href="/" className="mb-8 flex items-center gap-2.5 px-2 font-semibold tracking-tight">
+        <Link href="/" title="Home" className="mb-8 flex items-center gap-2.5 rounded-full px-2 font-semibold tracking-tight transition-opacity hover:opacity-80">
           <Logo /> Finance
         </Link>
         <nav aria-label="Main" className="flex flex-col gap-1">
@@ -175,13 +175,14 @@ function PrivateShell({ children }: { children: React.ReactNode }) {
       <div className="group/shell flex min-w-0 flex-col">
         <header className="sticky top-0 z-30 border-b bg-background/80 pt-[env(safe-area-inset-top)] backdrop-blur-lg md:border-b-0 md:bg-transparent md:backdrop-blur-none">
           <div className={cn("mx-auto flex h-14 w-full max-w-3xl items-center gap-2 px-4", WIDE_HEADER)}>
-            <Link href="/" className="flex items-center gap-2 font-semibold tracking-tight md:hidden">
+            <Link href="/" title="Home" className="-ml-1 flex min-h-11 items-center gap-2 rounded-full px-1 font-semibold tracking-tight transition-opacity active:opacity-70 md:hidden">
               <Logo /> Finance
             </Link>
             {meta?.demo && (
               <span className="ml-1 rounded-full bg-warning/10 px-2.5 py-0.5 text-xs font-medium text-warning">Sample data</span>
             )}
             <div className="-mr-1.5 ml-auto flex items-center md:mr-0 md:gap-1">
+              <RefreshButton />
               <AlertsBell demo={!!meta?.demo} className={TOP_ICON} />
               <Button
                 variant="ghost"
@@ -236,6 +237,30 @@ function PrivateShell({ children }: { children: React.ReactNode }) {
         </ul>
       </nav>
     </div>
+  );
+}
+
+/** A laptop has no pull to refresh: this does the same (sync with the banks, then fresh numbers everywhere). */
+function RefreshButton() {
+  const [busy, setBusy] = useState(false);
+  const refresh = () => {
+    if (busy) return;
+    setBusy(true);
+    refreshAll().finally(() => setBusy(false));
+  };
+  return (
+    <Button
+      variant="ghost"
+      size="icon"
+      className={cn(TOP_ICON, "hidden md:inline-flex")}
+      onClick={refresh}
+      aria-label={busy ? "Refreshing" : "Refresh"}
+      aria-busy={busy}
+      title="Refresh: sync with your banks"
+      data-tab="refresh"
+    >
+      <RefreshCw className={cn(busy && "animate-spin motion-reduce:animate-none")} />
+    </Button>
   );
 }
 
