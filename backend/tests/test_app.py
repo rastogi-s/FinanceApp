@@ -131,7 +131,7 @@ def test_demo_household_adds_up(site):
 
 def test_demo_coming_up(site):
     r = client(site, demo_mode=True).get("/api/upcoming").json()
-    assert {e["kind"] for e in r["events"]} == {"pay", "card", "cd", "dividend", "offer"}
+    assert {e["kind"] for e in r["events"]} == {"pay", "card", "bill", "cd", "dividend", "offer"}
     assert [e["date"] for e in r["events"]] == sorted(e["date"] for e in r["events"])
 
 

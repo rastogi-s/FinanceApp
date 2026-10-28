@@ -1,5 +1,22 @@
 [
   {
+    "version": "0.58.0",
+    "title": "A heads-up when a utility bill hasn't been paid",
+    "features": [
+      {
+        "id": "utility-bill-alerts",
+        "title": "Utility bills you haven't paid yet",
+        "body": "The app learns when each utility is usually paid, like power around the 14th or water every two months, from the last year of payments. If this time's payment hasn't shown up a few days after its usual day, Home's Needs you says to check that bill, and you get one push per bill (it waits for quiet hours and never shows an amount). It clears by itself once a payment comes in. Paid it from an account the app doesn't see? Tap Paid. No rule to set up.",
+        "tryIt": "/"
+      },
+      {
+        "id": "utility-bills-coming-up",
+        "title": "Upcoming utility bills on Home",
+        "body": "Coming up now lists the utility bills expected in the next two weeks, at their usual amount, next to paydays and card payments."
+      }
+    ]
+  },
+  {
     "version": "0.57.0",
     "title": "Card payments: paid or not, and a nudge before they're due",
     "features": [

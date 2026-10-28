@@ -6,6 +6,7 @@ card offers about to end. Each comes from the page that already works it out:
 - CDs: deposits.maturing, the same list Home's "Needs you" shows (out to 30 days, since a CD needs deciding early).
 - dividends: Dividends & interest's expected payments (income.build), at each holding's usual amount.
 - offers: card offers ending within a week (offers.load).
+- utility bills: when each is usually paid (bills.status), at its usual amount. Late ones are in "Needs you" instead.
 Amounts are what's expected, not promised; the rows say so where it matters.
 """
 
@@ -14,7 +15,7 @@ from datetime import date, timedelta
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
 
-from financeapp import budget, cardpay, cards, deposits, household, income, offers
+from financeapp import bills, budget, cardpay, cards, deposits, household, income, offers
 from financeapp.models import Account, CardLink, CardStatement, Paycheck, User
 
 DAYS = 14
@@ -25,6 +26,7 @@ EVERY = {
     "monthly": "Every month",
 }
 OFFER_DAYS = 7
+CADENCE = {"monthly": "Monthly bill", "every two months": "Bill every two months", "quarterly": "Quarterly bill"}
 
 
 def event(on: date, kind: str, title: str, detail: str, cents: int | None, href: str | None) -> dict:
@@ -125,9 +127,18 @@ def ending_offers(rows: list[offers.Offer], names: dict[int, str], today: date) 
     return out
 
 
+def utility_bills(soon: list[dict], today: date) -> list[dict]:
+    out = []
+    for r in soon:
+        on = max(date.fromisoformat(r["expected"]), today)
+        detail = "Usually paid about now" if on == today else f"{CADENCE[r['cadence']]}, usual amount"
+        out.append(event(on, "bill", f"{r['name']} bill", detail, -r["usual_cents"], r["href"]))
+    return out
+
+
 def merge(*groups: list[dict]) -> list[dict]:
     rows = [r for g in groups for r in g]
-    order = {"pay": 0, "card": 1, "cd": 2, "dividend": 3, "offer": 4}
+    order = {"pay": 0, "card": 1, "bill": 2, "cd": 3, "dividend": 4, "offer": 5}
     return sorted(rows, key=lambda r: (r["date"], order[r["kind"]], r["title"]))
 
 
@@ -164,5 +175,6 @@ def build(db: DbSession, today: date) -> dict:
             cds(maturing),
             dividends(expected, today, end),
             ending_offers(offers.load(db, today), card_names, today),
+            utility_bills(bills.status(db, today)["soon"], today),
         ),
     }

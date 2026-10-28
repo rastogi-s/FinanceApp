@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session as DbSession
 
 from financeapp import (
     auth,
+    bills,
     crypto,
     dedupe,
     demo,
@@ -478,6 +479,20 @@ def snooze_reminder(account_id: int, body: SnoozeIn, request: Request, who: Sign
     if a is None or conn is None or conn.provider not in reminders.PROVIDERS:
         raise HTTPException(404, "No such account.")
     reminders.snooze(db, a.id, body.days, reminders.local_today(db))
+    return {"ok": True}
+
+
+class BillPaidIn(BaseModel):
+    key: str = Field(min_length=1, max_length=200)
+
+
+@router.post("/bills/paid")
+def bill_paid(body: BillPaidIn, request: Request, who: Signed = Depends(signed_in)) -> dict:
+    """A utility bill was paid from an account the app doesn't see: stop saying it's late (bills.py)."""
+    no_demo(who)
+    db = db_of(request)
+    if not bills.mark_paid(db, body.key, reminders.local_today(db)):
+        raise HTTPException(404, "No such bill.")
     return {"ok": True}
 
 
