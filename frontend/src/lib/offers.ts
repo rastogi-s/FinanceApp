@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * Card offers (backend offers.py): Chase Offers and Capital One Offers, sent from the bank's own offers page by the
+ * Card offers (backend offers.py): Chase Offers, Capital One Offers, Amex Offers or any bank's, sent from its offers page by the
  * "Send to Finance" bookmark, or pasted.
  *
  * The bookmark runs only when tapped, on the page you have open. It keeps the lines around each offer ("5% cash
@@ -26,7 +26,7 @@ export type OfferRead = {
 };
 
 export type ReadOffers = {
-  issuer: "chase" | "capital_one" | "other";
+  issuer: string; // a bank (offers.py BANKS) or "other": any bank's offers page works
   issuer_name: string;
   card_name: string | null;
   mask: string | null;
@@ -100,16 +100,16 @@ const STASH = "finance.sent-offers";
 /** What the bookmark runs. `origin` is this app's address, so the offers come back here and nowhere else. */
 export function bookmarklet(origin: string): string {
   const js = `(()=>{
-const v=/(\\d+(\\.\\d+)?\\s?%|\\$\\d+(\\.\\d\\d)?|\\d+(\\.\\d)?\\s?x)\\s*(in\\s+)?(cash\\s?back|back|off|rewards?|statement credit|(the\\s+)?miles|(the\\s+)?points)/i;
-const c=/(\\.{2,3}|\\u2026|ending in|x{2,4})\\s?\\d{4}/i;
+const v=/(\\d+(\\.\\d+)?\\s?%|\\$\\d+(\\.\\d\\d)?|\\d+(\\.\\d)?\\s?x)\\s*(in\\s+)?(cash\\s?back|back|off|rewards?|statement credit|(the\\s+)?miles|(the\\s+)?points)|\\d+\\s(additional\\s|extra\\s|bonus\\s)?(membership rewards\\S*\\s|thankyou\\S*\\s)?(points|miles|pts)\\s(per|for every|on every)\\s/i;
+const c=/(\\.{2,3}|\\u2026|\\u2022{2,4}|ending in|x{2,4}|\\s-)\\s?\\d{4,5}\\b/i;
 const a=[];
 try{document.querySelectorAll('img[alt],img[src*="domain="],[role=img][aria-label]').forEach(m=>{let d='';try{d=new URL(m.src||'').searchParams.get('domain')||'';}catch(e){}const t=d?'Logo for '+d:(m.getAttribute('alt')||m.getAttribute('aria-label')||'').trim();if(t.length<2||t.length>60||!m.parentNode)return;const e=document.createElement('span');e.textContent=t;e.style.cssText='position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap';m.parentNode.insertBefore(e,m);a.push(e);});}catch(e){}
 const l=document.body.innerText.split(/\\n+/).map(s=>s.trim()).filter(Boolean);
 a.forEach(e=>e.remove());
 const k=new Set();let card='';
-const no=/balance|available|payment|statement|routing|account (number|ending)/i;
+const no=/balance|available|payment|statement(?! credit)|routing|account (number|ending)/i;
 l.forEach((s,i)=>{if(!card&&c.test(s)&&s.length<80&&!no.test(s))card=s;if(v.test(s))for(let j=Math.max(0,i-5);j<Math.min(l.length,i+5);j++)if(!no.test(l[j]))k.add(j);});
-if(!k.size){alert('No offers on this page. Open Chase Offers or Capital One Offers first.');return;}
+if(!k.size){alert('No offers on this page. Open your card\\'s offers page first (Chase Offers, Capital One Offers, Amex Offers...).');return;}
 const t=[card,...[...k].sort((a,b)=>a-b).map(i=>l[i])].join('\\n').slice(0,150000);
 const u=${JSON.stringify(origin)}+'/cards${HASH}'+encodeURIComponent(JSON.stringify({site:location.hostname,text:t}));
 if(!window.open(u,'_blank'))location.href=u;
@@ -167,3 +167,6 @@ export const OFFER_PAGES = [
   { issuer: "chase", name: "Chase Offers", url: "https://secure.chase.com/", hint: "Sign in, then pick Chase Offers under a card." },
   { issuer: "capital_one", name: "Capital One Offers", url: "https://capitaloneoffers.com/", hint: "Sign in with your Capital One login." },
 ] as const;
+
+/** Other banks' offers pages the bookmark reads the same way (any other bank's too). */
+export const OTHER_OFFER_PAGES = "Amex Offers, Citi Merchant Offers, BankAmeriDeals, My Wells Fargo Deals, U.S. Bank Deals and Discover Deals";

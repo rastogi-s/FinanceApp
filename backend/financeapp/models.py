@@ -636,7 +636,7 @@ class CardOffer(Base):
     __tablename__ = "card_offers"
     id: Mapped[int] = mapped_column(primary_key=True)
     account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id", ondelete="CASCADE"), index=True)
-    issuer: Mapped[str] = mapped_column(String(16))  # chase | capital_one | other
+    issuer: Mapped[str] = mapped_column(String(16))  # a key of offers.BANKS, or other
     merchant: Mapped[str] = mapped_column(String(80))  # as the bank wrote it
     key: Mapped[str] = mapped_column(String(80))  # categorize.merchant_key of it
     kind: Mapped[str] = mapped_column(String(12))  # percent | amount | multiplier

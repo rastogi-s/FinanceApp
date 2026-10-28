@@ -57,7 +57,7 @@ class OfferIn(BaseModel):
 
 
 class OffersIn(BaseModel):
-    issuer: Literal["chase", "capital_one", "other"]
+    issuer: str = Field(pattern="^(" + "|".join([*offers.BANKS, "other"]) + ")$")
     offers: list[OfferIn] = Field(max_length=offers.MAX_OFFERS)
 
 
