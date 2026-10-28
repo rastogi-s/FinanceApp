@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { Check, Sparkles, Sunrise } from "lucide-react";
+import { Sparkles, Sunrise } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Field, Input } from "@/components/ui/input";
@@ -62,35 +62,6 @@ function Byline({ b }: { b: BriefRow }) {
         </>
       )}
     </p>
-  );
-}
-
-/** Today's brief on Home, until it's been read. */
-export function BriefCard() {
-  const { data } = useApi<BriefState>("/api/brief");
-  const [hidden, setHidden] = useState(false);
-  const b = data?.today;
-  if (!b || b.read || hidden) return null;
-  const done = () => {
-    setHidden(true);
-    api(`/api/brief/${b.id}/read`, { method: "POST" }).catch(() => {});
-  };
-  return (
-    <Card className="border-primary/20 bg-accent/40">
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Sunrise className="size-4 text-primary" aria-hidden /> Morning brief
-        </CardTitle>
-        <Button variant="ghost" size="sm" onClick={done}>
-          <Check /> Got it
-        </Button>
-      </CardHeader>
-      <CardContent className="grid grid-cols-1 gap-3">
-        <p className="text-lg font-semibold tracking-tight">{b.headline}</p>
-        <Points b={b} />
-        <Byline b={b} />
-      </CardContent>
-    </Card>
   );
 }
 

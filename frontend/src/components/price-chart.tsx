@@ -2,6 +2,7 @@
 
 import { useId, useMemo, useRef, useState } from "react";
 import { price as fmtPrice } from "@/lib/portfolio";
+import { cn } from "@/lib/utils";
 
 const dayTime = new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit" });
 const dayDate = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" });
@@ -23,12 +24,17 @@ export function PriceChart({
   intraday,
   onScrub,
   label,
+  format = (v) => fmtPrice.format(v),
+  className,
 }: {
   points: [number, number][];
   baseline?: number | null;
   intraday: boolean;
   onScrub: (p: [number, number] | null) => void;
   label: string;
+  /** How a point's value is read out to a screen reader (a share price by default). */
+  format?: (v: number) => string;
+  className?: string;
 }) {
   const id = useId();
   const ref = useRef<HTMLDivElement>(null);
@@ -97,9 +103,12 @@ export function PriceChart({
       aria-valuemax={points.length - 1}
       aria-valuenow={active ?? points.length - 1}
       aria-valuetext={
-        a ? `${fmtPrice.format(a[1])} on ${pointLabel(a[0], intraday)}` : `${fmtPrice.format(points[points.length - 1]![1])}, latest`
+        a ? `${format(a[1])} on ${pointLabel(a[0], intraday)}` : `${format(points[points.length - 1]![1])}, latest`
       }
-      className="money relative h-52 w-full touch-pan-y rounded-lg outline-none select-none focus-visible:ring-2 focus-visible:ring-ring md:h-60"
+      className={cn(
+        "money relative h-52 w-full touch-pan-y rounded-lg outline-none select-none focus-visible:ring-2 focus-visible:ring-ring md:h-60",
+        className,
+      )}
       onPointerMove={(e) => pick(e.clientX)}
       onPointerDown={(e) => pick(e.clientX)}
       onPointerLeave={clear}

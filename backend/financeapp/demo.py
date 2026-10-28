@@ -52,6 +52,7 @@ HOLDINGS = [
     ("HSA cash", "HealthEquity cash", "Cash", "HealthEquity HSA", 6_200, 0.0),
 ]
 
+CD_DAYS_LEFT = 24  # the Marcus CD matures soon, so Home's "Needs you" has it
 CASH = [("Chase checking", 14_350), ("Ally savings", 38_900), ("Marcus 12-month CD", 25_000)]
 # goal, name, icon, color, priority, target (dollars), months from now (None: no date), funding [(account id, dollars)]
 GOALS = [
@@ -189,7 +190,12 @@ def household(today: date | None = None) -> dict:
                 for i, (n, v) in enumerate(DEBTS)
             ],
         },
-        "health": {"stale": [], "last_sync_ok": True, "uploads": [_upload_due()]},
+        "health": {
+            "stale": [],
+            "last_sync_ok": True,
+            "uploads": [_upload_due()],
+            "maturing": deposits.maturing(_deposit_details(today), {9: "Marcus 12-month CD ••7781"}),
+        },
         "holdings": [
             {
                 "symbol": s,
@@ -374,7 +380,7 @@ def _deposit_details(today: date) -> dict[int, dict]:
                    round(38_900_00 * 3.8 / 1200) * today.month, round(38_900_00 * 4.0 / 100))  # fmt: skip
     months = [deposits.add_months(date(today.year, today.month, 1), -i) for i in range(5, -1, -1)]
     savings["rates"] = [{"month": f"{m:%Y-%m}", "apy": 4.4 if i < 2 else 3.8} for i, m in enumerate(months)]
-    opened = deposits.add_months(today + timedelta(days=74), -12)
+    opened = deposits.add_months(today + timedelta(days=CD_DAYS_LEFT), -12)
     cd = base("cd", 4.4, "typed", _cents(25_000), 0, 0, 0)
     cd["cd"] = deposits.cd(
         deposits.CdInputs(
