@@ -4,9 +4,9 @@ import Link from "next/link";
 import { useState } from "react";
 import { type Guide, GuideCard } from "@/components/guide";
 import { Bell, ChevronRight, Sparkles, TrendingUp } from "lucide-react";
-import { FreedomTile, GoalTile, Greeting, NeedsYou, NetWorthHero } from "@/components/home";
+import { ComingUp, FreedomTile, GoalTile, Greeting, Movers, NeedsYou, NetWorthHero, type Upcoming, WhereItSits } from "@/components/home";
 import { Money } from "@/components/money";
-import { Column, Columns, HouseholdPage } from "@/components/page";
+import { HouseholdPage } from "@/components/page";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
@@ -14,6 +14,7 @@ import { toast } from "@/components/ui/toast";
 import { api } from "@/lib/api";
 import { monthName } from "@/lib/budget";
 import { KIND_DOT, type LinkedHousehold, alertHref, resetHousehold, useApi } from "@/lib/household";
+import type { NetWorth } from "@/lib/networth";
 import { cn } from "@/lib/utils";
 
 const time = new Intl.DateTimeFormat("en-US", {
@@ -38,50 +39,57 @@ export default function Home() {
   };
   return (
     <HouseholdPage title="Home" heading={<Greeting />} wide before={guide && <GuideCard guide={guide} onHide={hideGuide} />}>
-      {(h) => (
-        // Phone: what needs you, net worth, the tiles, then the rest. Laptop: what needs you across the top, the
-        // chart beside the tiles, then two columns.
-        <div data-wide className="grid grid-cols-1 gap-4 xl:grid-cols-12 xl:items-start">
-          <NeedsYou h={h} className="xl:col-span-12" />
-          <NetWorthHero h={h} className="xl:col-span-8" />
-          <div className="grid grid-cols-2 gap-4 xl:col-span-4 [&>*:last-child:nth-child(odd)]:col-span-2">
-            <FirstTile h={h} />
-            <SecondTile h={h} />
-            <FreedomTile h={h} />
-            <GoalTile />
-          </div>
-          <Columns className="xl:col-span-12">
-            <Column>
-              {h.budgets_closest.length > 0 && (
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Closest to their limit</CardTitle>
-                    <Link href="/budget" className="flex items-center text-sm font-medium text-primary">
-                      Budget <ChevronRight className="size-4" aria-hidden />
-                    </Link>
-                  </CardHeader>
-                  <CardContent className="grid grid-cols-1 gap-4">
-                    {h.budgets_closest.map((b) => (
-                      <div key={b.category}>
-                        <div className="mb-1.5 flex items-baseline justify-between text-sm">
-                          <span className="font-medium">{b.category}</span>
-                          <span className="text-muted-foreground">
-                            <Money cents={b.spent_cents} /> of <Money cents={b.limit_cents} />
-                          </span>
-                        </div>
-                        <Progress value={b.spent_cents} max={b.limit_cents} label={`${b.category} budget used`} />
-                      </div>
-                    ))}
-                  </CardContent>
-                </Card>
-              )}
-              {h.alerts.length > 0 && <Alerts h={h} />}
-            </Column>
-            <Column>{!h.demo && <Accounts h={h} />}</Column>
-          </Columns>
-        </div>
-      )}
+      {(h) => <HomeBody h={h} />}
     </HouseholdPage>
+  );
+}
+
+/**
+ * Phone: what needs you, net worth, the tiles, what's coming up, then the rest. Laptop: what needs you across the
+ * top, the chart beside the tiles, three cards in a row, then where the money sits beside the alerts.
+ */
+function HomeBody({ h }: { h: LinkedHousehold }) {
+  const { data: nw } = useApi<NetWorth>("/api/net-worth");
+  const { data: upcoming } = useApi<Upcoming>("/api/upcoming");
+  const alerts = h.alerts.length > 0;
+  return (
+    <div data-wide className="grid grid-cols-1 gap-4 xl:grid-cols-12 xl:items-start">
+      <NeedsYou h={h} className="xl:col-span-12" />
+      <NetWorthHero h={h} nw={nw} className="xl:col-span-8" />
+      <div className="grid grid-cols-2 gap-4 xl:col-span-4 [&>*:last-child:nth-child(odd)]:col-span-2">
+        <FirstTile h={h} />
+        <SecondTile h={h} />
+        <FreedomTile h={h} />
+        <GoalTile />
+      </div>
+      <ComingUp data={upcoming} className="xl:col-span-4" />
+      <Movers h={h} className="xl:col-span-4" />
+      {h.budgets_closest.length > 0 && (
+        <Card className="xl:col-span-4">
+          <CardHeader>
+            <CardTitle>Closest to their limit</CardTitle>
+            <Link href="/budget" className="flex items-center text-sm font-medium text-primary">
+              Budget <ChevronRight className="size-4" aria-hidden />
+            </Link>
+          </CardHeader>
+          <CardContent className="grid grid-cols-1 gap-4">
+            {h.budgets_closest.map((b) => (
+              <div key={b.category}>
+                <div className="mb-1.5 flex items-baseline justify-between text-sm">
+                  <span className="font-medium">{b.category}</span>
+                  <span className="text-muted-foreground">
+                    <Money cents={b.spent_cents} /> of <Money cents={b.limit_cents} />
+                  </span>
+                </div>
+                <Progress value={b.spent_cents} max={b.limit_cents} label={`${b.category} budget used`} />
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+      <WhereItSits nw={nw} className={alerts ? "xl:col-span-7" : "xl:col-span-12"} />
+      {alerts && <Alerts h={h} className="xl:col-span-5" />}
+    </div>
   );
 }
 
@@ -162,47 +170,7 @@ function SecondTile({ h }: { h: LinkedHousehold }) {
   );
 }
 
-function Accounts({ h }: { h: LinkedHousehold }) {
-  const groups = [
-    { title: "Cash", rows: h.accounts.cash, sign: 1 },
-    { title: "Investments", rows: h.accounts.investments ?? [], sign: 1 },
-    { title: "Cards and loans", rows: h.accounts.debts, sign: -1 },
-  ].filter((g) => g.rows.length);
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Accounts</CardTitle>
-        <Link href="/settings/accounts" className="flex items-center text-sm font-medium text-primary">
-          Manage <ChevronRight className="size-4" aria-hidden />
-        </Link>
-      </CardHeader>
-      <CardContent className="grid grid-cols-1 gap-4">
-        {groups.map((g) => (
-          <div key={g.title}>
-            <div className="mb-1 flex items-baseline justify-between text-xs font-medium tracking-wide text-muted-foreground uppercase">
-              <span>{g.title}</span>
-              <Money cents={g.sign * g.rows.reduce((s, r) => s + r.cents, 0)} />
-            </div>
-            <ul className="divide-y">
-              {g.rows.map((r) => (
-                <li key={r.id ?? r.name} className="flex items-center justify-between gap-3 py-2.5 text-sm">
-                  <span className="min-w-0 truncate">{r.name}</span>
-                  {r.as_of ? (
-                    <Money cents={g.sign * r.cents} className="font-medium" />
-                  ) : (
-                    <span className="text-xs text-muted-foreground">No balance yet</span>
-                  )}
-                </li>
-              ))}
-            </ul>
-          </div>
-        ))}
-      </CardContent>
-    </Card>
-  );
-}
-
-function Alerts({ h }: { h: LinkedHousehold }) {
+function Alerts({ h, className }: { h: LinkedHousehold; className?: string }) {
   const [cleared, setCleared] = useState(false);
   if (cleared) return null;
   const clear = async () => {
@@ -216,7 +184,7 @@ function Alerts({ h }: { h: LinkedHousehold }) {
     }
   };
   return (
-    <Card>
+    <Card className={className}>
       <CardHeader>
         <CardTitle>Alerts</CardTitle>
         <div className="flex items-center gap-1">

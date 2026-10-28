@@ -26,6 +26,7 @@ from financeapp import (
     review,
     search,
     sync,
+    upcoming,
 )
 from financeapp.ai import documents, extract, reading
 from financeapp.ai.providers import ProviderError
@@ -77,6 +78,14 @@ def get_net_worth(request: Request, who: Signed = Depends(signed_in)) -> dict:
     if who.demo:
         return demo.net_worth()
     return networth.build(db_of(request), sync.today())
+
+
+@router.get("/upcoming")
+def get_upcoming(request: Request, who: Signed = Depends(signed_in)) -> dict:
+    """Home's "Coming up": paydays, card payments, CDs, dividends and offers in the next two weeks (upcoming.py)."""
+    if who.demo:
+        return demo.upcoming_events()
+    return upcoming.build(db_of(request), sync.today())
 
 
 # ---- accounts and connections
