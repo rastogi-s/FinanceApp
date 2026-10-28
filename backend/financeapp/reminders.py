@@ -189,6 +189,7 @@ def queue(db: DbSession, today: date) -> int:
             fired_at=now(),
             status="pending",
             attempts=0,
+            link=f"/settings/accounts?account={r['account_id']}",
         )
         if db.scalar(stmt.on_conflict_do_nothing(index_elements=["dedup_key"]).returning(AlertEvent.id)) is not None:
             added += 1

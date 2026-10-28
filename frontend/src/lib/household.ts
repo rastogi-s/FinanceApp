@@ -44,7 +44,12 @@ export type Alert = {
   status?: "pending" | "held" | "sent" | "unsent" | "failed";
   channel?: string | null;
   read?: boolean;
+  /** The page it's about (/portfolio/holding?s=META): tapping the alert, or its push, opens it. */
+  link?: string | null;
 };
+
+/** Where tapping an alert goes, when it's about one page of the app. */
+export const alertHref = (a: Alert): string | null => (a.link?.startsWith("/") && !a.link.startsWith("//") ? a.link : null);
 export type AccountRow = { id?: number; name: string; type?: string; cents: number; as_of?: string | null };
 
 export type LinkedHousehold = {

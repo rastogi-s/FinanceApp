@@ -18,7 +18,7 @@ import { toast } from "@/components/ui/toast";
 import { type UploadDue, dueLabel, shortDate } from "@/lib/accounts";
 import { api } from "@/lib/api";
 import { monthName } from "@/lib/budget";
-import { KIND_DOT, type LinkedHousehold, resetHousehold, useApi } from "@/lib/household";
+import { KIND_DOT, type LinkedHousehold, alertHref, resetHousehold, useApi } from "@/lib/household";
 import { cn } from "@/lib/utils";
 
 const time = new Intl.DateTimeFormat("en-US", {
@@ -367,24 +367,33 @@ function Alerts({ h }: { h: LinkedHousehold }) {
       </CardHeader>
       <CardContent className="pt-1">
         <ul className="divide-y">
-          {h.alerts.map((a) => (
-            <li key={a.id} className="flex items-start gap-3 py-3">
-              <span
-                className={cn(
-                  "mt-1.5 size-2 shrink-0 rounded-full",
-                  KIND_DOT[a.kind],
+          {h.alerts.map((a) => {
+            const href = alertHref(a);
+            const row = (
+              <>
+                <span className={cn("mt-1.5 size-2 shrink-0 rounded-full", KIND_DOT[a.kind])} aria-hidden />
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium">{a.title}</p>
+                  <p className="text-sm text-muted-foreground">{a.body}</p>
+                </div>
+                <time dateTime={a.at} className="text-xs text-muted-foreground">
+                  {when(a.at)}
+                </time>
+                {href && <ChevronRight className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />}
+              </>
+            );
+            return (
+              <li key={a.id}>
+                {href ? (
+                  <Link href={href} className="-mx-2 flex items-start gap-3 rounded-lg px-2 py-3 transition-colors hover:bg-muted/60">
+                    {row}
+                  </Link>
+                ) : (
+                  <div className="flex items-start gap-3 py-3">{row}</div>
                 )}
-                aria-hidden
-              />
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-medium">{a.title}</p>
-                <p className="text-sm text-muted-foreground">{a.body}</p>
-              </div>
-              <time dateTime={a.at} className="text-xs text-muted-foreground">
-                {when(a.at)}
-              </time>
-            </li>
-          ))}
+              </li>
+            );
+          })}
         </ul>
       </CardContent>
     </Card>

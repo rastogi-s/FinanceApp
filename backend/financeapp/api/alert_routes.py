@@ -315,7 +315,13 @@ def send_test(request: Request, who: Signed = Depends(signed_in)) -> dict:
         raise HTTPException(429, "A test just went out. Give it a few seconds.")
     p.value = {"at": now().isoformat()}
     db.merge(p)
-    channel = notify.deliver(settings, "Test alert", "Alerts from your Finance app reach this phone.", tags="bell")
+    channel = notify.deliver(
+        settings,
+        "Test alert",
+        "Alerts from your Finance app reach this phone.",
+        tags="bell",
+        click=notify.app_link(settings, "/settings/alerts"),
+    )
     audit(db, request, "alert_test", who.user.id, channel=channel)
     if channel is None:
         reason = (notify.last_attempt() or {}).get("reason")

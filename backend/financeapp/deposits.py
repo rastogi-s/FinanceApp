@@ -414,10 +414,10 @@ def record_rates(db: DbSession, details: dict[int, dict], today: date) -> list[t
     return drops
 
 
-def _event(db: DbSession, title: str, body: str, key: str) -> bool:
+def _event(db: DbSession, title: str, body: str, key: str, account_id: int) -> bool:
     stmt = insert(AlertEvent).values(
         rule_id=None, kind="account", title=title[:120], body=body[:300], dedup_key=key[:160], fired_at=now(),
-        status="pending", attempts=0,
+        status="pending", attempts=0, link=f"/settings/accounts?account={account_id}",
     )  # fmt: skip
     return db.scalar(stmt.on_conflict_do_nothing(index_elements=["dedup_key"]).returning(AlertEvent.id)) is not None
 
@@ -467,9 +467,9 @@ def queue(db: DbSession, today: date) -> int:
     for aid, d in details.items():
         if d["cd"]:
             for stage, title, body in notices(names[aid], d["cd"], today):
-                added += _event(db, title, body, f"cd:{aid}:{d['cd']['maturity']}:{stage}")
+                added += _event(db, title, body, f"cd:{aid}:{d['cd']['maturity']}:{stage}", aid)
     for aid, before, after in record_rates(db, details, today):
         title = f"{names[aid]} cut its rate"
         body = f"The bank now reports {after:.2f}% APY, down from {before:.2f}% last month. Worth comparing rates."
-        added += _event(db, title, body, f"rate:{aid}:{today:%Y-%m}")
+        added += _event(db, title, body, f"rate:{aid}:{today:%Y-%m}", aid)
     return added

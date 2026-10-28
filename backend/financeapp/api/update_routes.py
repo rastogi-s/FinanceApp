@@ -64,5 +64,6 @@ def install(request: Request, who: Signed = Depends(recent), _: Signed = Depends
             "Update started",
             f"{who.user.name} asked to update the Finance App from {value['current']} to {value['latest']}.",
             tags="arrows_counterclockwise",
+            link="/settings",
         )
     return _state(request, who)

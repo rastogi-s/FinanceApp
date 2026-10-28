@@ -9,7 +9,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { CodeInput } from "@/components/ui/code-input";
 import { Field, Input } from "@/components/ui/input";
 import { api, ApiError } from "@/lib/api";
-import { useAuth, type User } from "@/lib/auth";
+import { placeAfterSignIn, useAuth, type User } from "@/lib/auth";
 import { getPasskey, passkeyMessage, usePasskeysSupported } from "@/lib/webauthn";
 
 type Step = { kind: "start" } | { kind: "password" } | { kind: "code"; token: string };
@@ -36,12 +36,12 @@ function SignIn() {
   const canPasskey = usePasskeysSupported();
 
   useEffect(() => {
-    if (state.status === "signed-in" && !state.demo) router.replace("/");
+    if (state.status === "signed-in" && !state.demo) router.replace(placeAfterSignIn());
   }, [state, router]);
 
   const done = (r: SignedIn) => {
     signedIn(r.user, r.csrf);
-    router.replace("/");
+    router.replace(placeAfterSignIn());
   };
 
   const run = async (fn: () => Promise<void>) => {

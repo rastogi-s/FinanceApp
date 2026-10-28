@@ -12,7 +12,7 @@ import { Toaster } from "@/components/ui/toast";
 import { UpdateBanner } from "@/components/updates";
 import { AuthProvider, isPublic, useAuth } from "@/lib/auth";
 import { useMeta } from "@/lib/household";
-import { installNavMemory, noteNavigation } from "@/lib/nav";
+import { followHash, installNavMemory, noteNavigation } from "@/lib/nav";
 import { cn } from "@/lib/utils";
 
 const TABS = [
@@ -75,6 +75,7 @@ function Shell({ children }: { children: React.ReactNode }) {
 
   useEffect(installNavMemory, []);
   useEffect(noteNavigation, [pathname]);
+  useEffect(followHash, [pathname, state.status]);
 
   useEffect(() => {
     if ("serviceWorker" in navigator && process.env.NODE_ENV === "production") {

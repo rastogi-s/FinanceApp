@@ -43,6 +43,7 @@ amounts of the household's own money.
 import logging
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
+from urllib.parse import urlencode
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import delete, select
@@ -81,6 +82,16 @@ class Hit:
     title: str = ""
     body: str = ""
     silent: bool = False  # becomes true without an alert (a smaller step of a dip passed on the way down)
+    link: str | None = None  # the page it's about, opened by tapping the alert
+
+
+def holding_link(symbol: str) -> str:
+    return f"/portfolio/holding?{urlencode({'s': symbol})}"
+
+
+def category_link(category_id: int | None) -> str:
+    """A category's spending this month, the same as tapping its Budget row; everyday spending is the Budget."""
+    return "/budget" if category_id is None else f"/spending?category={category_id}&range=month&from=budget"
 
 
 def money(dollars: float) -> str:
@@ -125,14 +136,15 @@ def price_hits(rule: AlertRule, quote, t: datetime) -> list[Hit]:
     if quote is None:
         return []
     price = float(quote.price)
+    link = holding_link(s)
     if "above" in p:
         line = float(p["above"])
         return [Hit("", price >= line, price < line * (1 - REARM_PRICE), f"{s} is above {money(line)}",
-                    f"{s} is at {money(price)}.")]  # fmt: skip
+                    f"{s} is at {money(price)}.", link=link)]  # fmt: skip
     if "below" in p:
         line = float(p["below"])
         return [Hit("", price <= line, price > line * (1 + REARM_PRICE), f"{s} is below {money(line)}",
-                    f"{s} is at {money(price)}.")]  # fmt: skip
+                    f"{s} is at {money(price)}.", link=link)]  # fmt: skip
     if "move_percent" in p and quote.previous_close:
         day = quote.as_of.astimezone(quotes.ET).date()
         if day != t.astimezone(quotes.ET).date():
@@ -140,7 +152,8 @@ def price_hits(rule: AlertRule, quote, t: datetime) -> list[Hit]:
         change = (price - float(quote.previous_close)) / float(quote.previous_close) * 100
         word = "up" if change > 0 else "down"
         return [Hit(day.isoformat(), abs(change) >= float(p["move_percent"]), False,
-                    f"{s} is {word} {percent(abs(change))} today", f"{s} is at {money(price)}.")]  # fmt: skip
+                    f"{s} is {word} {percent(abs(change))} today", f"{s} is at {money(price)}.",
+                    link=link)]  # fmt: skip
     return []
 
 
@@ -167,7 +180,8 @@ def dip_hits(rule: AlertRule, live: dict, held: set[str], t: datetime) -> list[H
                 hits.append(
                     Hit(key, under >= x, under < x - REARM_DIP,
                         f"{s} is {percent(round(under))} under its 52-week high",
-                        f"{s} is at {money(price)}; its 52-week high is {money(high)}. {NOT_ADVICE}", silent)
+                        f"{s} is at {money(price)}; its 52-week high is {money(high)}. {NOT_ADVICE}", silent,
+                        holding_link(s))
                 )  # fmt: skip
         elif "below_average" in p:
             days = int(p["below_average"])
@@ -179,7 +193,7 @@ def dip_hits(rule: AlertRule, live: dict, held: set[str], t: datetime) -> list[H
             hits.append(
                 Hit(s, price < line, price > line * (1 + REARM_PRICE), f"{s} dropped under its {days}-day average",
                     f"{s} is at {money(price)}, {percent(max(under, 0.1))} under its {days}-day average of "
-                    f"{money(line)}. {NOT_ADVICE}")
+                    f"{money(line)}. {NOT_ADVICE}", link=holding_link(s))
             )  # fmt: skip
     return hits
 
@@ -203,7 +217,8 @@ def budget_hits(rule: AlertRule, state: dict, today: date) -> list[Hit]:
     left = (next_month - today).days
     title = f"{name} {verb} over budget" if used > 100 else f"{name} {verb} at {percent(min(used, 100))} of its budget"
     days = f"{left} day{'s' if left != 1 else ''} left in {month.strftime('%B')}."
-    return [Hit(month.isoformat()[:7], used >= float(p["percent"]), False, title, days)]
+    link = category_link(p.get("category_id"))
+    return [Hit(month.isoformat()[:7], used >= float(p["percent"]), False, title, days, link=link)]
 
 
 def forecast_hits(rule: AlertRule, state: dict, today: date) -> list[Hit]:
@@ -221,7 +236,7 @@ def forecast_hits(rule: AlertRule, state: dict, today: date) -> list[Hit]:
             Hit(f"{month.isoformat()[:7]}:{line['category_id']}", f["status"] == "heading_over", False,
                 f"{line['category']} is on pace to go over budget",
                 f"At this pace it ends {month.strftime('%B')} about {percent(max(round(share), 1))} over. "
-                f"{left} day{'s' if left != 1 else ''} left to slow down.")
+                f"{left} day{'s' if left != 1 else ''} left to slow down.", link=category_link(line["category_id"]))
         )  # fmt: skip
     return hits
 
@@ -235,7 +250,8 @@ def concentration_hits(rule: AlertRule, companies: list[dict]) -> list[Hit]:
         hits.append(
             Hit(c["key"], c["percent"] >= limit, c["percent"] < limit - REARM_POINTS,
                 f"{label} is {percent(c['percent'])} of your portfolio",
-                f"That's over your {percent(limit)} limit for one company{through}.")
+                f"That's over your {percent(limit)} limit for one company{through}.",
+                link=holding_link(c["symbol"]) if c["symbol"] else "/portfolio")
         )  # fmt: skip
     return hits
 
@@ -264,7 +280,7 @@ def goal_hits(rule: AlertRule, goals: list[dict], silent: bool = False) -> list[
                 body = MILESTONE_WORDS[m]
                 if g.get("projected_month"):
                     body += f" On pace for {date.fromisoformat(g['projected_month']).strftime('%B %Y')}."
-            hits.append(Hit(key, pct >= m, pct < m - REARM_GOAL, title, body, quiet))
+            hits.append(Hit(key, pct >= m, pct < m - REARM_GOAL, title, body, quiet, f"/goals?goal={g['id']}"))
     return hits
 
 
@@ -298,6 +314,7 @@ def fire(db: DbSession, rule: AlertRule, hits: list[Hit]) -> int:
                 fired_at=now(),
                 status="pending",
                 attempts=0,
+                link=h.link and h.link[:300],
             )
             if db.execute(stmt.on_conflict_do_nothing(index_elements=["dedup_key"])).rowcount:
                 fired += 1
@@ -376,6 +393,10 @@ def send_pending(db: DbSession, settings: Settings, t: datetime | None = None) -
         for e in waiting:
             e.status = "held"
         return 0
+    # Tapping it opens the page it's about; several at once open Home, where the newest alerts are listed (or the
+    # one page they share, like three steps of one budget).
+    links = {e.link for e in waiting}
+    link = links.pop() if len(links) == 1 and None not in links else "/"
     if len(waiting) == 1:
         title, body = waiting[0].title, waiting[0].body
     else:
@@ -383,7 +404,9 @@ def send_pending(db: DbSession, settings: Settings, t: datetime | None = None) -
         body = "\n".join(f"• {e.title}" for e in waiting[:8])
         if len(waiting) > 8:
             body += f"\n…and {len(waiting) - 8} more in the app."
-    channel = notify.deliver(settings, title, body, tags="bell", priority=loudest(db, waiting))
+    channel = notify.deliver(
+        settings, title, body, tags="bell", priority=loudest(db, waiting), click=notify.app_link(settings, link)
+    )
     for e in waiting:
         e.attempts += 1
         if channel:
@@ -431,4 +454,5 @@ def event_json(e: AlertEvent) -> dict:
         "status": e.status,
         "channel": e.channel,
         "read": e.read_at is not None,
+        "link": e.link,
     }

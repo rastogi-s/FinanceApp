@@ -525,6 +525,7 @@ def revoke_all(request: Request, who: Signed = Depends(recent), _: Signed = Depe
         settings,
         "Every connection revoked",
         f"{who.user.name} revoked every account connection. Nothing will sync until accounts are linked again.",
+        link="/settings/accounts",
     )
     return {"revoked": count, "problems": problems}
 

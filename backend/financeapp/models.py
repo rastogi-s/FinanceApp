@@ -518,6 +518,8 @@ class AlertEvent(Base):
     channel: Mapped[str | None] = mapped_column(String(16))  # ntfy | email
     sent_at: Mapped[datetime | None]
     read_at: Mapped[datetime | None]
+    # The page it's about (/portfolio/holding?s=META), opened by tapping the push or the alert in the app.
+    link: Mapped[str | None] = mapped_column(String(300))
 
 
 class Fund(Base):

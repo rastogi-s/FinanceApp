@@ -62,3 +62,21 @@ def test_unreachable_and_bad_address(monkeypatch):
     assert "Couldn't reach" in reason and "10.0.0.1" not in reason  # never an exception's own text
     assert notify.deliver(settings(ntfy_url="ntfy.sh/topic"), "Test alert", "hi") is None
     assert "full address" in notify.last_attempt()["reason"]
+
+
+def test_app_link():
+    s = settings(allowed_hosts="localhost,finance.tail1234.ts.net")
+    assert notify.app_link(s, "/portfolio/holding?s=META") == "https://finance.tail1234.ts.net/portfolio/holding?s=META"
+    assert notify.app_link(settings(app_url="https://money.example/"), "/cards") == "https://money.example/cards"
+    assert notify.app_link(settings(), "/cards") is None  # only localhost: nowhere a phone can open
+    assert notify.app_link(settings(app_url="money.example"), "/cards") is None
+    for bad in (None, "", "cards", "//evil.example/x"):
+        assert notify.app_link(s, bad) is None
+
+
+def test_send_now_links_to_the_page(posted):
+    s = settings(allowed_hosts="finance.tail1234.ts.net")
+    assert notify.send_now(s, "New sign-in", "hi", link="/settings/security")
+    assert posted[0]["json"]["click"] == "https://finance.tail1234.ts.net/settings/security"
+    assert notify.send_now(s, "New sign-in", "hi")
+    assert "click" not in posted[1]["json"]

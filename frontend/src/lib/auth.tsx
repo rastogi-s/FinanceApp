@@ -10,7 +10,7 @@ export type User = { id: number; name: string; email: string; role: "owner" | "m
 type AuthState =
   | { status: "loading" }
   | { status: "setup" }
-  | { status: "signed-out"; reason?: "idle" }
+  | { status: "signed-out"; reason?: "idle" | "out" }
   | { status: "signed-in"; user: User; demo: boolean };
 
 type Ctx = {
@@ -25,6 +25,35 @@ const AuthContext = createContext<Ctx | null>(null);
 // Pages anyone can open. Everything else needs a signed-in person.
 export const PUBLIC_PATHS = ["/signin", "/setup", "/welcome"];
 export const isPublic = (path: string) => PUBLIC_PATHS.some((p) => path === p || path.startsWith(p + "/"));
+
+// The page you were sent to sign in from (a tapped notification, or a page left open until the session ended), so
+// signing in carries on there instead of starting at Home. Kept in this tab only.
+const PLACE = "signin-return";
+
+function keepPlace() {
+  const place = window.location.pathname + window.location.search + window.location.hash;
+  try {
+    if (place === "/") sessionStorage.removeItem(PLACE);
+    else sessionStorage.setItem(PLACE, place);
+  } catch {}
+}
+
+/** Where to go after signing in: the page you were sent here from, or Home. Only a page of this app. */
+export function placeAfterSignIn(): string {
+  let place: string | null = null;
+  try {
+    place = sessionStorage.getItem(PLACE);
+  } catch {}
+  if (!place || !place.startsWith("/") || place.startsWith("//") || place.includes("\\")) return "/";
+  const url = new URL(place, window.location.origin);
+  return url.origin !== window.location.origin || isPublic(url.pathname) ? "/" : place;
+}
+
+function forgetPlace() {
+  try {
+    sessionStorage.removeItem(PLACE);
+  } catch {}
+}
 
 type ServerState = { demo: boolean; setup_required: boolean; user: User | null; csrf: string | null; idle_minutes?: number };
 
@@ -63,7 +92,7 @@ export function AuthProvider({ children, reauth }: { children: React.ReactNode; 
     await api("/api/auth/logout", { method: "POST" }).catch(() => {});
     setCsrf(null);
     resetHousehold();
-    setState({ status: "signed-out" });
+    setState({ status: "signed-out", reason: "out" });
     router.replace("/signin");
   }, [router]);
 
@@ -112,8 +141,11 @@ export function AuthProvider({ children, reauth }: { children: React.ReactNode; 
     if (state.status === "setup" && pathname !== "/setup" && !pathname.startsWith("/welcome")) router.replace("/setup");
     if (state.status === "signed-out" && !isPublic(pathname)) {
       keepSent(); // card offers sent by the bookmark wait in this tab until you're signed in
+      if (state.reason !== "out") keepPlace(); // signing out on purpose starts afresh at Home
+      else forgetPlace();
       router.replace(state.reason === "idle" ? "/signin?idle=1" : "/signin");
     }
+    if (state.status === "signed-in" && !isPublic(pathname)) forgetPlace(); // arrived
     if (state.status === "signed-in" && hasKept() && pathname !== "/cards") router.replace("/cards");
   }, [state, pathname, router]);
 

@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { ChevronRight, Flag, Plus, Target } from "lucide-react";
 import { GoalSheet } from "@/components/goal-sheet";
 import { Money } from "@/components/money";
@@ -54,6 +55,11 @@ export default function GoalsPage() {
       )}
       {s && <Goals s={s} onOpen={setOpen} />}
       {s && (
+        <Suspense>
+          <OpenFromLink goals={s.goals} onOpen={setOpen} />
+        </Suspense>
+      )}
+      {s && (
         <GoalSheet
           open={open !== null}
           onOpenChange={(o) => !o && setOpen(null)}
@@ -65,6 +71,19 @@ export default function GoalsPage() {
       )}
     </>
   );
+}
+
+/** Opened from a milestone push (/goals?goal=3): that goal's sheet, once. */
+function OpenFromLink({ goals, onOpen }: { goals: Goal[]; onOpen: (d: Draft) => void }) {
+  const id = Number(useSearchParams().get("goal"));
+  const done = useRef(false);
+  useEffect(() => {
+    if (done.current || !id) return;
+    done.current = true;
+    const goal = goals.find((g) => g.id === id);
+    if (goal) onOpen({ goal });
+  }, [id, goals, onOpen]);
+  return null;
 }
 
 function Goals({ s, onOpen }: { s: GoalsState; onOpen: (d: Draft) => void }) {

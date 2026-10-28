@@ -1,5 +1,22 @@
 [
   {
+    "version": "0.50.0",
+    "title": "Tap a notification to open what it's about",
+    "features": [
+      {
+        "id": "push-links",
+        "title": "Notifications open the right page",
+        "body": "Tap a push and the app opens on what it's about: the stock's page for a price or dip alert, that category's spending for a budget alert, the goal for a milestone, the account for an upload reminder or a CD maturing, Credit Cards for an offer, and Security for a new sign-in. Several alerts at once open Home. If you need to sign in first, you land on that page afterwards.",
+        "tryIt": "/settings/alerts"
+      },
+      {
+        "id": "alert-rows-open",
+        "title": "Alerts in the app open too",
+        "body": "The alerts on Home and under Settings → Alerts open the same page when you tap them."
+      }
+    ]
+  },
+  {
     "version": "0.49.0",
     "title": "Card offers near you",
     "features": [
