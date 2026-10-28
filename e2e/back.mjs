@@ -71,6 +71,9 @@ for (const [name, opts] of Object.entries(sizes)) {
   await page.waitForURL(/settings$/); await page.waitForTimeout(500);
   check((await page.evaluate(() => history.length)) === depth, `${name} Settings back link goes back`);
   // 5. Home -> Budget -> back, Budget -> Spending -> back
+  // Home lays out in two columns on a laptop and fits a 768px-tall window, so make it short enough to scroll.
+  const size = page.viewportSize();
+  await page.setViewportSize({ width: size.width, height: Math.min(size.height, 480) });
   await page.goto(BASE + "/"); await page.waitForTimeout(1200);
   await page.mouse.wheel(0, 500); await page.waitForTimeout(400);
   const h0 = await page.evaluate(() => scrollY);
@@ -79,6 +82,7 @@ for (const [name, opts] of Object.entries(sizes)) {
   await page.goBack(); await page.waitForTimeout(1500);
   const h1 = await page.evaluate(() => scrollY);
   check(Math.abs(h1 - h0) < 5 && h0 > 0, `${name} home scroll after back from budget ${h0} -> ${h1}`);
+  await page.setViewportSize(size);
   await page.goto(BASE + "/budget"); await page.waitForTimeout(1200);
   await page.mouse.wheel(0, 2000); await page.waitForTimeout(400);
   const link = page.locator('a[href^="/spending"]').filter({ visible: true }).first();
