@@ -12,7 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
 
 from financeapp import demo, household, lookthrough, lots, portfolio, quotes, security
-from financeapp.ai import moves
+from financeapp.ai import moves, research
 from financeapp.ai.providers import ProviderError
 from financeapp.ai.service import AIUnavailable
 from financeapp.api.alert_routes import rule_json
@@ -173,6 +173,58 @@ def moves_review(body: MovesIn, request: Request, who: Signed = Depends(signed_i
     return result
 
 
+def ticker(symbol: str) -> str:
+    symbol = symbol.strip().upper()
+    if not security.valid(symbol):
+        raise HTTPException(404, "Not a ticker symbol.")
+    return symbol
+
+
+@router.get("/securities/{symbol}/ask")
+def research_offer(symbol: str, request: Request, who: Signed = Depends(signed_in)) -> dict:
+    """Ask AI on a holding's page: what would be sent, to whom, at most what cost, and the kept conversation."""
+    symbol = ticker(symbol)
+    if who.demo:
+        return demo.research_offer(symbol)
+    return research.offer(db_of(request), settings_of(request), who.user.id, symbol)
+
+
+class AskIn(BaseModel):
+    question: str = Field("", max_length=research.MAX_QUESTION)
+
+
+@router.post("/securities/{symbol}/ask")
+def research_ask(symbol: str, body: AskIn, request: Request, who: Signed = Depends(signed_in)) -> dict:
+    """Researches the ticker (news and, with Claude, the web) and answers. An educated take, not advice."""
+    symbol = ticker(symbol)
+    if who.demo:
+        raise HTTPException(403, "Not available with sample data.")
+    db = db_of(request)
+    try:
+        result = research.ask(request.app.state.db, db, settings_of(request), who.user.id, symbol, body.question)
+    except AIUnavailable as e:
+        raise HTTPException(409, str(e)) from None
+    except ProviderError as e:
+        raise HTTPException(502, e.message) from None
+    except research.NotAvailable as e:
+        raise HTTPException(422, e.message) from None
+    entry = result["entry"]
+    audit(
+        db, request, "ticker_researched", who.user.id, symbol=symbol, model=entry["model"], searches=entry["searched"]
+    )
+    return result
+
+
+@router.delete("/securities/{symbol}/ask")
+def research_forget(symbol: str, request: Request, who: Signed = Depends(signed_in)) -> dict:
+    """Clears the kept questions and answers for this ticker."""
+    symbol = ticker(symbol)
+    if who.demo:
+        raise HTTPException(403, "Not available with sample data.")
+    research.forget(db_of(request), symbol)
+    return {"thread": []}
+
+
 @router.get("/securities/{symbol}")
 def detail(
     symbol: str,
@@ -180,9 +232,7 @@ def detail(
     range_: Literal["1d", "5d", "1m", "6m", "1y", "5y"] = Query("1d", alias="range"),
     who: Signed = Depends(signed_in),
 ) -> dict:
-    symbol = symbol.strip().upper()
-    if not security.valid(symbol):
-        raise HTTPException(404, "Not a ticker symbol.")
+    symbol = ticker(symbol)
     if who.demo:
         return demo.security(symbol, range_)
     db = db_of(request)

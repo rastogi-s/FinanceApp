@@ -3,8 +3,9 @@
 import Link from "next/link";
 import { Suspense, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { AlertTriangle, ArrowDownRight, ArrowUpRight, Bell, ChevronRight, Layers, Plus } from "lucide-react";
+import { AlertTriangle, ArrowDownRight, ArrowUpRight, Bell, ChevronRight, Layers, Plus, Sparkles } from "lucide-react";
 import { RuleSheet, type RuleIn } from "@/components/alert-sheets";
+import { AskAICard, AskAISheet, useResearch } from "@/components/ask-ai";
 import { Money } from "@/components/money";
 import { BackLink, Notice, Wide } from "@/components/page";
 import { PriceChart, pointLabel } from "@/components/price-chart";
@@ -61,6 +62,13 @@ function Holding() {
   const { data, error, reload } = useApi<Security>(valid ? `/api/securities/${encodeURIComponent(symbol)}?range=${range}` : null);
   const [scrub, setScrub] = useState<[number, number] | null>(null);
   const [alertOpen, setAlertOpen] = useState(false);
+  const research = useResearch(valid ? symbol : "");
+  const [askOpen, setAskOpen] = useState(false);
+  const [askStart, setAskStart] = useState<string | null>(null);
+  const openAsk = (question?: string) => {
+    setAskStart(question ?? null);
+    setAskOpen(true);
+  };
 
   if (!valid || (error && !data)) {
     return (
@@ -102,9 +110,14 @@ function Holding() {
             {data.exchange && ` · ${data.exchange}`}
           </p>
         </div>
-        <Button variant="outline" size="sm" onClick={() => setAlertOpen(true)} className="mt-1">
-          <Bell /> Alert
-        </Button>
+        <div className="mt-1 flex shrink-0 gap-2">
+          <Button size="sm" onClick={() => openAsk()}>
+            <Sparkles /> Ask AI
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => setAlertOpen(true)}>
+            <Bell /> Alert
+          </Button>
+        </div>
       </div>
 
       <Card className="overflow-hidden">
@@ -159,6 +172,7 @@ function Holding() {
       </Card>
 
       <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
+        <AskAICard symbol={data.symbol} r={research} open={openAsk} />
         {data.position && <PositionCard s={data} />}
         <StatsCard s={data} />
         {data.position?.lots && <TaxLotsCard lots={data.position.lots} />}
@@ -167,6 +181,7 @@ function Holding() {
         <AlertsCard s={data} onAdd={() => setAlertOpen(true)} />
       </div>
 
+      <AskAISheet symbol={data.symbol} name={data.name} r={research} open={askOpen} onOpenChange={setAskOpen} start={askStart} />
       <RuleSheet open={alertOpen} onOpenChange={setAlertOpen} symbol={data.symbol} currentPrice={data.price} save={saveRule} />
     </>
   );

@@ -29,6 +29,7 @@ class Task:
     title: str
     detail: str
     pictures: bool  # needs a model that can read pictures
+    borrows: str | None = None  # until it has its own route, it goes where this task goes
 
 
 TASKS = {
@@ -59,6 +60,13 @@ TASKS = {
         "Tickers, amounts and percentages are sent; account numbers and names aren't.",
         pictures=False,
     ),
+    "ticker_research": Task(
+        "Researching a holding",
+        "Ask AI on a stock or fund's page: it reads the news and searches the web for that ticker. Only the ticker "
+        "and your question are searched for; your position and tax lots are sent to the AI but never searched.",
+        pictures=False,
+        borrows="portfolio_moves",
+    ),
 }
 
 # Dollars per million tokens (input, output), from each provider's price list. A model that isn't here is priced
@@ -81,6 +89,8 @@ GUESS = (15.0, 75.0)
 # What to suggest when a provider is first set up (the owner can pick any model the provider lists).
 SUGGESTED = {"anthropic": "claude-opus-5-5"}
 PICTURE_TOKENS = 1600  # roughly what one page-sized picture costs as input
+SEARCH_MICRODOLLARS = 10_000  # Claude's web search: $10 per thousand searches, on top of tokens
+SEARCH_TOKENS = 12_000  # what one search's results can add to the input, generously
 
 
 class AIUnavailable(RuntimeError):
@@ -160,7 +170,10 @@ def find_route(db: DbSession, task: str, pictures: bool = False) -> tuple[Route 
     if task not in TASKS:
         return None, "Unknown AI task."
     title = TASKS[task].title.lower()
-    r = settings(db)["routes"].get(task)
+    routes = settings(db)["routes"]
+    r = routes.get(task)
+    if not (r and r.get("provider_id")) and TASKS[task].borrows:
+        r = routes.get(TASKS[task].borrows)
     provider = db.get(AIProvider, r["provider_id"]) if r and r.get("provider_id") else None
     if provider is None or not r.get("model"):
         return None, f"AI isn't set up for {title}. The owner can turn it on in Settings, AI."
@@ -185,7 +198,13 @@ def estimate(req: Request, price: tuple[float, float, bool]) -> int:
     """The most a request could cost, in microdollars: its size in tokens (about 3 characters each, generously)
     plus every reply token it's allowed."""
     tokens_in = (len(req.system) + len(req.text)) // 3 + PICTURE_TOKENS * len(req.pictures)
-    return microdollars(tokens_in, req.max_tokens, price)
+    tokens_in += SEARCH_TOKENS * req.web_searches
+    return microdollars(tokens_in, req.max_tokens, price) + SEARCH_MICRODOLLARS * req.web_searches
+
+
+def cost_of(reply: Reply, price: tuple[float, float, bool]) -> int:
+    """What an answer cost, in microdollars: its tokens and any web searches."""
+    return microdollars(reply.input_tokens, reply.output_tokens, price) + SEARCH_MICRODOLLARS * reply.web_searches
 
 
 def cap_problem(db: DbSession, cost: int) -> str | None:
@@ -226,6 +245,7 @@ def run(database: Database, db: DbSession, task: str, user_id: int | None, req: 
     finally:
         tokens_in = reply.input_tokens if reply else 0
         tokens_out = reply.output_tokens if reply else 0
+        searches = reply.web_searches if reply else 0
         with database.session() as log_db:
             log_db.add(
                 AIUsage(
@@ -236,7 +256,7 @@ def run(database: Database, db: DbSession, task: str, user_id: int | None, req: 
                     model=route.model,
                     input_tokens=tokens_in,
                     output_tokens=tokens_out,
-                    cost_microdollars=microdollars(tokens_in, tokens_out, route.price),
+                    cost_microdollars=microdollars(tokens_in, tokens_out, route.price) + SEARCH_MICRODOLLARS * searches,
                     priced=route.price[2],
                     ok=error is None,
                     error=error[:200] if error else None,

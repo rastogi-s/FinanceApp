@@ -1,5 +1,17 @@
 [
   {
+    "version": "0.56.0",
+    "title": "Ask AI about any stock or fund",
+    "features": [
+      {
+        "id": "ask-ai-holding",
+        "title": "Ask AI on every holding's page",
+        "body": "Tap Ask AI on a stock, ETF or fund's page and ask anything: what's the sentiment, why it moved, what analysts think, what the risks are. The AI reads the latest headlines and, with Claude, searches the web for news, analyst views and earnings, then gives a balanced take with both sides and a numbered link to every source. If you own it, it ends with what it means for your shares, gains and tax lots. Follow-up questions keep the conversation, and the last answers stay on the page. Web searches carry only the ticker and topic, never anything about you. An educated take, not financial advice.",
+        "tryIt": "/portfolio"
+      }
+    ]
+  },
+  {
     "version": "0.55.0",
     "title": "A bell for your alerts, and a laptop Refresh",
     "features": [

@@ -14,6 +14,7 @@ export function Sheet({
   title,
   description,
   children,
+  footer,
   className,
 }: {
   open: boolean;
@@ -21,6 +22,8 @@ export function Sheet({
   title: string;
   description?: React.ReactNode;
   children: React.ReactNode;
+  /** Stays put below the scrolling body (a message box, say). */
+  footer?: React.ReactNode;
   className?: string;
 }) {
   return (
@@ -51,7 +54,14 @@ export function Sheet({
               <X className="size-5" aria-hidden />
             </Dialog.Close>
           </div>
-          <div className="overflow-y-auto px-5 pt-2 pb-[max(1.25rem,env(safe-area-inset-bottom))]">{children}</div>
+          {footer ? (
+            <>
+              <div className="min-h-0 flex-1 overflow-y-auto px-5 pt-2 pb-4">{children}</div>
+              <div className="shrink-0 border-t px-5 pt-3 pb-[max(1rem,env(safe-area-inset-bottom))]">{footer}</div>
+            </>
+          ) : (
+            <div className="overflow-y-auto px-5 pt-2 pb-[max(1.25rem,env(safe-area-inset-bottom))]">{children}</div>
+          )}
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>

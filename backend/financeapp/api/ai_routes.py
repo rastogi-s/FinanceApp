@@ -63,7 +63,8 @@ def overview(db: DbSession, who: Signed) -> dict:
     rows = list(db.scalars(select(AIProvider).order_by(AIProvider.created_at)))
     tasks = []
     for task_id, t in TASKS.items():
-        route = s["routes"].get(task_id)
+        # A task that borrows another's route shows that one until it's given its own.
+        route = s["routes"].get(task_id) or (s["routes"].get(t.borrows) if t.borrows else None)
         r, problem = service.find_route(db, task_id, pictures=False)
         price = {"in": r.price[0], "out": r.price[1], "known": r.price[2]} if r else None
         if r and t.pictures and not r.provider.allow_pictures:
