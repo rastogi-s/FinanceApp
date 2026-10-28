@@ -12,7 +12,7 @@ from datetime import UTC, date, datetime, timedelta
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
 
-from financeapp import alerts, budget, plan, portfolio, reminders, review
+from financeapp import alerts, budget, deposits, plan, portfolio, reminders, review
 from financeapp.models import Account, AlertEvent, Balance, Category, Connection, SyncRun, Transaction, now
 from financeapp.sync import today
 
@@ -209,6 +209,8 @@ def build_with_plan(db: DbSession) -> tuple[dict, dict | None]:
         {"asset_class": k, "cents": v} for k, v in sorted(allocation.items(), key=lambda kv: -kv[1]) if v
     ]
     plan_inputs = plan.inputs(db, budget_state, net, end, holdings, allocation_rows)
+    cds = [a for a in accounts if deposits.kind_of(a) == "cd"]
+    maturing = deposits.maturing(deposits.build(db, cds, end), names) if cds else []
     return {
         "demo": False,
         "linked": True,
@@ -243,5 +245,6 @@ def build_with_plan(db: DbSession) -> tuple[dict, dict | None]:
                 {k: r[k] for k in ("account_id", "name", "provider", "every", "newest", "statement", "days_late")}
                 for r in reminders.due(db, reminders.local_today(db))
             ],
+            "maturing": maturing,  # CDs to decide about (deposits.maturing)
         },
     }, plan_inputs

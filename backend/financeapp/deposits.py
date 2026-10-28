@@ -258,6 +258,30 @@ def _monthly_out(db: DbSession, ids: list[int], today: date) -> dict[int, int]:
     return {aid: round(-total / 3) for aid, total in rows}
 
 
+def maturing(details: dict[int, dict], names: dict[int, str]) -> list[dict]:
+    """CDs maturing within 30 days or in their grace period, soonest first: Home's "Needs you" lists them."""
+    rows = []
+    for account_id, d in details.items():
+        c = d.get("cd")
+        if not c or not c["maturity"] or c["status"] not in ("open", "grace"):
+            continue
+        if c["status"] == "open" and c["days_left"] > CD_NOTICES[0]:
+            continue
+        rows.append(
+            {
+                "account_id": account_id,
+                "name": names[account_id],
+                "maturity": c["maturity"],
+                "days_left": c["days_left"],
+                "grace_ends": c["grace_ends"],
+                "status": c["status"],
+                "auto_renew": c["auto_renew"],
+                "value_cents": c["value_at_maturity_cents"],
+            }
+        )
+    return sorted(rows, key=lambda r: r["maturity"])
+
+
 def kind_of(a: Account) -> str:
     return kinds.kind_of(a.type, a.subtype, a.name, a.kind)
 
