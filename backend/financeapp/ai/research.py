@@ -23,6 +23,7 @@ preference) so follow-ups have context and the page shows them again without ask
 import contextlib
 import json
 import logging
+import re
 import threading
 from datetime import UTC, datetime, timedelta
 from email.utils import parsedate_to_datetime
@@ -92,19 +93,26 @@ How to research:
   and whether a tax-advantaged account is the better place for any change. Doing nothing is often right. If they
   don't own it, say how it would fit only if they ask.
 
+Write for a phone screen: short sentences, short paragraphs (two or three sentences each), and lists where there are
+several items. Inside text, start a list item with "- " on its own line, cite sources inline with their numbers in
+brackets right after the claim, like [2] or [1][3], and use no other markup (no headings, bold, tables or links).
+
 Answer with only a JSON object, no other text, in this shape:
 {"sentiment": "positive" | "mixed" | "negative" | "unclear",
  "headline": one plain sentence that answers the question,
- "answer": 2 to 4 short paragraphs (separated by a blank line) answering the question with the key facts and numbers,
+ "answer": the direct answer in 2 or 3 short paragraphs separated by a blank line, with the key facts and numbers,
  "points": up to 6 {"side": "bull" | "bear" | "neutral", "text": one or two sentences, "sources": [source numbers]},
- "analysts": what analysts say (ratings, price targets, who and when), or "" if you found nothing,
- "fundamentals": the numbers that matter (growth, margins, valuation; for a fund: cost, holdings, strategy), or "",
- "for_you": what it means for their position and taxes (2 to 4 sentences), or "" if they don't own it,
- "watch": up to 4 upcoming things to watch (earnings dates, decisions, levels),
+ "analysts": what analysts say as 2 to 4 "- " lines (ratings, price targets, who and when), or "" if you found
+   nothing,
+ "fundamentals": the numbers that matter as 2 to 5 "- " lines (growth, margins, valuation; for a fund: cost,
+   holdings, strategy), or "",
+ "for_you": what it means for their position and taxes (2 to 4 sentences, or "- " lines for several lots), or "" if
+   they don't own it,
+ "watch": up to 4 upcoming things to watch (earnings dates, decisions, levels), each a short phrase,
  "sources": every source you relied on: {"n": number, "title", "url", "publisher", "date"} using the app's numbers
    for its headlines and new numbers after them for pages you found, with the exact url,
- "caveats": what you couldn't find or check, and how old the information is}
-Cite with source numbers in points. Plain words, no jargon without a short explanation, whole dollars."""
+ "caveats": one or two sentences on what you couldn't find or check, and how old the information is}
+Plain words, no jargon without a short explanation, whole dollars."""
 
 SCHEMA = {
     "type": "object",
@@ -479,6 +487,7 @@ def offer(db: DbSession, settings: Settings, viewer_id: int, symbol: str) -> dic
         "preview": json.dumps(sendable(f), indent=1)[:PREVIEW_CHARS],
         "suggested": suggested,
         "thread": thread(db, symbol),
+        "job": job(symbol),
     }
     if route is not None:
         cost = service.estimate(request_for(f, web), route.price)
@@ -522,6 +531,32 @@ class Answer(BaseModel):
 def _text(s: str, limit: int) -> str:
     """Model text, trimmed; never markup (the page shows it as plain text)."""
     return s.strip()[:limit]
+
+
+CITE = re.compile(r"\[(\d{1,2}(?:\s*,\s*\d{1,2}){0,5})\]")
+TAG = re.compile(r"</?[A-Za-z][A-Za-z0-9-]{0,20}(?:\s[^<>]{0,200})?>")
+BOLD = re.compile(r"\*\*([^*\n]{1,200})\*\*")
+HEADING = re.compile(r"^#{1,6}\s+", re.M)
+
+
+def cited_in(text: str) -> set[int]:
+    return {int(n) for m in CITE.finditer(text) for n in m.group(1).split(",")}
+
+
+def tidy(text: str, limit: int, number: dict[int, int]) -> str:
+    """Model text made plain and its inline [n] citations renumbered to the kept sources (unknown ones dropped).
+    Markup is stripped (tags, bold, headings): the page renders only paragraphs, "- " lists and citations."""
+    text = HEADING.sub("", BOLD.sub(r"\1", TAG.sub("", text.strip()[: limit + 200])))
+
+    def renumber(m: re.Match) -> str:
+        ours = sorted({number[int(n)] for n in m.group(1).split(",") if int(n) in number})
+        return "".join(f"[{n}]" for n in ours)
+
+    text = CITE.sub(renumber, text)
+    text = re.sub(r"[ \t]+([.,;:])", r"\1", text)  # a dropped citation leaves no gap before punctuation
+    text = re.sub(r"[ \t]{2,}", " ", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()[:limit]
 
 
 def clean(answer: Answer, f: dict, reply: Reply) -> dict:
@@ -568,9 +603,11 @@ def clean(answer: Answer, f: dict, reply: Reply) -> dict:
             )
             at[key] = len(kept)
         number[s.n] = at[key]
-    # Points may cite the app's headlines by number without listing them again.
+    # Points and text may cite the app's headlines by number without listing them again.
+    texts = [answer.answer, answer.analysts, answer.fundamentals, answer.for_you, *answer.watch]
+    mentioned = {n for p in answer.points for n in p.sources} | {n for t in texts for n in cited_in(t)}
     for n, key in packet.items():
-        if n not in number and any(n in p.sources for p in answer.points) and len(kept) < MAX_SOURCES:
+        if n not in number and n in mentioned and len(kept) < MAX_SOURCES:
             base = known[key]
             kept.append({"n": len(kept) + 1, **base})
             at[key] = number[n] = len(kept)
@@ -583,64 +620,135 @@ def clean(answer: Answer, f: dict, reply: Reply) -> dict:
                 kept.append({"n": len(kept) + 1, **base})
                 at[_same(url)] = len(kept)
 
-    points = [
-        {"side": p.side, "text": _text(p.text, 800), "sources": sorted({number[n] for n in p.sources if n in number})}
-        for p in answer.points[:6]
-        if p.text.strip()
-    ]
+    points = []
+    for p in answer.points[:6]:
+        text = tidy(p.text, 800, number)
+        if text:
+            refs = {number[n] for n in p.sources if n in number} | cited_in(text)
+            points.append({"side": p.side, "text": CITE.sub("", text).strip(), "sources": sorted(refs)})
     return {
         "sentiment": answer.sentiment,
-        "headline": _text(answer.headline, 300),
-        "answer": _text(answer.answer, 4000),
+        "headline": CITE.sub("", tidy(answer.headline, 300, number)).strip(),
+        "answer": tidy(answer.answer, 4000, number),
         "points": points,
-        "analysts": _text(answer.analysts, 1500),
-        "fundamentals": _text(answer.fundamentals, 1500),
-        "for_you": _text(answer.for_you, 1500) if f["position"] else "",
-        "watch": [_text(w, 300) for w in answer.watch[:4] if w.strip()],
+        "analysts": tidy(answer.analysts, 1500, number),
+        "fundamentals": tidy(answer.fundamentals, 1500, number),
+        "for_you": tidy(answer.for_you, 1500, number) if f["position"] else "",
+        "watch": [w for w in (tidy(w, 300, number) for w in answer.watch[:4]) if w],
         "sources": kept,
-        "caveats": _text(answer.caveats, 1000),
+        "caveats": tidy(answer.caveats, 1000, {}),
     }
 
 
 def ask(database: Database, db: DbSession, settings: Settings, user_id: int, symbol: str, question: str) -> dict:
     """Researches and answers one question, and keeps it. Raises AIUnavailable (nothing sent), ProviderError or
     NotAvailable."""
+    f = facts(db, settings, user_id, symbol, question)
+    if not f["security"].get("price") and f["position"] is None:
+        raise NotAvailable("Couldn't find market data for that ticker, so there's nothing to research yet.")
+    route = service.route_for(db, TASK)
+    web = can_search(route)
+    try:
+        reply, route = service.run(database, db, TASK, user_id, request_for(f, web))
+    except ProviderError as e:
+        # Web search may be turned off for the Anthropic organization (a 400 before anything is billed):
+        # answer from the gathered headlines instead.
+        if not web or e.status != 400:
+            raise
+        log.info("research without web search after a 400")
+        web = False
+        reply, route = service.run(database, db, TASK, user_id, request_for(f, web))
+    try:
+        answer = Answer.model_validate(parse_json(reply.text))
+    except (ValidationError, ProviderError):
+        raise ProviderError("The answer wasn't in the expected format. Try again or pick another model.") from None
+    entry = {
+        "at": datetime.now(UTC).isoformat(),
+        "question": f["question"],
+        "model": route.model,
+        "cost": round(service.cost_of(reply, route.price) / 1_000_000, 4),
+        "searched": reply.web_searches,
+        "web_search": web,
+        "headlines": len(f["sources"]),
+        "answer": clean(answer, f, reply),
+    }
+    rows = _keep(db, symbol, entry)
+    return {"entry": entry, "thread": rows}
+
+
+# ---- in the background
+#
+# Research takes a minute or two, longer than a phone keeps a request open (iOS drops it when the screen locks or
+# the app goes to the background, and a proxy may give up first). So a question runs here, in its own thread, and
+# the page checks on it every few seconds; the answer lands in the kept thread either way, and coming back to the
+# page later picks up a question that's still running.
+
+JOB_SECONDS = 1800  # a finished question's state is kept this long, so a page that comes back sees how it ended
+_jobs: dict[str, dict] = {}
+_jobs_lock = threading.Lock()
+
+
+def job(symbol: str) -> dict | None:
+    """Where the latest question on this ticker stands: running, done or failed (with a message), or None."""
+    with _jobs_lock:
+        j = _jobs.get(symbol)
+        if (
+            j
+            and j["state"] != "running"
+            and (now() - datetime.fromisoformat(j["finished"])).total_seconds() > JOB_SECONDS
+        ):
+            _jobs.pop(symbol, None)
+            return None
+        return dict(j) if j else None
+
+
+def _set(symbol: str, **values) -> None:
+    with _jobs_lock:
+        _jobs[symbol] = {**_jobs.get(symbol, {}), **values}
+
+
+def _spawn(target) -> None:
+    threading.Thread(target=target, name="ticker-research", daemon=True).start()
+
+
+def start(database: Database, settings: Settings, user_id: int, symbol: str, question: str, on_done=None) -> dict:
+    """Starts researching a question and returns its job at once. Raises AIUnavailable or NotAvailable when it
+    can't start (not set up, or another question is running); everything after that is reported through the job."""
     if not _running.acquire(blocking=False):
         raise NotAvailable("Another question is being researched. It'll be done in a moment.")
     try:
-        f = facts(db, settings, user_id, symbol, question)
-        if not f["security"].get("price") and f["position"] is None:
-            raise NotAvailable("Couldn't find market data for that ticker, so there's nothing to research yet.")
-        route = service.route_for(db, TASK)
-        web = can_search(route)
-        try:
-            reply, route = service.run(database, db, TASK, user_id, request_for(f, web))
-        except ProviderError as e:
-            # Web search may be turned off for the Anthropic organization (a 400 before anything is billed):
-            # answer from the gathered headlines instead.
-            if not web or e.status != 400:
-                raise
-            log.info("research without web search after a 400")
-            web = False
-            reply, route = service.run(database, db, TASK, user_id, request_for(f, web))
-        try:
-            answer = Answer.model_validate(parse_json(reply.text))
-        except (ValidationError, ProviderError):
-            raise ProviderError("The answer wasn't in the expected format. Try again or pick another model.") from None
-        entry = {
-            "at": datetime.now(UTC).isoformat(),
-            "question": f["question"],
-            "model": route.model,
-            "cost": round(service.cost_of(reply, route.price) / 1_000_000, 4),
-            "searched": reply.web_searches,
-            "web_search": web,
-            "headlines": len(f["sources"]),
-            "answer": clean(answer, f, reply),
-        }
-        rows = _keep(db, symbol, entry)
-        return {"entry": entry, "thread": rows}
-    finally:
+        with database.session() as db:
+            service.route_for(db, TASK)  # not set up: say so now, not after a wait
+    except BaseException:
         _running.release()
+        raise
+    shown = " ".join(question.split())[:MAX_QUESTION] or "What's the sentiment on this, and why?"
+    with _jobs_lock:
+        _jobs[symbol] = {"state": "running", "question": shown, "started": now().isoformat(), "finished": None,
+                         "error": None}  # fmt: skip
+
+    def run() -> None:
+        error = None
+        try:
+            with database.session() as db:
+                result = ask(database, db, settings, user_id, symbol, question)
+                if on_done:
+                    on_done(db, result["entry"])
+        except service.AIUnavailable as e:
+            error = str(e)
+        except ProviderError as e:
+            error = e.message
+        except NotAvailable as e:
+            error = e.message
+        except Exception:
+            log.exception("ticker research failed")
+            error = "Something went wrong while researching this. Try again in a minute."
+        finally:
+            _set(symbol, state="failed" if error else "done", error=error, finished=now().isoformat())
+            _running.release()
+
+    _spawn(run)
+    return job(symbol) or {}
 
 
 def stale(entry: dict, hours: int = 24) -> bool:

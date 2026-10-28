@@ -20,7 +20,8 @@ HEADLINES = [
 ANSWER = {
     "sentiment": "mixed",
     "headline": "Liked for the business, debated on price.",
-    "answer": "Analysts mostly rate it Buy.\n\nThe price is near its high.",
+    "answer": "## Short answer\nAnalysts mostly rate it **Buy** [3].\n\n\n\n"
+    "The price is near its high [9], <b>see</b> [2, 4].",
     "points": [
         {"side": "bull", "text": "Services grow.", "sources": [3]},
         {"side": "bear", "text": "EU fine.", "sources": [2]},
@@ -55,6 +56,23 @@ def market(monkeypatch):
     monkeypatch.setattr(research, "news", lambda settings, symbol, name: [dict(h) for h in HEADLINES])
 
 
+@pytest.fixture(autouse=True)
+def inline(monkeypatch):
+    """Questions run in a background thread; here they run before the request returns."""
+    monkeypatch.setattr(research, "_spawn", lambda target: target())
+    research._jobs.clear()
+
+
+def asked(client, question: str, symbol: str = "AAPL") -> dict:
+    """Asks, then reads the answer the way the page does: from the job and the kept thread."""
+    r = client.post(f"/api/securities/{symbol}/ask", json={"question": question}, headers=csrf(client))
+    assert r.status_code == 202, r.text
+    assert r.json()["job"]["question"] == (" ".join(question.split()) or "What's the sentiment on this, and why?")
+    j = client.get(f"/api/securities/{symbol}/ask/job").json()
+    assert j["job"]["state"] == "done", j["job"]
+    return j["thread"][-1]
+
+
 class Searching(FakeProviders):
     """Claude with web search: a search block, then the answer in text blocks carrying citations."""
 
@@ -64,7 +82,7 @@ class Searching(FakeProviders):
         self.refuse_tools = False
 
     def handler(self, request: httpx.Request) -> httpx.Response:
-        if request.url.path != "/v1/messages":
+        if request.url.path != "/v1/messages" or self.status != 200:
             return super().handler(request)
         self.sent.append(request)
         body = json.loads(request.content)
@@ -155,9 +173,7 @@ def test_ask_searches_cleans_links_and_keeps_the_thread(client, home, searching)
         holdings(db)
     ai_route(client, "ticker_research")
     searching.answer = json.dumps(ANSWER)
-    r = client.post("/api/securities/AAPL/ask", json={"question": "Sentiment? Ask Shubham."}, headers=csrf(client))
-    assert r.status_code == 200, r.text
-    entry = r.json()["entry"]
+    entry = asked(client, "Sentiment? Ask Shubham.")
     a = entry["answer"]
     assert entry["searched"] == 2 and entry["web_search"] and entry["cost"] > 0.02
     # Only links the app gathered or the search returned, renumbered; made-up and script links are gone.
@@ -168,6 +184,8 @@ def test_ask_searches_cleans_links_and_keeps_the_thread(client, home, searching)
     assert a["sources"][0]["publisher"] == "Reuters"
     assert [(p["side"], p["sources"]) for p in a["points"]] == [("bull", [2]), ("bear", [1]), ("bear", [])]
     assert a["watch"] == ["Earnings next week"] and a["for_you"]
+    # Inline citations follow the renumbering; made-up ones and markup are gone.
+    assert a["answer"] == "Short answer\nAnalysts mostly rate it Buy [2].\n\nThe price is near its high, see [1]."
 
     sent = json.loads(searching.sent[-1].content)
     assert sent["tools"][0]["type"] == "web_search_20260209" and sent["tools"][0]["max_uses"] == research.WEB_SEARCHES
@@ -178,7 +196,7 @@ def test_ask_searches_cleans_links_and_keeps_the_thread(client, home, searching)
 
     # Kept, and the next question carries it as context.
     assert client.get("/api/securities/AAPL/ask").json()["thread"][0]["answer"]["headline"] == ANSWER["headline"]
-    client.post("/api/securities/AAPL/ask", json={"question": "And the risks?"}, headers=csrf(client))
+    asked(client, "And the risks?")
     body = json.loads(json.loads(searching.sent[-1].content)["messages"][0]["content"][-1]["text"])
     assert body["earlier"][0]["question"].startswith("Sentiment?")
     assert len(client.get("/api/securities/AAPL/ask").json()["thread"]) == 2
@@ -194,9 +212,7 @@ def test_a_paused_search_is_resumed(client, home, searching):
     ai_route(client, "ticker_research")
     searching.answer = json.dumps(ANSWER)
     searching.pause_first = True
-    r = client.post("/api/securities/AAPL/ask", json={"question": ""}, headers=csrf(client))
-    assert r.status_code == 200, r.text
-    assert r.json()["entry"]["searched"] == 3
+    assert asked(client, "")["searched"] == 3
     resumed = json.loads(searching.sent[-1].content)["messages"]
     assert [m["role"] for m in resumed] == ["user", "assistant"]
     assert resumed[1]["content"][1]["type"] == "server_tool_use"
@@ -210,9 +226,7 @@ def test_without_web_search_it_answers_from_headlines(client, home, searching):
     ai_route(client, "ticker_research")
     searching.answer = json.dumps(ANSWER)
     searching.refuse_tools = True
-    r = client.post("/api/securities/AAPL/ask", json={"question": "Sentiment?"}, headers=csrf(client))
-    assert r.status_code == 200, r.text
-    entry = r.json()["entry"]
+    entry = asked(client, "Sentiment?")
     assert entry["web_search"] is False and entry["searched"] == 0
     assert [s["url"] for s in entry["answer"]["sources"]] == ["https://www.reuters.com/apple-eu"]  # CNBC never found
     sent = json.loads(searching.sent[-1].content)
@@ -227,3 +241,24 @@ def test_demo_shows_a_sample_and_asks_nothing(tmp_path):
             assert research.safe_url(s["url"]) == s["url"]
         assert c.get("/api/securities/MSFT/ask").json()["thread"] == []
         assert c.post("/api/securities/AAPL/ask", json={}).status_code in (403, 401)
+
+
+@needs_db
+def test_a_failed_question_says_why_and_a_second_waits(client, home, searching):
+    home.setup()
+    with db_of(client).session() as db:
+        holdings(db)
+    ai_route(client, "ticker_research")
+    searching.status = 500
+    r = client.post("/api/securities/AAPL/ask", json={"question": "Sentiment?"}, headers=csrf(client))
+    assert r.status_code == 202
+    j = client.get("/api/securities/AAPL/ask/job").json()
+    assert j["job"]["state"] == "failed" and "Claude returned an error (500" in j["job"]["error"]
+    assert j["thread"] == [] and client.get("/api/securities/AAPL/ask").json()["job"]["state"] == "failed"
+
+    assert research._running.acquire(blocking=False)  # another question is still going
+    try:
+        r = client.post("/api/securities/AAPL/ask", json={"question": "Again"}, headers=csrf(client))
+        assert r.status_code == 409 and "Another question" in r.json()["detail"]
+    finally:
+        research._running.release()
