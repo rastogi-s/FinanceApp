@@ -263,7 +263,7 @@ def test_a_push_before_an_offer_you_would_use_ends(client, home):
         assert offers.queue(db, TODAY) == 1  # Starbucks ends in 3 days; Teleflora has no date and one visit
         assert offers.queue(db, TODAY) == 0  # once
         e = db.scalar(select(AlertEvent))
-        assert e.title == "Chase Offer at Starbucks ends Friday"
+        assert e.title == "Chase Offer at Starbucks ends Friday" and e.link == "/cards"
         assert e.body == "10% back on Sapphire Preferred ••9791. Add it in the Chase app or on chase.com first."
         assert offers.queue(db, TODAY + timedelta(days=10)) == 0  # ended
 

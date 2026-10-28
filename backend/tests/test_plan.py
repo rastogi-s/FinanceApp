@@ -565,7 +565,7 @@ def test_split_paycheck_counts_once_and_a_changed_paycheck_asks_for_its_stub(cli
     from financeapp import notify
 
     sent = []
-    monkeypatch.setattr(notify, "send", lambda settings, title, body, tags="": sent.append((title, body)))
+    monkeypatch.setattr(notify, "send", lambda settings, title, body, tags="", link=None: sent.append((title, body)))
     home.setup()
     history(client)
     checking, savings = [], []

@@ -139,6 +139,7 @@ def start_session(db: DbSession, request: Request, response: Response, user: Use
             "New sign-in",
             f"{user.name} signed in from a new device ({label}). Not you? Open "
             "Settings → Security and sign out everywhere.",
+            link="/settings/security",
         )
     secure = settings.secure_cookies
     response.set_cookie(
@@ -306,6 +307,7 @@ def login(body: LoginIn, request: Request, db: DbSession = Depends(get_db)) -> d
                     settings,
                     "Sign-in locked",
                     f"Password sign-in for {user.name} was paused after several wrong tries.",
+                    link="/settings/security",
                 )
         else:
             audit(db, request, "signin_failed", None, step="password")

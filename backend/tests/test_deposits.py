@@ -207,6 +207,7 @@ def test_cd_and_rate_pushes(client, home):
         assert f"cd:{cd['id']}:{maturity}:7d" in events
         e = events[f"cd:{cd['id']}:{maturity}:7d"]
         assert e.title == "Ally CD matures in 7 days" and "Decide whether to renew it" in e.body
+        assert e.link == f"/settings/accounts?account={cd['id']}"  # tapping the push opens the CD
         assert events[f"rate:{savings['id']}:{today:%Y-%m}"].title == "Ally savings cut its rate"
         assert db.get(AccountTerms, savings["id"]).rates[f"{today:%Y-%m}"] == 3.5
 

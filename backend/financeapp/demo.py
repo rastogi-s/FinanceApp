@@ -158,6 +158,7 @@ def household(today: date | None = None) -> dict:
                 "title": "Dining out is at 93%",
                 "body": f"{days_left} days left this month.",
                 "at": (datetime.now(UTC) - timedelta(hours=3)).isoformat(),
+                "link": "/budget",
             },
             {
                 "id": "a2",
@@ -165,6 +166,7 @@ def household(today: date | None = None) -> dict:
                 "title": "AAPL up 1.35% today",
                 "body": "Your largest single stock.",
                 "at": (datetime.now(UTC) - timedelta(hours=5)).isoformat(),
+                "link": "/portfolio/holding?s=AAPL",
             },
         ],
         "transactions": transactions,
@@ -1159,6 +1161,7 @@ def alerts() -> dict:
                 "status": "sent",
                 "channel": "ntfy",
                 "read": False,
+                "link": "/budget",
             },
             {
                 "id": "a2",
@@ -1169,6 +1172,7 @@ def alerts() -> dict:
                 "status": "sent",
                 "channel": "ntfy",
                 "read": False,
+                "link": "/portfolio/holding?s=AAPL",
             },
             {
                 "id": "a4",
@@ -1179,6 +1183,7 @@ def alerts() -> dict:
                 "status": "sent",
                 "channel": "ntfy",
                 "read": True,
+                "link": "/portfolio/holding?s=MSFT",
             },
             {
                 "id": "a3",
@@ -1189,6 +1194,7 @@ def alerts() -> dict:
                 "status": "sent",
                 "channel": "ntfy",
                 "read": True,
+                "link": "/portfolio/holding?s=NVDA",
             },
         ],
         "quiet": {"enabled": True, "start": "22:00", "end": "07:00", "timezone": "America/New_York"},

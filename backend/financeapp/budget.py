@@ -1122,6 +1122,7 @@ def ask_for_stubs(db: DbSession, settings) -> int:
             f"Your {day} paycheck from {a['employer']} {why}. Add its pay stub on Budget so your savings rate "
             "stays right.",
             tags="page_facing_up",
+            link="/budget#pay",
         )
         sent += 1
     if sent:

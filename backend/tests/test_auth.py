@@ -76,7 +76,7 @@ def test_a_code_works_only_once(client, home):
 
 def test_five_wrong_tries_lock_the_account(client, home, monkeypatch):
     sent = []
-    monkeypatch.setattr(notify, "send", lambda s, title, body, tags="lock": sent.append(title))
+    monkeypatch.setattr(notify, "send", lambda s, title, body, tags="lock", link=None: sent.append(title))
     home.setup()
     client.post("/api/auth/logout", headers=csrf(client))
     for _ in range(5):
@@ -149,7 +149,7 @@ def test_inviting_a_second_person(client, home, tmp_path):
 
 def test_a_new_device_sends_an_alert(client, home, monkeypatch):
     sent = []
-    monkeypatch.setattr(notify, "send", lambda s, title, body, tags="lock": sent.append(title))
+    monkeypatch.setattr(notify, "send", lambda s, title, body, tags="lock", link=None: sent.append(title))
     home.setup()
     client.post("/api/auth/logout", headers=csrf(client))
     home.login()  # same browser: no alert

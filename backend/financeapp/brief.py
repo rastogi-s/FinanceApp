@@ -323,15 +323,10 @@ def due(db: DbSession, t: datetime | None = None) -> date | None:
     return local.date()
 
 
-def click_url(settings: Settings) -> str | None:
-    hosts = [h for h in settings.allowed_host_list if h not in ("localhost", "127.0.0.1") and "*" not in h]
-    return f"https://{hosts[0]}/" if hosts else None
-
-
 def send(settings: Settings, db: DbSession, b: Brief) -> str | None:
-    channel = notify.deliver(
-        settings, "Morning brief", lock_screen(b.facts), tags="sunrise", priority="default", click=click_url(settings)
-    )
+    click = notify.app_link(settings, "/")
+    channel = notify.deliver(settings, "Morning brief", lock_screen(b.facts), tags="sunrise", priority="default",
+                             click=click)  # fmt: skip
     b.channel = channel
     return channel
 

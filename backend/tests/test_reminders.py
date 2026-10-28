@@ -12,7 +12,7 @@ from tests.conftest import csrf, db_of, needs_db
 def sent(monkeypatch) -> list[tuple[str, str, str]]:
     out: list[tuple[str, str, str]] = []
 
-    def deliver(settings, title, body, tags="lock", priority="high"):
+    def deliver(settings, title, body, tags="lock", priority="high", click=None):
         out.append((title, body, priority))
         return "ntfy"
 
@@ -75,6 +75,7 @@ def test_reminder_falls_due_pushes_once_then_once_more(client, home, sent):
 
     with db_of(client).session() as db:
         assert reminders.queue(db, due) == 1
+        assert db.scalar(select(AlertEvent)).link == f"/settings/accounts?account={hsa['id']}"
         assert reminders.queue(db, due + timedelta(days=1)) == 0  # the same due date: never twice
         alerts.send_pending(db, client.app.state.settings)
         assert reminders.queue(db, due + timedelta(days=reminders.AGAIN_DAYS)) == 1  # one follow-up

@@ -475,6 +475,7 @@ def queue(db: DbSession, on: date) -> int:
         stmt = insert(AlertEvent).values(
             rule_id=None, kind="account", title=title[:120], body=body[:300],
             dedup_key=f"offer:{o.account_id}:{o.key}:{o.expires}"[:160], fired_at=now(), status="pending", attempts=0,
+            link="/cards",
         )  # fmt: skip
         if db.scalar(stmt.on_conflict_do_nothing(index_elements=["dedup_key"]).returning(AlertEvent.id)) is not None:
             added += 1

@@ -576,7 +576,7 @@ def test_linking_and_syncing_plaid(client, home, plaid):
 @needs_db
 def test_a_broken_connection_goes_stale_and_alerts_once(client, home, plaid, monkeypatch):
     sent = []
-    monkeypatch.setattr(notify, "send", lambda s, title, body, tags="": sent.append(title))
+    monkeypatch.setattr(notify, "send", lambda s, title, body, tags="", link=None: sent.append(title))
     home.setup()
     r = client.post("/api/connections/plaid/start", json={}, headers=csrf(client))
     client.post("/api/connections/finish", json={"token": r.json()["token"]}, headers=csrf(client))

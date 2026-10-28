@@ -45,6 +45,24 @@ def configured(settings: Settings) -> bool:
     return bool(settings.ntfy_url or (settings.smtp_host and settings.alert_email))
 
 
+def app_link(settings: Settings, path: str | None = "/") -> str | None:
+    """The full address of a page in the app, for a notification to open when tapped: APP_URL, or https:// and the
+    first name in ALLOWED_HOSTS that isn't this computer. None when there's no such address, or no page."""
+    if not path or not path.startswith("/") or path.startswith("//"):
+        return None
+    base = settings.app_url.strip().rstrip("/")
+    if base:
+        parts = urlsplit(base)
+        if parts.scheme not in ("http", "https") or not parts.netloc:
+            return None
+    else:
+        hosts = [h for h in settings.allowed_host_list if h not in ("localhost", "127.0.0.1") and "*" not in h]
+        if not hosts:
+            return None
+        base = f"https://{hosts[0]}"
+    return base + path
+
+
 def ntfy_target(url: str) -> tuple[str, str]:
     """NTFY_URL (https://ntfy.sh/your-topic) as the server to publish to and the topic."""
     url = url.strip().rstrip("/")
@@ -134,12 +152,13 @@ def deliver(
     return None
 
 
-def send_now(settings: Settings, title: str, body: str, tags: str = "lock") -> bool:
-    """Sends on the first channel that works. Returns whether anything was sent."""
-    return deliver(settings, title, body, tags) is not None
+def send_now(settings: Settings, title: str, body: str, tags: str = "lock", link: str | None = None) -> bool:
+    """Sends on the first channel that works. Returns whether anything was sent. `link` is the page in the app
+    (/settings/security) that tapping it opens."""
+    return deliver(settings, title, body, tags, click=app_link(settings, link)) is not None
 
 
-def send(settings: Settings, title: str, body: str, tags: str = "lock") -> None:
+def send(settings: Settings, title: str, body: str, tags: str = "lock", link: str | None = None) -> None:
     """Sends in the background."""
     if configured(settings):
-        threading.Thread(target=send_now, args=(settings, title, body, tags), daemon=True).start()
+        threading.Thread(target=send_now, args=(settings, title, body, tags, link), daemon=True).start()

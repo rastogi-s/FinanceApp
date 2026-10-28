@@ -117,6 +117,22 @@ export function noteNavigation() {
   if (returnedTo !== here()) returnedTo = null;
 }
 
+/**
+ * Opened at an address with a section in it (/budget#pay, from a notification or a link on another page): scroll
+ * to that section once it has loaded. The browser only tries before the page's numbers are in, and gives up.
+ */
+export function followHash() {
+  const id = decodeURIComponent(window.location.hash.slice(1));
+  if (!/^[\w-]{1,40}$/.test(id) || isReturning()) return;
+  const start = performance.now();
+  const step = (now: number) => {
+    const el = document.getElementById(id);
+    if (el) return el.scrollIntoView({ block: "start" });
+    if (now - start < 3000) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+}
+
 /** Whether this page was reached by going back (or forward), so it should look the way it was left. */
 export function isReturning(): boolean {
   return typeof window !== "undefined" && returnedTo === here();

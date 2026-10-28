@@ -18,7 +18,7 @@ def sent(monkeypatch) -> list[tuple[str, str]]:
     """Captures what would go to the phone (as if ntfy is set up)."""
     out: list[tuple[str, str]] = []
 
-    def deliver(settings, title, body, tags="lock", priority="high"):
+    def deliver(settings, title, body, tags="lock", priority="high", click=None):
         out.append((title, body))
         return "ntfy"
 
@@ -215,7 +215,7 @@ def test_quiet_hours_hold_then_one_message(client, sent):
 def test_priority_per_rule_and_quiet_roundup(client, monkeypatch):
     loud: list[str] = []
     monkeypatch.setattr(notify, "configured", lambda settings: True)
-    monkeypatch.setattr(notify, "deliver", lambda settings, title, body, tags="lock", priority="high":
+    monkeypatch.setattr(notify, "deliver", lambda settings, title, body, tags="lock", priority="high", click=None:
                         loud.append(priority) or "ntfy")  # fmt: skip
     settings = client.app.state.settings
     with db_of(client).session() as db:
@@ -356,3 +356,55 @@ def test_failed_test_message_says_why_and_shows_in_settings(client, home, monkey
     assert r.status_code == 502 and r.json()["detail"] == "No topic."
     d = client.get("/api/alerts").json()["delivery"]
     assert d["ok"] is False and d["reason"] == "No topic."
+
+
+@pytest.fixture
+def clicks(monkeypatch) -> list[str | None]:
+    out: list[str | None] = []
+    monkeypatch.setattr(notify, "configured", lambda settings: True)
+    monkeypatch.setattr(notify, "deliver", lambda settings, title, body, tags="lock", priority="high", click=None:
+                        out.append(click) or "ntfy")  # fmt: skip
+    return out
+
+
+@needs_db
+def test_tapping_an_alert_opens_what_its_about(client, clicks):
+    settings = client.app.state.settings.model_copy(update={"app_url": "https://finance.example"})
+    with db_of(client).session() as db:
+        db.add(AlertRule(kind="price", params={"symbol": "BRK.B", "below": 500}, enabled=True, state={}))
+        db.add(AlertRule(kind="price", params={"symbol": "VTI", "below": 250}, enabled=True, state={}))
+        set_quote(db, "BRK.B", 480)
+        alerts.evaluate(db, {"price"}, t=NOON)
+        alerts.send_pending(db, settings, t=NOON)
+        e = db.scalar(select(AlertEvent))
+        assert e.link == "/portfolio/holding?s=BRK.B" and alerts.event_json(e)["link"] == e.link
+        set_quote(db, "BRK.B", 520)
+        set_quote(db, "VTI", 240)
+        alerts.evaluate(db, {"price"}, t=NOON)
+        set_quote(db, "BRK.B", 480)
+        alerts.evaluate(db, {"price"}, t=NOON)
+        alerts.send_pending(db, settings, t=NOON)  # two different stocks at once: Home, where both are listed
+        db.add(AlertEvent(kind="account", title="t", body="b", dedup_key="x", status="pending", attempts=0))
+        db.flush()
+        alerts.send_pending(db, settings, t=NOON)  # nothing to point at: Home
+    assert clicks == ["https://finance.example/portfolio/holding?s=BRK.B", "https://finance.example/",
+                      "https://finance.example/"]  # fmt: skip
+
+
+def test_links_for_each_kind():
+    state = {"lines": [{"category_id": 7, "category": "Dining", "kind": "flexible", "limit_cents": 100,
+                        "spent_cents": 120, "forecast": {"projected_cents": 150, "status": "heading_over",
+                                                         "days_left": 9}}]}  # fmt: skip
+    day = date(2026, 10, 21)
+    rule = AlertRule(kind="budget", params={"category_id": 7, "percent": 90})
+    assert alerts.budget_hits(rule, state, day)[0].link == "/spending?category=7&range=month&from=budget"
+    rule.params = {"category_id": None, "percent": 90}
+    assert alerts.budget_hits(rule, state, day)[0].link == "/budget"
+    rule.params = {"category_id": None, "forecast": True}
+    assert alerts.forecast_hits(rule, state, day)[0].link == "/spending?category=7&range=month&from=budget"
+    goal = {"id": 3, "name": "House", "percent": 52, "projected_month": None}
+    assert {h.link for h in alerts.goal_hits(AlertRule(kind="goal", params={}), [goal])} == {"/goals?goal=3"}
+    company = {"key": "name:acme", "symbol": None, "name": "Acme", "percent": 12, "sources": [{"symbol": "direct"}]}
+    rule = AlertRule(kind="concentration", params={"percent": 10})
+    assert alerts.concentration_hits(rule, [company])[0].link == "/portfolio"
+    assert alerts.concentration_hits(rule, [{**company, "symbol": "NVDA"}])[0].link == "/portfolio/holding?s=NVDA"

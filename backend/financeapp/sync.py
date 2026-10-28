@@ -351,6 +351,7 @@ def _run(database: Database, settings: Settings, trigger: str, only: list[int] |
                         f"{c.institution} couldn't sync. Open Settings → Accounts to reconnect it, or upload "
                         "a file from the bank instead.",
                         tags="warning",
+                        link="/settings/accounts",
                     )
 
     dropped: list[tuple[str, str]] = []

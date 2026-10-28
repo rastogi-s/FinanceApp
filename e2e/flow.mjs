@@ -309,15 +309,17 @@ try {
   });
 
   await check("private-pages-need-sign-in", async () => {
-    await page.goto(BASE + "/portfolio");
+    // As if tapping a price alert's push while signed out.
+    await page.goto(BASE + "/portfolio/holding?s=VTI");
     await page.waitForURL((u) => u.pathname === "/signin");
     const r = await page.request.get(BASE + "/api/household");
     if (r.status() !== 401) throw new Error(`/api/household answered ${r.status()} while signed out`);
   });
 
-  await check("sign-in-with-passkey", async () => {
+  await check("sign-in-with-passkey-opens-the-tapped-page", async () => {
     await button("Sign in with passkey").click();
-    await page.waitForURL((u) => u.pathname === "/");
+    await page.waitForURL((u) => u.pathname === "/portfolio/holding" && u.searchParams.get("s") === "VTI");
+    await page.goto(BASE + "/");
     await page.getByText("Net worth").first().waitFor();
   });
 

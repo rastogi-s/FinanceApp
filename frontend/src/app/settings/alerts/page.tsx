@@ -1,7 +1,8 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
-import { BellRing, Mail, Moon, Plus, Send, Smartphone } from "lucide-react";
+import { BellRing, ChevronRight, Mail, Moon, Plus, Send, Smartphone } from "lucide-react";
 import { KIND_ICON, type Rule, type RuleIn, RuleSheet } from "@/components/alert-sheets";
 import { BriefSettingsCard } from "@/components/brief";
 import { SubPageTitle } from "@/components/page";
@@ -15,7 +16,7 @@ import { Switch } from "@/components/ui/switch";
 import { toast } from "@/components/ui/toast";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { type Alert, KIND_DOT, resetHousehold, useApi } from "@/lib/household";
+import { type Alert, KIND_DOT, alertHref, resetHousehold, useApi } from "@/lib/household";
 import { cn } from "@/lib/utils";
 
 type Delivery = { at: string; ok: boolean; channel: string | null; reason: string | null };
@@ -212,18 +213,33 @@ export default function AlertsPage() {
                 <p className="text-sm text-muted-foreground">Nothing yet. When a rule fires it shows up here and on Home.</p>
               ) : (
                 <ul className="divide-y">
-                  {s.events.map((e) => (
-                    <li key={e.id} className="flex items-start gap-3 py-3">
-                      <span className={cn("mt-1.5 size-2 shrink-0 rounded-full", KIND_DOT[e.kind])} aria-hidden />
-                      <div className="min-w-0 flex-1">
-                        <p className="text-sm font-medium">{e.title}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {when.format(new Date(e.at))} · {STATUS[e.status ?? "sent"] ?? e.status}
-                          {e.channel === "email" && " by email"}
-                        </p>
-                      </div>
-                    </li>
-                  ))}
+                  {s.events.map((e) => {
+                    const href = alertHref(e);
+                    const row = (
+                      <>
+                        <span className={cn("mt-1.5 size-2 shrink-0 rounded-full", KIND_DOT[e.kind])} aria-hidden />
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-medium">{e.title}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {when.format(new Date(e.at))} · {STATUS[e.status ?? "sent"] ?? e.status}
+                            {e.channel === "email" && " by email"}
+                          </p>
+                        </div>
+                        {href && <ChevronRight className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />}
+                      </>
+                    );
+                    return (
+                      <li key={e.id}>
+                        {href ? (
+                          <Link href={href} className="-mx-2 flex items-start gap-3 rounded-lg px-2 py-3 transition-colors hover:bg-muted/60">
+                            {row}
+                          </Link>
+                        ) : (
+                          <div className="flex items-start gap-3 py-3">{row}</div>
+                        )}
+                      </li>
+                    );
+                  })}
                 </ul>
               )}
             </CardContent>

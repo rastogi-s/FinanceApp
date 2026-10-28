@@ -54,6 +54,9 @@ class Settings(BaseSettings):
     # Security alerts (new-device sign-in, lockouts, broken connections). ntfy first, email as the fallback.
     ntfy_url: str = ""  # e.g. https://ntfy.sh/your-long-random-topic or your own ntfy server
     ntfy_token: str = ""
+    # The address the app is opened at, e.g. https://finance.tail1234.ts.net. Tapping a notification opens the page it
+    # is about there. Empty uses the first name in ALLOWED_HOSTS (https), or no link if that's only localhost.
+    app_url: str = ""
     smtp_host: str = ""
     smtp_port: int = 587
     smtp_user: str = ""
