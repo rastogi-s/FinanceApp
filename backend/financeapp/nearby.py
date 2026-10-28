@@ -29,8 +29,11 @@ MAX_PLACES = 300
 AMENITIES = "fuel|restaurant|cafe|fast_food|pharmacy|bar|pub|ice_cream|cinema|car_rental|charging_station"
 
 
+UNAVAILABLE = "Couldn't look up the stores around you. Try again in a minute."
+
+
 class Unavailable(RuntimeError):
-    """The map lookup didn't work. The message is shown as-is."""
+    """The map lookup didn't work. Callers show UNAVAILABLE, never the exception's text."""
 
 
 @dataclass
@@ -75,7 +78,7 @@ def places(lat: float, lon: float, client: httpx.Client | None = None) -> list[P
         elements = r.json().get("elements", [])
     except (httpx.HTTPError, ValueError) as e:
         log.info("stores nearby not read: %s", type(e).__name__)
-        raise Unavailable("Couldn't look up the stores around you. Try again in a minute.") from None
+        raise Unavailable(UNAVAILABLE) from None
     finally:
         if own:
             client.close()

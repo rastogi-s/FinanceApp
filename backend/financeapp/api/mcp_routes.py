@@ -267,8 +267,8 @@ def _offers_here(request: Request, lat: float, lon: float) -> Response:
             return JSONResponse({"found": 0, "pushed": 0})
         try:
             around = nearby.places(lat, lon)
-        except nearby.Unavailable as e:
-            return JSONResponse({"detail": str(e)}, status_code=502)
+        except nearby.Unavailable:
+            return JSONResponse({"detail": nearby.UNAVAILABLE}, status_code=502)
         _, accounts, links = cards.load_cards(db)
         labels = {a.id: cards.label_of(a, links.get(a.id)) for a in accounts}
         found = [

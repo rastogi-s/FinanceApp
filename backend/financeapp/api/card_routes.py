@@ -224,8 +224,8 @@ def offers_near(body: SpotIn, request: Request, who: Signed = Depends(signed_in)
         return {"offers": [], "stores": 0, "radius_m": nearby.RADIUS_M}
     try:
         around = nearby.places(body.lat, body.lon)
-    except nearby.Unavailable as e:
-        raise HTTPException(502, str(e)) from None
+    except nearby.Unavailable:
+        raise HTTPException(502, nearby.UNAVAILABLE) from None
     _, accounts, links = cards.load_cards(db)
     labels = {a.id: cards.label_of(a, links.get(a.id)) for a in accounts}
     found = [
