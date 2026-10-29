@@ -10,7 +10,14 @@ import { CodeInput } from "@/components/ui/code-input";
 import { Field, Input } from "@/components/ui/input";
 import { api, ApiError } from "@/lib/api";
 import { placeAfterSignIn, useAuth, type User } from "@/lib/auth";
-import { getPasskey, passkeyHere, passkeyMessage, rememberPasskeyHere, usePasskeysSupported } from "@/lib/webauthn";
+import {
+  getPasskey,
+  passkeyHere,
+  passkeyMessage,
+  platformPasskeys,
+  rememberPasskeyHere,
+  usePasskeysSupported,
+} from "@/lib/webauthn";
 
 type Step = { kind: "start" } | { kind: "password" } | { kind: "code"; token: string };
 type SignedIn = { user: User; csrf: string };
@@ -78,13 +85,13 @@ function SignIn() {
       }
     });
 
-  // Not after signing out on purpose (you meant to leave), and only on a device that has used a passkey here before.
+  // Not after signing out on purpose (you meant to leave), nor on a device that signs in here with password and code.
   const askOnOpen =
     canPasskey && step.kind === "start" && state.status === "signed-out" && state.reason !== "out" && passkeyHere();
-  const askNow = useEffectEvent(() => {
+  const askNow = useEffectEvent(async () => {
     if (askedThisOpening || busy || document.visibilityState !== "visible") return;
     askedThisOpening = true;
-    passkey();
+    if (await platformPasskeys()) passkey();
   });
 
   useEffect(() => {
@@ -120,7 +127,9 @@ function SignIn() {
     step.kind === "code" &&
     run(async () => {
       try {
-        done(await api<SignedIn>("/api/auth/login/code", { body: { token: step.token, code: value } }));
+        const r = await api<SignedIn>("/api/auth/login/code", { body: { token: step.token, code: value } });
+        rememberPasskeyHere(false); // this device signs in with password and code: don't open a passkey sheet on it
+        done(r);
       } catch (e) {
         setCode("");
         if (e instanceof ApiError && e.status === 410) setStep({ kind: "password" });
