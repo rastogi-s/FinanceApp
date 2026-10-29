@@ -358,6 +358,20 @@ try {
     await page.locator("#code").fill(totp(secret));
     await page.waitForURL((u) => u.pathname === "/");
   });
+
+  await check("password-device-isnt-asked-for-a-passkey", async () => {
+    // This device last signed in with password and code, so opening the app shows the buttons without a passkey sheet.
+    await context.clearCookies();
+    let asks = 0;
+    const count = (req) => req.url().endsWith("/api/auth/passkey/options") && (asks += 1);
+    page.on("request", count);
+    await page.goto(BASE + "/");
+    await page.waitForURL((u) => u.pathname === "/signin");
+    await button("Sign in with passkey").waitFor();
+    await page.waitForTimeout(1500);
+    page.off("request", count);
+    if (asks !== 0) throw new Error(`asked for a passkey ${asks} times on a password device`);
+  });
 } finally {
   await browser.close();
 }

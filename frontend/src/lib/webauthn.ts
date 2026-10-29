@@ -31,24 +31,34 @@ export function passkeysSupported(): boolean {
 
 const noSubscribe = () => () => {};
 
-// A note on this device that it has a passkey for the app, so the sign-in page can ask for it straight away instead of
-// opening a "no passkeys" sheet on a phone that never had one. It holds no secret: the passkey itself is the proof.
-const HERE = "passkey-here";
+// The sign-in page asks for the passkey on its own, unless this device has shown it doesn't use one here: the last
+// sign-in on it was with password and code, or its passkey wasn't one of ours. Using or adding a passkey clears that.
+// It holds no secret: the passkey itself is the proof.
+const SKIP = "passkey-skip";
 
 export function passkeyHere(): boolean {
   try {
-    return localStorage.getItem(HERE) === "1";
+    return localStorage.getItem(SKIP) !== "1";
   } catch {
-    return false;
+    return true;
   }
 }
 
 export function rememberPasskeyHere(here: boolean): void {
   try {
-    if (here) localStorage.setItem(HERE, "1");
-    else localStorage.removeItem(HERE);
+    if (here) localStorage.removeItem(SKIP);
+    else localStorage.setItem(SKIP, "1");
   } catch {
-    // private window or blocked storage: the sign-in page just waits for a tap
+    // private window or blocked storage: the sign-in page asks each time it opens, which a tap on Cancel answers
+  }
+}
+
+/** Whether this device has Face ID, Touch ID or Windows Hello for passkeys, so asking won't open a QR-code sheet. */
+export async function platformPasskeys(): Promise<boolean> {
+  try {
+    return await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
+  } catch {
+    return false;
   }
 }
 

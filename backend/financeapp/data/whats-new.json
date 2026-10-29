@@ -6,7 +6,7 @@
       {
         "id": "passkey-on-open",
         "title": "Opening the app asks for your passkey",
-        "body": "When you open the app and you're signed out, Face ID (or Touch ID) now comes up by itself on a phone or computer that has signed in with a passkey before, so there's nothing to tap. Cancel it and the Sign in with passkey button is right there; it won't ask again until you next open the app. Signing out on purpose doesn't trigger it."
+        "body": "When you open the app and you're signed out, Face ID (or Touch ID) now comes up by itself so there's nothing to tap. It also comes up as soon as you return to the app after it timed out, instead of showing your numbers for a few seconds first. Cancel it and the Sign in with passkey button is right there; it won't ask again until you next open the app. Signing out on purpose doesn't trigger it, and neither does a device you sign in to with password and code."
       }
     ]
   },

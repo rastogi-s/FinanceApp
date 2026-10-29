@@ -122,16 +122,23 @@ export function AuthProvider({ children, reauth }: { children: React.ReactNode; 
     const touch = () => (lastActive.current = Date.now());
     const events = ["pointerdown", "keydown", "scroll", "touchstart"] as const;
     events.forEach((e) => window.addEventListener(e, touch, { passive: true }));
-    const timer = setInterval(() => {
+    const check = () => {
       if (Date.now() - lastActive.current > idleMinutes.current * 60_000) {
         setCsrf(null);
         resetHousehold();
         setState({ status: "signed-out", reason: "idle" });
       }
-    }, 20_000);
+    };
+    const timer = setInterval(check, 20_000);
+    // A phone pauses timers while the app is in the background, so check the moment it comes back, before money shows.
+    const back = () => document.visibilityState === "visible" && check();
+    document.addEventListener("visibilitychange", back);
+    window.addEventListener("pageshow", back);
     return () => {
       events.forEach((e) => window.removeEventListener(e, touch));
       clearInterval(timer);
+      document.removeEventListener("visibilitychange", back);
+      window.removeEventListener("pageshow", back);
     };
   }, [state]);
 
