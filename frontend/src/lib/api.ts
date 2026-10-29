@@ -26,11 +26,66 @@ export function setApiHandlers(h: Partial<Handlers>) {
   Object.assign(handlers, h);
 }
 
+// Names people know for the fields the server checks, so a rejected form says which part to fix.
+const FIELD_NAMES: Record<string, string> = {
+  gross: "Gross pay",
+  taxes: "Taxes",
+  savings: "Savings",
+  net: "Take-home pay",
+  employer_match: "Employer 401(k) match",
+  match: "Employer 401(k) match",
+  employer_hsa: "Employer HSA money",
+  employer_hsa_seed: "Employer HSA yearly deposit",
+  hsa: "HSA",
+  espp: "ESPP",
+  roth: "Roth 401(k)",
+  retirement: "401(k)",
+  federal: "Federal income tax",
+  state: "State income tax",
+  social_security: "Social Security",
+  period_start: "Pay period start",
+  period_end: "Pay period end",
+  mask: "Account's last four digits",
+};
+
+type Problem = { loc?: (string | number)[]; msg?: string; type?: string };
+
+function fieldName(loc: (string | number)[]): string | null {
+  const parts = loc.filter((p) => p !== "body");
+  const key = parts.findLast((p) => typeof p === "string");
+  if (key === undefined) return null;
+  const bare = String(key).replace(/_cents$/, "");
+  const name = FIELD_NAMES[bare] ?? bare.charAt(0).toUpperCase() + bare.slice(1).replaceAll("_", " ");
+  // Year-to-date amounts sit beside this paycheck's, so say which column.
+  return parts.includes("ytd") ? `${name} (year to date)` : name;
+}
+
+function problemText(p: Problem): string {
+  const msg = (p.msg ?? "").replace(/^Value error, /, "");
+  const name = fieldName(p.loc ?? []);
+  if (!name) return msg || "Some of that isn't quite right.";
+  if (p.type === "extra_forbidden") return `${name} isn't something the app can save yet.`;
+  if (p.type === "missing") return `${name} is missing.`;
+  if (p.type === "greater_than_equal") return `${name} can't be negative.`;
+  if (p.type === "greater_than") return `${name} has to be more than zero.`;
+  if (p.type === "less_than_equal" || p.type === "less_than") return `${name} is too large.`;
+  if (p.type?.startsWith("date")) return `${name} isn't a date.`;
+  return `${name}: ${msg || "isn't quite right"}.`;
+}
+
+/** The first thing the server didn't accept, named so the person knows where to look. */
+export function validationMessage(problems: Problem[]): string {
+  if (!problems[0]) return "Some of that isn't quite right. Check it and try again.";
+  const first = problemText(problems[0]);
+  const more = problems.length - 1;
+  return more ? `${first} ${more === 1 ? "One more thing needs" : `${more} more things need`} a look too.` : first;
+}
+
 async function detail(r: Response): Promise<string> {
   try {
     const body = await r.json();
     if (typeof body.detail === "string") return body.detail;
-    if (Array.isArray(body.detail)) return "Some of that isn't quite right. Check it and try again.";
+    if (Array.isArray(body.detail)) return validationMessage(body.detail);
   } catch {}
   return `Something went wrong (${r.status}). Try again.`;
 }
