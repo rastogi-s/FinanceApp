@@ -1,5 +1,16 @@
 [
   {
+    "version": "0.60.0",
+    "title": "Face ID comes up on its own",
+    "features": [
+      {
+        "id": "passkey-on-open",
+        "title": "Opening the app asks for your passkey",
+        "body": "When you open the app and you're signed out, Face ID (or Touch ID) now comes up by itself on a phone or computer that has signed in with a passkey before, so there's nothing to tap. Cancel it and the Sign in with passkey button is right there; it won't ask again until you next open the app. Signing out on purpose doesn't trigger it."
+      }
+    ]
+  },
+  {
     "version": "0.59.0",
     "title": "Ask AI: easier to read, and it keeps working",
     "features": [

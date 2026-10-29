@@ -309,15 +309,35 @@ try {
   });
 
   await check("private-pages-need-sign-in", async () => {
-    // As if tapping a price alert's push while signed out.
-    await page.goto(BASE + "/portfolio/holding?s=VTI");
-    await page.waitForURL((u) => u.pathname === "/signin");
     const r = await page.request.get(BASE + "/api/household");
     if (r.status() !== 401) throw new Error(`/api/household answered ${r.status()} while signed out`);
+    // As if tapping a price alert's push while signed out. Opening the app asks for the passkey by itself; here
+    // Face ID fails (or the sheet is cancelled), so the button stays and it doesn't ask again.
+    await cdp.send("WebAuthn.setUserVerified", { authenticatorId, isUserVerified: false });
+    let asks = 0;
+    const count = (req) => req.url().endsWith("/api/auth/passkey/options") && (asks += 1);
+    page.on("request", count);
+    await page.goto(BASE + "/portfolio/holding?s=VTI");
+    await page.waitForURL((u) => u.pathname === "/signin");
+    await page.waitForFunction(() => [...document.querySelectorAll("button")].some((b) => /passkey/.test(b.textContent) && !b.disabled));
+    await page.waitForTimeout(1500);
+    page.off("request", count);
+    if (asks !== 1) throw new Error(`asked for the passkey ${asks} times on opening, expected once`);
+    if (new URL(page.url()).pathname !== "/signin") throw new Error("signed in without Face ID");
+    await cdp.send("WebAuthn.setUserVerified", { authenticatorId, isUserVerified: true });
   });
 
   await check("sign-in-with-passkey-opens-the-tapped-page", async () => {
     await button("Sign in with passkey").click();
+    await page.waitForURL((u) => u.pathname === "/portfolio/holding" && u.searchParams.get("s") === "VTI");
+    await page.goto(BASE + "/");
+    await page.getByText("Net worth").first().waitFor();
+  });
+
+  await check("opening-the-app-asks-for-the-passkey", async () => {
+    // Session gone (timed out on the server) and the app opened again: Face ID comes up with no tap.
+    await context.clearCookies();
+    await page.goto(BASE + "/portfolio/holding?s=VTI");
     await page.waitForURL((u) => u.pathname === "/portfolio/holding" && u.searchParams.get("s") === "VTI");
     await page.goto(BASE + "/");
     await page.getByText("Net worth").first().waitFor();
