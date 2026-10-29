@@ -168,33 +168,36 @@ def test_upload_then_save_with_frequency(client, home):
     assert client.post("/api/paychecks", json=bad, headers=csrf(client)).status_code == 422
 
 
+# ADP stubs can come out as "Gross Pay $5 000 00 90 000 00", two columns to a line. Made-up numbers, in that layout.
+ADP_FLAT = [
+    "ACME, INC. Period Beginning: 10/04/2026",
+    "1 MAIN ST Period Ending: 10/17/2026",
+    "SAN JOSE, CA 95128-2155 Pay Date: 10/16/2026",
+    "rate salary/hours this period year to date this period year to date",
+    "Regular 4900 00 80 00 4 900 00 88 200 00 Emp Sup Life -5 00 90 00",
+    "Ltd2 Plan 10 00 180 00 Espp_2 -490 00 8 820 00",
+    "Restrict Stock 40 000 00 Health Savings -200 00* 3 600 00",
+    "Gross Pay $4 910 00 128 380 00 Disq Espp 1 000 00",
+    "Espp_1 4 000 00",
+    "Federal Income Tax -700 00 12 600 00 Medicare Tax -71 20 1 281 60",
+    "Social Security Tax 10 918 20 NC State Income Tax -190 00 3 420 00",
+    "401K Pln -245 00* 4 410 00 401K Roth -300 00 5 400 00",
+    "Dental -15 00* 270 00 401K Er Match 4 000 00",
+    "Employer Health 1 263 63 26 536 23",
+    "Er Hsa Seed 1 800 00",
+    "Net Pay $2 693 80",
+    "Net Check $0 00",
+    "JANE DOE xxxxxxxxx1234 xxxx xxxx $2 154 80",
+    "xxxx5678 xxxx xxxx $539 00",
+]
+
+
 def test_stub_whose_amounts_lose_their_punctuation():
     """ADP stubs can come out as "Gross Pay $5 000 00 90 000 00", two columns to a line, deductions printed negative
     this period and blank (year to date only) otherwise. Made-up numbers, in that layout."""
     from financeapp import paystub
 
-    lines = [
-        "ACME, INC. Period Beginning: 10/04/2026",
-        "1 MAIN ST Period Ending: 10/17/2026",
-        "SAN JOSE, CA 95128-2155 Pay Date: 10/16/2026",
-        "rate salary/hours this period year to date this period year to date",
-        "Regular 4900 00 80 00 4 900 00 88 200 00 Emp Sup Life -5 00 90 00",
-        "Ltd2 Plan 10 00 180 00 Espp_2 -490 00 8 820 00",
-        "Restrict Stock 40 000 00 Health Savings -200 00* 3 600 00",
-        "Gross Pay $4 910 00 128 380 00 Disq Espp 1 000 00",
-        "Espp_1 4 000 00",
-        "Federal Income Tax -700 00 12 600 00 Medicare Tax -71 20 1 281 60",
-        "Social Security Tax 10 918 20 NC State Income Tax -190 00 3 420 00",
-        "401K Pln -245 00* 4 410 00 401K Roth -300 00 5 400 00",
-        "Dental -15 00* 270 00 401K Er Match 4 000 00",
-        "Employer Health 1 263 63 26 536 23",
-        "Er Hsa Seed 1 800 00",
-        "Net Pay $2 693 80",
-        "Net Check $0 00",
-        "JANE DOE xxxxxxxxx1234 xxxx xxxx $2 154 80",
-        "xxxx5678 xxxx xxxx $539 00",
-    ]
-    s = paystub.parse(lines)
+    s = paystub.parse(ADP_FLAT)
     assert (s.gross_cents, s.net_cents) == (4_910_00, 2_693_80)
     assert s.taxes_cents == 700_00 + 71_20 + 190_00  # Social Security is maxed out: year to date only
     assert s.savings_cents == 490_00 + 200_00 + 245_00 + 300_00  # not Espp_1's year-to-date
@@ -224,3 +227,13 @@ def test_employer_hsa_is_kept_apart_from_the_match_and_bonus_pay_is_read():
     assert stub.detail["employer_hsa"] == 3_846 and stub.ytd["employer_hsa"] == 73_074
     assert stub.detail["bonus"] == 600_000 and stub.ytd["bonus"] == 600_000
     assert stub.savings_cents == 60_000  # the employer's HSA money isn't taken out of pay
+
+
+def test_everything_the_reader_finds_can_be_saved():
+    """The form sends the reader's detail back as is, so a kind the reader knows but saving doesn't (the yearly
+    employer HSA seed, once) turned a good stub into "Some of that isn't quite right"."""
+    from financeapp.api.budget_routes import StubDetail
+
+    read = paystub.to_json(paystub.parse(ADP_FLAT))
+    assert "employer_hsa_seed" in read["detail"]["ytd"]
+    StubDetail.model_validate(read["detail"])

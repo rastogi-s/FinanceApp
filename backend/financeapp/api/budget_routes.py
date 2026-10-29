@@ -172,6 +172,7 @@ class StubAmounts(BaseModel):
     bonus: int | None = Field(default=None, ge=0, le=MAX_CENTS)
     match: int | None = Field(default=None, ge=0, le=MAX_CENTS)  # the employer's, on top of pay
     employer_hsa: int | None = Field(default=None, ge=0, le=MAX_CENTS)
+    employer_hsa_seed: int | None = Field(default=None, ge=0, le=MAX_CENTS)  # the yearly part of employer_hsa
 
 
 class StubDeposit(BaseModel):

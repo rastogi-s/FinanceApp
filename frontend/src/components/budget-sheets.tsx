@@ -412,7 +412,10 @@ function PaycheckForm({
   const splitBad = Object.values(splitCents).some((v) => v === null || (v !== undefined && v < 0));
   const complete = Object.values(cents).every((v) => v !== null && v >= 0) && (cents.gross ?? 0) > 0 && !splitBad;
   const other = complete ? cents.gross! - cents.taxes! - cents.savings! - cents.net! : null;
-  const employerHsa = cents.hsa ? { employer_hsa: cents.hsa } : {};
+  // The yearly seed the reader found is part of the employer's HSA money, so it goes when that's cleared.
+  const employerHsa = cents.hsa
+    ? { employer_hsa: cents.hsa, employer_hsa_seed: Math.min(readDetail?.this.employer_hsa_seed ?? 0, cents.hsa) || undefined }
+    : {};
 
   const save = async () => {
     if (demo) return toast("Adding pay stubs is off while the app shows sample data.");
@@ -435,6 +438,7 @@ function PaycheckForm({
             ...readDetail?.this,
             ...Object.fromEntries(Object.entries(splitCents).filter(([, v]) => v !== undefined)),
             employer_hsa: undefined,
+            employer_hsa_seed: undefined,
             ...employerHsa,
           },
           ytd: readDetail?.ytd ?? {},
