@@ -1,5 +1,16 @@
 [
   {
+    "version": "0.61.0",
+    "title": "Locks when you leave",
+    "features": [
+      {
+        "id": "lock-on-leave",
+        "title": "Face ID every time you open the app",
+        "body": "Swipe the app away and it locks straight away; switch to another app for more than a minute and it locks too. Your session ends on the server and Face ID comes up when you return, then you carry on where you were. A quick look at a text or a code under a minute stays signed in. This applies on devices that sign in with a passkey."
+      }
+    ]
+  },
+  {
     "version": "0.60.0",
     "title": "Face ID comes up on its own",
     "features": [
