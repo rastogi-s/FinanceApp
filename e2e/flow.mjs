@@ -367,6 +367,20 @@ try {
     if ((await context.cookies()).map((c) => c.value).join() === before) throw new Error("the session wasn't renewed");
   });
 
+  await check("swiping-the-app-away-locks-it", async () => {
+    // Closed ten seconds ago and opened again: Face ID straight away, not after a minute.
+    await page.addInitScript(() => {
+      if (window.name !== "swiped") return;
+      window.name = "";
+      localStorage.setItem("left-at", String(Date.now() - 10_000));
+    });
+    await page.evaluate(() => (window.name = "swiped"));
+    const verified = page.waitForResponse((r) => r.url().endsWith("/api/auth/passkey/verify") && r.ok());
+    await page.goto(BASE + "/settings");
+    await verified;
+    await page.waitForURL((u) => u.pathname === "/settings");
+  });
+
   await check("sign-in-with-password-and-code", async () => {
     await page.goto(BASE + "/settings");
     await button("Sign out").click();

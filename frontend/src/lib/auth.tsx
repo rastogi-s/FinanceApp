@@ -56,10 +56,12 @@ function forgetPlace() {
   } catch {}
 }
 
-// Leaving the app (swiping it away, or over a minute in another app) locks it on a device that signs in with a passkey:
-// the session ends on the server and the next open asks for Face ID. A quick look at another app stays signed in.
+// Leaving the app locks it on a device that signs in with a passkey: the session ends on the server and the next open
+// asks for Face ID. Swiping the app away locks it straight away (a reload or a link followed within the app doesn't);
+// switching to another app locks it after a minute, so a quick look at a text or a code stays signed in.
 const LEFT = "left-at";
 const LOCK_AFTER_MS = 60_000;
+const LOCK_AFTER_CLOSE_MS = 5_000;
 
 function noteLeft() {
   try {
@@ -67,13 +69,15 @@ function noteLeft() {
   } catch {}
 }
 
-function awayTooLong(): boolean {
+function awayTooLong(opened: boolean): boolean {
   let at = 0;
   try {
     at = Number(localStorage.getItem(LEFT)) || 0;
     localStorage.removeItem(LEFT);
   } catch {}
-  return at > 0 && Date.now() - at > LOCK_AFTER_MS && passkeyHere();
+  const nav = performance.getEntriesByType("navigation")[0] as PerformanceNavigationTiming | undefined;
+  const grace = opened && nav?.type !== "reload" ? LOCK_AFTER_CLOSE_MS : LOCK_AFTER_MS;
+  return at > 0 && Date.now() - at > grace && passkeyHere();
 }
 
 async function lock() {
@@ -84,12 +88,12 @@ async function lock() {
 
 type ServerState = { demo: boolean; setup_required: boolean; user: User | null; csrf: string | null; idle_minutes?: number };
 
-async function fetchState(idleMinutes: { current: number }): Promise<AuthState> {
+async function fetchState(idleMinutes: { current: number }, opened = false): Promise<AuthState> {
   try {
     const s = await api<ServerState>("/api/auth/state", { quiet401: true });
     setCsrf(s.csrf);
     idleMinutes.current = s.idle_minutes ?? 15;
-    if (s.user && !s.demo && awayTooLong()) {
+    if (s.user && !s.demo && awayTooLong(opened)) {
       await lock();
       return { status: "signed-out", reason: "idle" };
     }
@@ -129,7 +133,7 @@ export function AuthProvider({ children, reauth }: { children: React.ReactNode; 
 
   useEffect(() => {
     let live = true;
-    fetchState(idleMinutes).then((next) => live && setState(next));
+    fetchState(idleMinutes, true).then((next) => live && setState(next));
     return () => {
       live = false;
     };
@@ -164,7 +168,7 @@ export function AuthProvider({ children, reauth }: { children: React.ReactNode; 
     // A phone pauses timers while the app is in the background, so check the moment it comes back, before money shows.
     const back = () => {
       if (document.visibilityState !== "visible") return noteLeft();
-      if (awayTooLong()) lock().then(() => setState({ status: "signed-out", reason: "idle" }));
+      if (awayTooLong(false)) lock().then(() => setState({ status: "signed-out", reason: "idle" }));
       else check();
     };
     document.addEventListener("visibilitychange", back);
