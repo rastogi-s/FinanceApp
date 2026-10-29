@@ -31,6 +31,27 @@ export function passkeysSupported(): boolean {
 
 const noSubscribe = () => () => {};
 
+// A note on this device that it has a passkey for the app, so the sign-in page can ask for it straight away instead of
+// opening a "no passkeys" sheet on a phone that never had one. It holds no secret: the passkey itself is the proof.
+const HERE = "passkey-here";
+
+export function passkeyHere(): boolean {
+  try {
+    return localStorage.getItem(HERE) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function rememberPasskeyHere(here: boolean): void {
+  try {
+    if (here) localStorage.setItem(HERE, "1");
+    else localStorage.removeItem(HERE);
+  } catch {
+    // private window or blocked storage: the sign-in page just waits for a tap
+  }
+}
+
 /** Whether this browser can use passkeys. Pages are pre-rendered, so the server's guess is "yes". */
 export function usePasskeysSupported(): boolean {
   return useSyncExternalStore(noSubscribe, passkeysSupported, () => true);
@@ -50,6 +71,7 @@ export async function createPasskey(options: Record<string, unknown>): Promise<o
   } as unknown as PublicKeyCredentialCreationOptions;
   const cred = (await navigator.credentials.create({ publicKey })) as PublicKeyCredential | null;
   if (!cred) throw new Error("No passkey was made.");
+  rememberPasskeyHere(true);
   const response = cred.response as AuthenticatorAttestationResponse;
   return {
     id: cred.id,
@@ -74,6 +96,7 @@ export async function getPasskey(options: Record<string, unknown>): Promise<obje
   } as unknown as PublicKeyCredentialRequestOptions;
   const cred = (await navigator.credentials.get({ publicKey })) as PublicKeyCredential | null;
   if (!cred) throw new Error("No passkey was used.");
+  rememberPasskeyHere(true);
   const response = cred.response as AuthenticatorAssertionResponse;
   return {
     id: cred.id,

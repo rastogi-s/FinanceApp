@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useEffectEvent, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { KeyRound, Moon } from "lucide-react";
 import { BackHeading } from "@/components/auth/back-heading";
@@ -10,10 +10,17 @@ import { CodeInput } from "@/components/ui/code-input";
 import { Field, Input } from "@/components/ui/input";
 import { api, ApiError } from "@/lib/api";
 import { placeAfterSignIn, useAuth, type User } from "@/lib/auth";
-import { getPasskey, passkeyMessage, usePasskeysSupported } from "@/lib/webauthn";
+import { getPasskey, passkeyHere, passkeyMessage, rememberPasskeyHere, usePasskeysSupported } from "@/lib/webauthn";
 
 type Step = { kind: "start" } | { kind: "password" } | { kind: "code"; token: string };
 type SignedIn = { user: User; csrf: string };
+
+// Opening the app signed out asks for the passkey straight away, once. Cancelling leaves the button to tap; the
+// automatic ask comes back only when the app is opened again (a reload, or back after a while in the background),
+// never in a loop. These live outside the page so a re-render or remount can't ask twice.
+const REOPENED_AFTER_MS = 10_000;
+let askedThisOpening = false;
+let hiddenAt = 0;
 
 export default function SignInPage() {
   return (
@@ -34,12 +41,14 @@ function SignIn() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const canPasskey = usePasskeysSupported();
+  const [openings, setOpenings] = useState(0);
 
   useEffect(() => {
     if (state.status === "signed-in" && !state.demo) router.replace(placeAfterSignIn());
   }, [state, router]);
 
   const done = (r: SignedIn) => {
+    askedThisOpening = false; // the next time this tab lands here signed out is a new opening
     signedIn(r.user, r.csrf);
     router.replace(placeAfterSignIn());
   };
@@ -61,8 +70,42 @@ function SignIn() {
     run(async () => {
       const { token, options } = await api<{ token: string; options: Record<string, unknown> }>("/api/auth/passkey/options", { body: {} });
       const credential = await getPasskey(options);
-      done(await api<SignedIn>("/api/auth/passkey/verify", { body: { token, credential } }));
+      try {
+        done(await api<SignedIn>("/api/auth/passkey/verify", { body: { token, credential } }));
+      } catch (e) {
+        if (e instanceof ApiError && e.status === 401) rememberPasskeyHere(false); // not one of ours: stop asking on open
+        throw e;
+      }
     });
+
+  // Not after signing out on purpose (you meant to leave), and only on a device that has used a passkey here before.
+  const askOnOpen =
+    canPasskey && step.kind === "start" && state.status === "signed-out" && state.reason !== "out" && passkeyHere();
+  const askNow = useEffectEvent(() => {
+    if (askedThisOpening || busy || document.visibilityState !== "visible") return;
+    askedThisOpening = true;
+    passkey();
+  });
+
+  useEffect(() => {
+    if (!askOnOpen) return;
+    const t = setTimeout(askNow, 0); // after the page has painted, so the sheet rises over it
+    return () => clearTimeout(t);
+  }, [askOnOpen, openings]);
+
+  useEffect(() => {
+    const seen = () => {
+      if (document.visibilityState === "hidden") {
+        hiddenAt = Date.now();
+      } else if (hiddenAt && Date.now() - hiddenAt > REOPENED_AFTER_MS) {
+        hiddenAt = 0;
+        askedThisOpening = false;
+        setOpenings((n) => n + 1);
+      }
+    };
+    document.addEventListener("visibilitychange", seen);
+    return () => document.removeEventListener("visibilitychange", seen);
+  }, []);
 
   const submitPassword = (e: React.FormEvent) => {
     e.preventDefault();
