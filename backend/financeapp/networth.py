@@ -64,6 +64,7 @@ class AccountIn:
     # The kind Settings → Accounts lists it as (worked out from the account's own name, not the display name),
     # or None to work it out here.
     kind_set: str | None = None
+    synced: date | None = None  # the last balance's day, when `balances` holds a made-up one (yesterday's close)
 
     @property
     def kind(self) -> str:
@@ -158,7 +159,7 @@ def breakdown(accounts: list[AccountIn], end: date) -> dict:
     groups = []
     rows_by_group: dict[str, list[dict]] = {k: [] for k, _, _ in GROUPS}
     for a in accounts:
-        last = a.balances[-1][0] if a.balances else None
+        last = a.synced or (a.balances[-1][0] if a.balances else None)
         rows_by_group[group_of(a)].append(
             {
                 "id": a.id,
@@ -235,7 +236,9 @@ def breakdown(accounts: list[AccountIn], end: date) -> dict:
 
 
 def _history(accounts: list[AccountIn], end: date, net: int) -> list[dict]:
-    """Net worth each day for the last year, carrying each balance forward, ending at today's live figure."""
+    """Net worth each day for the last year, carrying each balance forward, ending at today's live figure. An account
+    counts from the start at its first balance, as the windows count it, so the line moves by exactly a window's
+    change and linking an account isn't drawn as a jump."""
     first = min((a.balances[0][0] for a in accounts if a.balances), default=end)
     day = max(first, end - timedelta(days=HISTORY_DAYS - 1))
     pointers = {a.id: -1 for a in accounts}
@@ -247,8 +250,8 @@ def _history(accounts: list[AccountIn], end: date, net: int) -> list[dict]:
             while i + 1 < len(a.balances) and a.balances[i + 1][0] <= day:
                 i += 1
             pointers[a.id] = i
-            if i >= 0:
-                cents += signed(a, a.balances[i][1])
+            if a.balances:
+                cents += signed(a, a.balances[max(i, 0)][1])
         out.append({"date": day.isoformat(), "cents": cents})
         day += timedelta(days=1)
     if out:
@@ -266,6 +269,7 @@ def build(db: DbSession, end: date) -> dict:
     latest = household.latest_balances(db, accounts)
     positions = portfolio.positions(db, accounts)
     moved = household.live_moves(latest, positions)
+    close = household.last_close(db, accounts, positions, end)
     since = end - timedelta(days=HISTORY_DAYS + 31)
     ins = []
     for a in accounts:
@@ -285,6 +289,12 @@ def build(db: DbSession, end: date) -> dict:
         )  # fmt: skip
         if a.type == "investment":
             _load_investments(db, a, ai, positions, end, since)
+        if a.id in close:  # "today" starts from yesterday's close (household.last_close)
+            cents, holdings = close[a.id]
+            ai.synced = ai.balances[-1][0]
+            ai.balances = household.with_balance(ai.balances, end - timedelta(days=1), cents)
+            ai.snapshots = sorted([s for s in ai.snapshots if s[0] != end - timedelta(days=1)]
+                                  + [(end - timedelta(days=1), holdings)], key=lambda s: s[0])  # fmt: skip
         ins.append(ai)
     return {"linked": True, **breakdown(ins, end)}
 

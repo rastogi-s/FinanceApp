@@ -8,12 +8,23 @@ comes from plan.py, and is null until there's a savings number to project (the P
 
 from collections import defaultdict
 from datetime import UTC, date, datetime, timedelta
+from decimal import Decimal
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
 
-from financeapp import alerts, bills, budget, deposits, plan, portfolio, reminders, review
-from financeapp.models import Account, AlertEvent, Balance, Category, Connection, SyncRun, Transaction, now
+from financeapp import alerts, bills, budget, deposits, plan, portfolio, quotes, reminders, review
+from financeapp.models import (
+    Account,
+    AlertEvent,
+    Balance,
+    Category,
+    Connection,
+    HoldingSnapshot,
+    SyncRun,
+    Transaction,
+    now,
+)
 from financeapp.sync import today
 
 HISTORY_DAYS = 90
@@ -32,7 +43,11 @@ def signed(a: Account, cents: int) -> int:
     return -cents if a.type in DEBT else cents
 
 
-def net_worth_history(db: DbSession, accounts: list[Account], end: date, days: int = HISTORY_DAYS) -> list[dict]:
+def net_worth_history(
+    db: DbSession, accounts: list[Account], end: date, days: int = HISTORY_DAYS, close: dict[int, int] | None = None
+) -> list[dict]:
+    """Net worth each day. An account counts from the start at its first balance, so linking one isn't a jump (the
+    same as the net worth sheet's windows). `close` (from last_close) replaces yesterday's balance of an account."""
     start = end - timedelta(days=days - 1)
     ids = [a.id for a in accounts]
     if not ids:
@@ -45,6 +60,8 @@ def net_worth_history(db: DbSession, accounts: list[Account], end: date, days: i
     by_account: dict[int, list[tuple[date, int]]] = defaultdict(list)
     for account_id, d, c in rows:
         by_account[account_id].append((d, c))
+    for aid, cents in (close or {}).items():
+        by_account[aid] = with_balance(by_account[aid], end - timedelta(days=1), cents)
     kinds = {a.id: a for a in accounts}
     first_day = min((v[0][0] for v in by_account.values()), default=end)
     history = []
@@ -58,12 +75,57 @@ def net_worth_history(db: DbSession, accounts: list[Account], end: date, days: i
             while i + 1 < len(series) and series[i + 1][0] <= day:
                 i += 1
             pointers[aid] = i
-            if i >= 0:
-                latest[aid] = series[i][1]
+            latest[aid] = series[max(i, 0)][1]
         if day >= max(start, first_day):
             history.append({"date": day.isoformat(), "cents": sum(signed(kinds[a], c) for a, c in latest.items())})
         day += timedelta(days=1)
     return history
+
+
+def with_balance(series: list[tuple[date, int]], day: date, cents: int) -> list[tuple[date, int]]:
+    """A balance series (oldest first) with the day's balance set to cents."""
+    return sorted([(d, c) for d, c in series if d != day] + [(day, cents)])
+
+
+def last_close(
+    db: DbSession, accounts: list[Account], positions: list[portfolio.Position], end: date
+) -> dict[int, tuple[int, dict[str, tuple[Decimal, Decimal, str]]]]:
+    """Each investment account at yesterday's close, for "today": its last balance before today, with the holdings
+    that have a live price today revalued at the close before today (the quote's previous close, or its price when
+    the market hasn't traded today). The brokerage's own price can be a day behind, and without this, today's change
+    would also hold yesterday's market move. Returns the balance and the revalued holdings, by account."""
+    live = {(p.account_id, p.symbol) for p in positions if p.price_as_of is not None}
+    found = quotes.latest(db, {s for _, s in live})
+    day = {p.account_id: p.as_of for p in positions}
+    latest = latest_balances(db, [a for a in accounts if a.id in day])
+    out = {}
+    for a in accounts:
+        # Only where today is at live prices too (live_moves): the balance is from the day of the holdings.
+        b = latest.get(a.id)
+        if a.type != "investment" or b is None or b.date != day[a.id] or not any(i == a.id for i, _ in live):
+            continue
+        before = db.scalar(
+            select(Balance).where(Balance.account_id == a.id, Balance.date < end).order_by(Balance.date.desc()).limit(1)
+        )
+        if before is None:
+            continue
+        rows = db.scalars(
+            select(HoldingSnapshot).where(HoldingSnapshot.account_id == a.id, HoldingSnapshot.date == before.date)
+        ).all()
+        moved, holdings = 0, {}
+        for h in rows:
+            price = h.price
+            q = found.get(h.symbol)
+            quoted = q.as_of.astimezone().date() if q is not None else None
+            if (a.id, h.symbol) in live and quoted is not None and quoted >= before.date and h.quantity > 0:
+                close = q.previous_close if quoted >= end else q.price
+                if close:
+                    price = close
+                    moved += int((h.quantity * close * 100).to_integral_value()) - h.value_cents
+            holdings[h.symbol] = (h.quantity, price, h.name)
+        if rows:
+            out[a.id] = (before.current_cents + moved, holdings)
+    return out
 
 
 def counted(db: DbSession) -> list[Account]:
@@ -99,10 +161,11 @@ def build_with_plan(db: DbSession) -> tuple[dict, dict | None]:
     if not accounts:
         return {"demo": False, "linked": False}, None
     end = today()
-    history = net_worth_history(db, accounts, end)
-    net = history[-1]["cents"] if history else 0
-
     latest_balance = latest_balances(db, accounts)
+    positions = portfolio.positions(db, accounts)
+    close = {aid: cents for aid, (cents, _) in last_close(db, accounts, positions, end).items()}
+    history = net_worth_history(db, accounts, end, close=close)
+    net = history[-1]["cents"] if history else 0
 
     def account_row(a: Account) -> dict:
         b = latest_balance[a.id]
@@ -120,7 +183,6 @@ def build_with_plan(db: DbSession) -> tuple[dict, dict | None]:
 
     # Holdings: each account's most recent snapshot, at live prices when there are newer ones (portfolio.py).
     names = {a.id: display_name(a) for a in accounts}
-    positions = portfolio.positions(db, accounts)
     holdings = [
         {
             "symbol": p.symbol,

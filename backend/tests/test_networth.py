@@ -175,3 +175,70 @@ def test_from_the_database_matches_household(client, home):
         {"symbol": "NTAP", "name": "NetApp", "shares": 5.0, "value_cents": 550_00, "account": "Fidelity Roth IRA"}
     ]
     assert client.get("/api/net-worth").json()["cents"] == n["cents"]
+
+
+def test_the_chart_moves_by_exactly_each_windows_change():
+    """Linking an account isn't a jump on the chart: it's drawn at its first balance from the start, the way the
+    windows count it, so the line moves by exactly the change the card prints beside it."""
+    b = networth.breakdown(sample(), END)
+    by_day = {p["date"]: p["cents"] for p in b["history"]}
+    for w in b["windows"]:
+        assert by_day[END.isoformat()] - by_day[w["since"]] == w["change_cents"], w["key"]
+    linked = (END - timedelta(days=3)).isoformat()
+    day_before = (END - timedelta(days=4)).isoformat()
+    assert by_day[linked] - by_day[day_before] == 0
+
+
+def _quote(db, symbol, price, previous, at):
+    from financeapp.models import Quote
+
+    db.add(Quote(symbol=symbol, price=Decimal(price), previous_close=Decimal(previous), as_of=at, source="yahoo"))
+
+
+@needs_db
+def test_today_is_since_the_last_close_and_skips_new_accounts(client, home):
+    """Today on Home: yesterday's point values the holdings at the last close (the brokerage's own price can be a day
+    behind), and an account linked today isn't a gain."""
+    from datetime import UTC, datetime
+
+    home.setup()
+    on = today()
+    yesterday = on - timedelta(days=1)
+    with db_of(client).session() as db:
+        conn = Connection(provider="manual", institution="Fidelity", state={})
+        db.add(conn)
+        db.flush()
+        bank = Account(connection_id=conn.id, external_id="c", name="Checking", institution="Ally", type="depository")
+        ira = Account(
+            connection_id=conn.id, external_id="i", name="Roth IRA", institution="Fidelity", type="investment"
+        )
+        new = Account(connection_id=conn.id, external_id="n", name="HSA", institution="Fidelity", type="depository")
+        db.add_all([bank, ira, new])
+        db.flush()
+        snap = dict(account_id=ira.id, symbol="VOO", name="Vanguard S&P 500", asset_class="Funds")
+        snap["quantity"] = Decimal(100)
+        # The brokerage's price lags a day: last night it still had the day before's $500 close, this morning
+        # yesterday's $510. The quote has today's $512, after yesterday's $510 close.
+        db.add_all(
+            [
+                Balance(account_id=bank.id, date=yesterday, current_cents=5_000_00),
+                Balance(account_id=bank.id, date=on, current_cents=5_100_00),
+                Balance(account_id=ira.id, date=yesterday, current_cents=50_000_00 + 50_00),
+                Balance(account_id=ira.id, date=on, current_cents=51_000_00 + 50_00),
+                Balance(account_id=new.id, date=on, current_cents=8_000_00),
+                HoldingSnapshot(date=yesterday, price=Decimal(500), value_cents=50_000_00, **snap),
+                HoldingSnapshot(date=on, price=Decimal(510), value_cents=51_000_00, **snap),
+            ]
+        )
+        _quote(db, "VOO", 512, 510, datetime.now(UTC))
+    with db_of(client).session() as db:
+        h = household.build(db)
+        n = networth.build(db, on)
+    assert h["net_worth"]["cents"] == n["cents"] == 5_100_00 + 51_200_00 + 50_00 + 8_000_00
+    day = n["windows"][0]
+    # $100 more in checking, and 100 shares up $2 today. Not yesterday's $10, not the new $8,000.
+    assert h["net_worth"]["change_today_cents"] == day["change_cents"] == 100_00 + 200_00
+    assert day["market_cents"] == 200_00 and day["saving_cents"] == 100_00
+    assert h["net_worth"]["history"][-1]["cents"] - h["net_worth"]["history"][-2]["cents"] == 300_00
+    by_day = {p["date"]: p["cents"] for p in n["history"]}
+    assert by_day[on.isoformat()] - by_day[yesterday.isoformat()] == 300_00
