@@ -343,6 +343,30 @@ try {
     await page.getByText("Net worth").first().waitFor();
   });
 
+  await check("leaving-the-app-locks-it", async () => {
+    // Coming back from another app: under a minute stays in; over a minute (or swiping the app away) ends the
+    // session and asks for Face ID straight away, then carries on where you were.
+    let asks = 0;
+    const count = (req) => req.url().endsWith("/api/auth/passkey/options") && (asks += 1);
+    page.on("request", count);
+    const comeBack = (secondsAway) =>
+      page.evaluate((s) => {
+        localStorage.setItem("left-at", String(Date.now() - s * 1000));
+        document.dispatchEvent(new Event("visibilitychange"));
+      }, secondsAway);
+    await comeBack(5);
+    await page.waitForTimeout(1000);
+    if (asks !== 0 || new URL(page.url()).pathname !== "/") throw new Error("a quick switch away locked the app");
+    const before = (await context.cookies()).map((c) => c.value).join();
+    await comeBack(120);
+    await page.waitForResponse((r) => r.url().endsWith("/api/auth/passkey/verify") && r.ok());
+    await page.waitForURL((u) => u.pathname === "/");
+    await page.getByText("Net worth").first().waitFor();
+    page.off("request", count);
+    if (asks !== 1) throw new Error(`asked for the passkey ${asks} times after being away`);
+    if ((await context.cookies()).map((c) => c.value).join() === before) throw new Error("the session wasn't renewed");
+  });
+
   await check("sign-in-with-password-and-code", async () => {
     await page.goto(BASE + "/settings");
     await button("Sign out").click();
