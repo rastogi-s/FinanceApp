@@ -271,7 +271,30 @@ def match_paydays(
                 matched[p.id] = ts
                 del groups[key]
                 break
+    # Part of take-home can go to an account the app doesn't see (a fourth account in a split, an ESPP), or each
+    # bank words its share differently. A payday near the stub's date that adds up to most of its take-home, and
+    # not more, is still that paycheck: otherwise the stub and its own deposits would both count as pay.
+    for p in sorted(stubs, key=lambda p: p.date):
+        if p.id in matched or p.net_cents <= 0:
+            continue
+        near_stub = sorted(
+            (kv for kv in groups.items() if abs((kv[0][1] - p.date).days) <= MATCH_DAYS),
+            key=lambda kv: abs((kv[0][1] - p.date).days),
+        )
+        picked: list[tuple[str, date]] = []
+        total = 0
+        for key, ts in near_stub:
+            cents = sum(t.amount_cents for t in ts)
+            same_day = not picked or abs((key[1] - picked[0][1]).days) <= PAYDAY_DAYS
+            if same_day and total + cents <= p.net_cents + MATCH_CENTS:
+                picked.append(key)
+                total += cents
+        if picked and total >= p.net_cents * MOST_OF_PAY:
+            matched[p.id] = [t for key in picked for t in groups.pop(key)]
     return matched
+
+
+MOST_OF_PAY = 0.5  # a payday this share of a stub's take-home (or more, up to all of it) is that stub's paycheck
 
 
 # Words a bank puts around an employer's name on a pay deposit. Wording differs from bank to bank ("Deposit from

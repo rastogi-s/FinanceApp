@@ -164,3 +164,28 @@ def test_power_paid_early_is_not_late(client, home):
 def test_next_bill_after_one_paid_around_the_turn_of_the_month(day, expected):
     # Usually paid three days before the month ends: Nov 1 belongs with October's, so November's is next.
     assert bills.next_on_day(day, -3).isoformat() == expected
+
+
+@needs_db
+def test_a_stub_whose_take_home_partly_lands_unseen_counts_once(client, home):
+    """Take-home split across accounts, one of them not linked: the visible deposits are still that stub's paycheck,
+    not a second paycheck filled in from the usual stub."""
+    home.setup()
+    rows = []
+    for m in range(5, 10):
+        rows += [
+            (f"2026-{m:02}-12", "Whole Foods", -400, "Groceries"),
+            # $3,954.54 take-home: $3,084.55 to checking, $500 to a savings account worded differently, and the
+            # rest to an account the app doesn't see.
+            (f"2026-{m:02}-15", "NETAPP INC PAYROLL", 3_084.55, "Paycheck"),
+            (f"2026-{m:02}-15", "NETAPP DIR DEP", 500, "Paycheck"),
+        ]
+    add_transactions(client, rows)
+    stub = {"gross_cents": 777_300, "taxes_cents": 200_000, "savings_cents": 100_000, "net_cents": 395_454}
+    h = csrf(client)
+    for m in (7, 8, 9):
+        assert client.post("/api/paychecks", json={**stub, "date": f"2026-{m:02}-15"}, headers=h).status_code == 200
+    b = client.get("/api/budget").json()
+    sep = next(x for x in b["savings_history"] if x["month"] == "2026-09-01")
+    assert sep["stubs"] == 1 and sep["estimated_paychecks"] == 0
+    assert sep["income_cents"] == 777_300  # one paycheck's gross, not that plus an estimate from its deposits
