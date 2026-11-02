@@ -29,7 +29,7 @@ from financeapp import (
     sync,
     upcoming,
 )
-from financeapp.ai import documents, extract, reading
+from financeapp.ai import documents, extract, reading, termdocs
 from financeapp.ai.providers import ProviderError
 from financeapp.ai.service import AIUnavailable
 from financeapp.api.deps import Signed, audit, owner, recent, settings_of, signed_in
@@ -446,6 +446,49 @@ def set_terms(account_id: int, body: TermsIn, request: Request, who: Signed = De
     audit(db, request, "account_terms_changed", who.user.id, account=a.id)
     db.flush()
     return connection_json(db, db.get_one(Connection, a.connection_id))
+
+
+TERMS_MAX_BYTES = 10 * 1024 * 1024
+
+
+@router.post("/accounts/{account_id}/terms/read")
+async def read_terms(
+    account_id: int,
+    file: UploadFile,
+    request: Request,
+    read_with_ai: bool = False,
+    who: Signed = Depends(signed_in),
+) -> dict:
+    """Reads a CD's receipt or renewal notice, or a statement, into the terms form. Nothing is saved and the file
+    isn't kept: the answer only fills in the form for the person to check. It comes back first as an offer to read it
+    with AI (exactly what would be sent, to whom), and again with read_with_ai=true if the person agrees."""
+    no_demo(who)
+    db = db_of(request)
+    a = db.get(Account, account_id)
+    kind = deposits.kind_of(a) if a is not None else None
+    if a is None or a.type in ("credit", "loan") or kind not in deposits.KINDS:
+        raise HTTPException(404, "No such bank account.")
+    data = await file.read(TERMS_MAX_BYTES + 1)
+    if len(data) > TERMS_MAX_BYTES:
+        raise HTTPException(422, "That file is over 10 MB. Save a smaller copy or take a screenshot.")
+    if documents.sniff(data) not in ("pdf", "png", "jpeg", "webp", "heic", "text"):
+        raise HTTPException(422, "Upload a PDF, a screenshot or a photo.")
+    try:
+        doc = documents.open_document(data)
+    except documents.DocumentError as e:
+        raise HTTPException(422, str(e)) from None
+    target = termdocs.Target(a.name, a.mask, kind)
+    if not read_with_ai:
+        why = "CD receipts and statements are read with AI." if kind == "cd" else "Statements are read with AI."
+        return {"ai_offer": reading.offer(db, doc, termdocs.outgoing_for(db, doc, target), why)}
+    try:
+        answer, model, cost = termdocs.read(request.app.state.db, db, who.user.id, doc, target)
+    except AIUnavailable as e:
+        raise HTTPException(409, str(e)) from None
+    except ProviderError as e:
+        raise HTTPException(502, str(e)) from None
+    audit(db, request, "ai_read_file", who.user.id, model=model, kind="account_terms", account=a.id)
+    return answer | {"ai_cost": cost}
 
 
 class ReminderIn(BaseModel):

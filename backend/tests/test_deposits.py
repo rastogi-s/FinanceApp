@@ -1,11 +1,15 @@
+import json
 from datetime import date, timedelta
 
 from sqlalchemy import select
 
 from financeapp import deposits, rates
+from financeapp.ai import termdocs
 from financeapp.deposits import CdInputs
 from financeapp.models import Account, AccountTerms, AlertEvent, Transaction
 from tests.conftest import csrf, db_of, needs_db
+from tests.pdf import pdf
+from tests.test_ai import add_claude, fake  # noqa: F401  (fake is a fixture)
 from tests.test_money import plaid  # noqa: F401  (the fixture)
 
 TODAY = date(2026, 10, 27)
@@ -270,3 +274,104 @@ def test_migration_moves_typed_rates(fresh_db):
         value = c.execute(text("SELECT value FROM preferences WHERE key = 'interest_accounts'")).scalar()
         assert value == {"7": {"apy": 4.4, "maturity": "2027-01-09", "term_months": 12}}
     engine.dispose()
+
+
+CD_ADVICE = [
+    [(50, "Ally Bank  Certificate of Deposit Confirmation")],
+    [(50, "Prepared for Shubham Rastogi")],
+    [(50, "Account number 9876543214321")],
+    [(50, "Opening deposit $25,000.00   Opened 03/15/2026")],
+    [(50, "Term 12 months   Matures 03/15/2027   APY 4.10%")],
+    [(50, "Early withdrawal penalty: 60 days of interest")],
+]
+
+
+def _answer(**kw) -> str:
+    base = {
+        "document": "cd_receipt", "institution": "Ally Bank", "account_last4": "4321", "apy": 4.1,
+        "interest_rate": 0, "opened_date": "2026-03-15", "term_months": 12, "maturity_date": "2027-03-15",
+        "principal": 25000, "penalty_days": 60, "auto_renew": "yes", "grace_days": 10, "interest_handling": "added",
+        "monthly_fee": 5, "fee_waiver_balance": 0, "notes": "",
+    }  # fmt: skip
+    return json.dumps(base | kw)
+
+
+def test_cd_terms_from_an_ai_answer():
+    cd = termdocs.Target("Ally 12-month CD", "4321", "cd")
+    a = termdocs.Answer.model_validate_json(_answer())
+    got = termdocs.to_terms(a, cd, [], [], "m")
+    assert got["apy"] == 4.1 and got["opened"] == "2026-03-15" and got["maturity"] == "2027-03-15"
+    assert got["term_months"] == 12 and got["principal_cents"] == 25_000_00 and got["penalty_days"] == 60
+    assert got["auto_renew"] is True and got["pays_out"] is False and got["grace_days"] == 10
+    # A CD has no monthly fee, whatever the statement says.
+    assert got["monthly_fee_cents"] is None and "monthly_fee_cents" not in got["filled"] and len(got["warnings"]) == 1
+    assert set(got) - {"institution", "document", "filled", "warnings"} == set(deposits.EDITABLE)
+
+    # Only the rate printed; no term but both dates; another CD's number; dates the wrong way round.
+    got = termdocs.to_terms(
+        termdocs.Answer.model_validate_json(_answer(apy=0, interest_rate=4.0, term_months=0, account_last4="1111")),
+        cd, [], [], "m",
+    )  # fmt: skip
+    assert got["apy"] == 4.0 and got["term_months"] == 12
+    assert any("interest rate" in w for w in got["warnings"]) and any("ending 1111" in w for w in got["warnings"])
+    got = termdocs.to_terms(
+        termdocs.Answer.model_validate_json(_answer(maturity_date="2025-01-01", term_months=0)), cd, [], [], "m"
+    )
+    assert got["opened"] is None and got["maturity"] is None and any("No maturity" in w for w in got["warnings"])
+
+    # A checking statement fills the rate and fee only.
+    chk = termdocs.Target("Checking", None, "checking")
+    got = termdocs.to_terms(
+        termdocs.Answer.model_validate_json(_answer(apy=0.01, fee_waiver_balance=1500)), chk, [], [], "m"
+    )
+    assert got["filled"] == ["apy", "monthly_fee_cents", "min_balance_cents"] and got["min_balance_cents"] == 1500_00
+    empty = _answer(apy=0, monthly_fee=0, fee_waiver_balance=0)
+    try:
+        termdocs.to_terms(termdocs.Answer.model_validate_json(empty), chk, [], [], "m")
+        raise AssertionError("expected a ProviderError")
+    except termdocs.ProviderError as e:
+        assert "No rate" in e.message
+
+
+@needs_db
+def test_cd_terms_read_from_a_receipt_after_a_yes(client, home, fake):  # noqa: F811
+    home.setup()
+    cd = client.post(
+        "/api/accounts/manual",
+        json={"name": "Ally 12-month CD", "institution": "Ally", "type": "depository", "balance_cents": 25_500_00},
+        headers=csrf(client),
+    ).json()["accounts"][0]
+    url = f"/api/accounts/{cd['id']}/terms/read"
+    doc = {"file": ("advice.pdf", pdf(CD_ADVICE))}
+    # Without AI set up: the offer says so, and nothing is sent.
+    offer = client.post(url, files=doc, headers=csrf(client)).json()["ai_offer"]
+    assert not offer["available"] and "CD receipts" in offer["reason"]
+    add_claude(client)
+    offer = client.post(url, files=doc, headers=csrf(client)).json()["ai_offer"]
+    assert offer["available"] and "25,000.00" in offer["preview"] and "4.10%" in offer["preview"]
+    assert "Shubham" not in offer["preview"] and "9876543214321" not in offer["preview"]
+    sent_before = len(fake.sent)
+    fake.answer = _answer(account_last4="")
+    r = client.post(url + "?read_with_ai=true", files=doc, headers=csrf(client))
+    assert r.status_code == 200, r.text
+    got = r.json()
+    assert got["apy"] == 4.1 and got["maturity"] == "2027-03-15" and got["institution"] == "Ally Bank"
+    assert "ai_cost" in got and len(fake.sent) == sent_before + 1
+    body = json.loads(fake.sent[-1].content)
+    assert "Shubham" not in json.dumps(body) and "Ally 12-month CD" in json.dumps(body)
+    schema = body["output_config"]["format"]["schema"]
+    assert set(schema["required"]) == set(schema["properties"])  # nothing optional for Claude's limits
+
+    # Nothing was saved: the person checks the form first.
+    with db_of(client).session() as db:
+        t = db.get(AccountTerms, cd["id"])
+        assert t is None or t.apy is None
+    # Not a bank account, or not a document.
+    card = client.post(
+        "/api/accounts/manual",
+        json={"name": "Visa", "institution": "Chase", "type": "credit", "balance_cents": 0},
+        headers=csrf(client),
+    ).json()["accounts"][0]
+    assert client.post(f"/api/accounts/{card['id']}/terms/read", files=doc, headers=csrf(client)).status_code == 404
+    junk = {"file": ("x.zip", b"PK\x03\x04junk")}
+    assert client.post(url, files=junk, headers=csrf(client)).status_code == 422
