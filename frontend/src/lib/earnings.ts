@@ -1,6 +1,5 @@
 /** The Income over time page's numbers, as GET /api/earnings sends them (backend/financeapp/earnings.py). */
 
-import type { AIOffer } from "@/components/ai-offer";
 
 export type SourceKey = "base" | "bonus" | "rsu" | "other" | "match" | "employer_hsa";
 export type How = "" | "ytd" | "stubs" | "estimated" | "take_home" | "typed" | "w2" | "stub" | "unsplit";
@@ -100,8 +99,6 @@ export type YearRead = {
   warnings: string[];
   ai_cost?: number;
 };
-
-export type ReadAnswer<T> = T | { ai_offer: AIOffer };
 
 /** The chart's series, in a fixed order: each source keeps its color whatever's shown. */
 export const SERIES: { keys: SourceKey[]; label: string; color: string }[] = [

@@ -102,6 +102,13 @@ export type TermsIn = {
   min_balance_cents: number | null;
 };
 
+/** What a CD's receipt or a statement filled in: the same fields, null where nothing was read. */
+export type TermsRead = TermsIn & {
+  institution: string | null;
+  document: "cd_receipt" | "renewal" | "statement" | "other";
+  filled: (keyof TermsIn)[];
+};
+
 export function percent(apy: number): string {
   return `${apy.toFixed(2)}%`;
 }

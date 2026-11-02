@@ -1,5 +1,16 @@
 [
   {
+    "version": "0.62.0",
+    "title": "CD terms from the receipt",
+    "features": [
+      {
+        "id": "cd-terms-upload",
+        "title": "Upload a CD receipt and its terms fill in",
+        "body": "On a CD's sheet in Settings, Accounts, tap Fill in from a receipt or statement and pick the CD's receipt (the advice or confirmation from when it opened), a renewal notice or a statement: a PDF, a screenshot or a photo. AI reads its APY, when it opened, its term and maturity date, the amount put in, the early withdrawal penalty, the grace period and whether it renews, and fills in the form. You see exactly what would be sent first, each filled field says it came from the document, and nothing is saved until you check it and tap Save. The file isn't kept. Savings and checking accounts can read their rate (and checking its fee) from a statement the same way."
+      }
+    ]
+  },
+  {
     "version": "0.61.0",
     "title": "Locks when you leave",
     "features": [

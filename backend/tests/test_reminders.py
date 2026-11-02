@@ -65,7 +65,8 @@ def test_reminder_falls_due_pushes_once_then_once_more(client, home, sent):
     hsa = manual(client)
     today = local_today(client)
     assert hsa["reminder"]["every"] == "monthly" and not hsa["reminder"]["is_due"]
-    newest = reminders.statement_on(*reminders.add_months(today.year, today.month, -2), None)
+    # Three statements back, so it's due whatever day the test runs (two back isn't due yet on the 1st to 3rd).
+    newest = reminders.statement_on(*reminders.add_months(today.year, today.month, -3), None)
     age(client, hsa["id"], newest)
     due = reminders.due_on("monthly", None, newest)
 
@@ -98,7 +99,7 @@ def test_snooze_settings_and_which_accounts(client, home):
     house = manual(client, "House", "other")
     assert house["reminder"]["every"] == "off"  # a house's value isn't a statement
     today = local_today(client)
-    newest = reminders.statement_on(*reminders.add_months(today.year, today.month, -2), None)
+    newest = reminders.statement_on(*reminders.add_months(today.year, today.month, -3), None)
     age(client, hsa["id"], newest)
     age(client, house["id"], newest)
     assert [u["account_id"] for u in client.get("/api/household").json()["health"]["uploads"]] == [hsa["id"]]

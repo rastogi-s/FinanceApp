@@ -1,9 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useRef, useState } from "react";
-import { ArrowDownRight, ArrowUpRight, Briefcase, FileUp, Minus, NotebookPen, Pencil, Plus, Sparkles, Trash2 } from "lucide-react";
-import { AIOfferCard, shrinkPicture, type AIOffer } from "@/components/ai-offer";
+import { useState } from "react";
+import { ArrowDownRight, ArrowUpRight, Briefcase, FileUp, Minus, NotebookPen, Pencil, Plus, Trash2 } from "lucide-react";
+import { useDocumentRead } from "@/components/document-read";
 import { YearBars } from "@/components/earnings-chart";
 import { Money, formatMoney } from "@/components/money";
 import { BackLink, Notice, PageTitle, Wide } from "@/components/page";
@@ -15,7 +15,6 @@ import { Sheet } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "@/components/ui/toast";
 import { parseDollars } from "@/lib/accounts";
-import { usd } from "@/lib/ai";
 import { api } from "@/lib/api";
 import {
   HOW,
@@ -24,7 +23,6 @@ import {
   type EarningsYear,
   type Letter,
   type LetterRead,
-  type ReadAnswer,
   type SourceKey,
   type YearRead,
 } from "@/lib/earnings";
@@ -388,82 +386,7 @@ function About({ e }: { e: EarningsState }) {
 // ---- reading a document
 
 function useRead<T>(kind: "letter" | "year", demo: boolean, onRead: (r: T) => void) {
-  const input = useRef<HTMLInputElement>(null);
-  const [busy, setBusy] = useState(false);
-  const [offer, setOffer] = useState<{ file: File; offer: AIOffer } | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [read, setRead] = useState<{ name: string; warnings: string[]; cost?: number } | null>(null);
-  const upload = async (original: File, withAI = false) => {
-    if (demo) return toast("Reading documents is off while the app shows sample data.");
-    setBusy(true);
-    setError(null);
-    try {
-      const file = await shrinkPicture(original);
-      const form = new FormData();
-      form.append("file", file);
-      const answer = await api<ReadAnswer<T & { warnings: string[]; ai_cost?: number }>>(
-        `/api/earnings/read?kind=${kind}${withAI ? "&read_with_ai=true" : ""}`,
-        { form },
-      );
-      if ("ai_offer" in answer) {
-        setOffer({ file, offer: answer.ai_offer });
-        return;
-      }
-      setOffer(null);
-      setRead({ name: file.name, warnings: answer.warnings, cost: answer.ai_cost });
-      onRead(answer);
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setBusy(false);
-      if (input.current) input.current.value = "";
-    }
-  };
-  const box = (title: string, hint: string) => (
-    <div className="rounded-2xl border border-dashed p-4">
-      <input
-        ref={input}
-        type="file"
-        accept="application/pdf,.pdf,image/png,image/jpeg,image/webp"
-        className="sr-only"
-        aria-label={title}
-        tabIndex={-1}
-        onChange={(ev) => ev.target.files?.[0] && upload(ev.target.files[0])}
-      />
-      <div className="flex items-center gap-3">
-        {read ? <Sparkles className="size-5 shrink-0 text-primary" aria-hidden /> : <FileUp className="size-5 shrink-0 text-primary" aria-hidden />}
-        <div className="min-w-0 flex-1">
-          <p className="text-sm font-medium">{read ? `Filled in from ${read.name}` : title}</p>
-          <p className="text-xs text-muted-foreground">
-            {read
-              ? `Check the numbers, then save.${read.cost !== undefined ? ` Read by AI, ${usd(read.cost)}.` : ""}`
-              : hint}
-          </p>
-        </div>
-        <Button type="button" size="sm" variant="secondary" disabled={busy} onClick={() => input.current?.click()}>
-          {busy ? "Reading…" : read ? "Another" : "Upload"}
-        </Button>
-      </div>
-      {offer && (
-        <div className="mt-4">
-          <AIOfferCard offer={offer.offer} busy={busy} onAccept={() => upload(offer.file, true)} onCancel={() => setOffer(null)} />
-        </div>
-      )}
-      {error && (
-        <p className="mt-3 text-sm text-negative" role="alert">
-          {error}
-        </p>
-      )}
-      {read && read.warnings.length > 0 && (
-        <ul className="mt-3 grid gap-1 text-sm text-warning" role="status">
-          {read.warnings.map((w) => (
-            <li key={w}>{w}</li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
-  return { box, reset: () => (setRead(null), setOffer(null), setError(null)) };
+  return useDocumentRead<T>(`/api/earnings/read?kind=${kind}`, demo, onRead);
 }
 
 const dollars = (c: number | null | undefined) => (c ? String(c / 100) : "");

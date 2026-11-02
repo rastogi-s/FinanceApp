@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
-import { AlertTriangle, CalendarClock, Landmark, PencilLine, TrendingDown } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { AlertTriangle, CalendarClock, FileUp, Landmark, PencilLine, Sparkles, TrendingDown } from "lucide-react";
+import { useDocumentRead } from "@/components/document-read";
 import { Money, formatMoney } from "@/components/money";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -13,6 +14,7 @@ import {
   type Connection,
   type Details,
   type TermsIn,
+  type TermsRead,
   parseDollars,
   percent,
 } from "@/lib/accounts";
@@ -84,11 +86,26 @@ export function DepositDetails({
   onSaved: (c: Connection) => void;
 }) {
   const [editing, setEditing] = useState(false);
+  // What a CD's receipt or a statement filled in; `n` remounts the form so a second document fills it again.
+  const [prefill, setPrefill] = useState<{ n: number; r: TermsRead } | null>(null);
+  const reader = useDocumentRead<TermsRead>(`/api/accounts/${a.id}/terms/read`, disabled, (r) => {
+    setPrefill((p) => ({ n: (p?.n ?? 0) + 1, r }));
+    setEditing(true);
+  });
+  const close = () => {
+    setEditing(false);
+    setPrefill(null);
+    reader.reset();
+  };
+  const fill = () => {
+    setEditing(true);
+    reader.pick();
+  };
   const save = async (body: TermsIn) => {
     try {
       const r = await api<Connection>(`/api/accounts/${a.id}/terms`, { method: "PUT", body });
       toast("Saved.");
-      setEditing(false);
+      close();
       onSaved(r);
     } catch (e) {
       toast((e as Error).message, "error");
@@ -96,7 +113,12 @@ export function DepositDetails({
   };
   return (
     <div className="grid grid-cols-1 gap-3">
-      {d.cd ? <CdPanel d={d} c={d.cd} onEdit={() => setEditing(true)} disabled={disabled} /> : <RatePanel d={d} onEdit={() => setEditing(true)} disabled={disabled} />}
+      {reader.input(d.cd ? "A CD receipt, renewal notice or statement" : "A bank statement")}
+      {d.cd ? (
+        <CdPanel d={d} c={d.cd} onEdit={() => setEditing(true)} onFill={fill} busy={reader.busy} disabled={disabled} />
+      ) : (
+        <RatePanel d={d} onEdit={() => setEditing(true)} disabled={disabled} />
+      )}
       {d.kind === "checking" && <CheckingPanel d={d} />}
       {d.fdic.over_cents > 0 && (
         <Warn>
@@ -104,7 +126,22 @@ export function DepositDetails({
           person at one bank. A joint account has its own limit; otherwise consider moving the rest.
         </Warn>
       )}
-      {editing && <TermsForm d={d} onCancel={() => setEditing(false)} onSave={save} />}
+      {editing && (
+        <TermsForm
+          key={prefill?.n ?? 0}
+          d={d}
+          prefill={prefill?.r ?? null}
+          reader={reader.box(
+            d.cd ? "Upload a receipt or statement" : "Upload a statement",
+            d.cd
+              ? "The receipt (or advice) from when it opened, a renewal notice or a statement. PDF, screenshot or photo."
+              : "A recent statement shows the APY it paid. PDF, screenshot or photo.",
+            { input: false },
+          )}
+          onCancel={close}
+          onSave={save}
+        />
+      )}
     </div>
   );
 }
@@ -147,6 +184,15 @@ function Edit({ onEdit, disabled, children }: { onEdit: () => void; disabled: bo
   );
 }
 
+/** "Upload a receipt" next to "Edit terms": opens the form and the file picker in one tap. */
+function Fill({ onFill, busy, disabled, primary }: { onFill: () => void; busy: boolean; disabled: boolean; primary?: boolean }) {
+  return (
+    <Button size="sm" variant={primary ? "default" : "outline"} onClick={onFill} disabled={disabled || busy}>
+      {primary ? <Sparkles /> : <FileUp />} {busy ? "Reading…" : primary ? "Fill in from a receipt or statement" : "Upload a receipt or notice"}
+    </Button>
+  );
+}
+
 const STATUS: Record<NonNullable<CdDetails["status"]>, string> = {
   open: "",
   grace: "In its grace period",
@@ -154,7 +200,21 @@ const STATUS: Record<NonNullable<CdDetails["status"]>, string> = {
   renewed: "Probably renewed",
 };
 
-function CdPanel({ d, c, onEdit, disabled }: { d: Details; c: CdDetails; onEdit: () => void; disabled: boolean }) {
+function CdPanel({
+  d,
+  c,
+  onEdit,
+  onFill,
+  busy,
+  disabled,
+}: {
+  d: Details;
+  c: CdDetails;
+  onEdit: () => void;
+  onFill: () => void;
+  busy: boolean;
+  disabled: boolean;
+}) {
   const guessed = c.guessed.filter((g) => g !== "maturity" && g !== "term_months");
   if (c.earned_cents === null) {
     return (
@@ -167,11 +227,14 @@ function CdPanel({ d, c, onEdit, disabled }: { d: Details; c: CdDetails; onEdit:
           {c.missing.includes("apy") && (c.missing.includes("opened") || c.missing.includes("maturity")) ? " and " : ""}
           {c.missing.includes("maturity") || c.missing.includes("opened") ? "when it matures (or when it opened and for how long)" : ""} would
           show what it has earned so far, what it&apos;s worth at maturity, and remind you before it renews. They&apos;re on the CD&apos;s receipt
-          or the bank&apos;s site.
+          or the bank&apos;s site: upload one and AI fills them in for you to check.
         </p>
-        <Edit onEdit={onEdit} disabled={disabled}>
-          Add terms
-        </Edit>
+        <div className="flex flex-wrap gap-2">
+          <Fill onFill={onFill} busy={busy} disabled={disabled} primary />
+          <Edit onEdit={onEdit} disabled={disabled}>
+            Type them in
+          </Edit>
+        </div>
       </section>
     );
   }
@@ -293,9 +356,12 @@ function CdPanel({ d, c, onEdit, disabled }: { d: Details; c: CdDetails; onEdit:
           worked out from the account&apos;s history. Edit the terms to set {guessed.length > 1 ? "them" : "it"}.
         </p>
       )}
-      <Edit onEdit={onEdit} disabled={disabled}>
-        Edit terms
-      </Edit>
+      <div className="flex flex-wrap gap-2">
+        <Edit onEdit={onEdit} disabled={disabled}>
+          Edit terms
+        </Edit>
+        <Fill onFill={onFill} busy={busy} disabled={disabled} />
+      </div>
     </section>
   );
 }
@@ -423,20 +489,52 @@ function CheckingPanel({ d }: { d: Details }) {
 }
 
 /** Typed-in terms. A blank field is sent as null: for a CD the app goes back to guessing it. */
-function TermsForm({ d, onCancel, onSave }: { d: Details; onCancel: () => void; onSave: (b: TermsIn) => void }) {
+function TermsForm({
+  d,
+  prefill: p,
+  reader,
+  onCancel,
+  onSave,
+}: {
+  d: Details;
+  prefill: TermsRead | null;
+  reader: React.ReactNode;
+  onCancel: () => void;
+  onSave: (b: TermsIn) => void;
+}) {
   const c = d.cd;
   const typed = (k: CdDetails["guessed"][number]) => (c && !c.guessed.includes(k) ? c : null);
-  const [apy, setApy] = useState(d.apy_typed?.toString() ?? "");
-  const [opened, setOpened] = useState(typed("opened")?.opened ?? "");
-  const [term, setTerm] = useState(typed("term_months")?.term_months?.toString() ?? "");
-  const [maturity, setMaturity] = useState(typed("maturity")?.maturity ?? "");
-  const [principal, setPrincipal] = useState(typed("principal_cents") ? (c!.principal_cents / 100).toFixed(2) : "");
-  const [penalty, setPenalty] = useState(c?.penalty_days?.toString() ?? "");
-  const [renew, setRenew] = useState(c?.auto_renew === null || !c ? "" : String(c.auto_renew));
-  const [grace, setGrace] = useState(c?.grace_days?.toString() ?? "");
-  const [paysOut, setPaysOut] = useState(c?.pays_out === null || !c ? "" : String(c.pays_out));
-  const [fee, setFee] = useState(d.monthly_fee_cents !== null ? (d.monthly_fee_cents / 100).toFixed(2) : "");
-  const [minimum, setMinimum] = useState(d.min_balance_cents !== null ? (d.min_balance_cents / 100).toFixed(2) : "");
+  const cents = (v: number | null | undefined) => (v === null || v === undefined ? "" : (v / 100).toFixed(2));
+  const text = (v: number | boolean | string | null | undefined) => (v === null || v === undefined ? "" : String(v));
+  // A document's value where it had one; otherwise what's saved.
+  const pick = <K extends keyof TermsIn>(k: K, saved: string, show: (v: TermsIn[K]) => string = text as (v: TermsIn[K]) => string) =>
+    p && p[k] !== null ? show(p[k]) : saved;
+  const [apy, setApy] = useState(pick("apy", d.apy_typed?.toString() ?? ""));
+  const [opened, setOpened] = useState(pick("opened", typed("opened")?.opened ?? ""));
+  const [term, setTerm] = useState(pick("term_months", typed("term_months")?.term_months?.toString() ?? ""));
+  const [maturity, setMaturity] = useState(pick("maturity", typed("maturity")?.maturity ?? ""));
+  const [principal, setPrincipal] = useState(pick("principal_cents", typed("principal_cents") ? cents(c!.principal_cents) : "", cents));
+  const [penalty, setPenalty] = useState(pick("penalty_days", c?.penalty_days?.toString() ?? ""));
+  const [renew, setRenew] = useState(pick("auto_renew", c?.auto_renew === null || !c ? "" : String(c.auto_renew)));
+  const [grace, setGrace] = useState(pick("grace_days", c?.grace_days?.toString() ?? ""));
+  const [paysOut, setPaysOut] = useState(pick("pays_out", c?.pays_out === null || !c ? "" : String(c.pays_out)));
+  const [fee, setFee] = useState(pick("monthly_fee_cents", cents(d.monthly_fee_cents), cents));
+  const [minimum, setMinimum] = useState(pick("min_balance_cents", cents(d.min_balance_cents), cents));
+  const read = new Set(p?.filled ?? []);
+  // Opened from a button above, or filled in again by a document: bring it into view in the sheet.
+  const ref = useRef<HTMLFormElement>(null);
+  useEffect(() => {
+    ref.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, []);
+  /** Under a field the document filled: says so, in place of its usual hint. */
+  const from = (k: keyof TermsIn, hint?: React.ReactNode) =>
+    read.has(k) ? (
+      <span className="inline-flex items-center gap-1 text-primary">
+        <Sparkles className="size-3" aria-hidden /> From the document
+      </span>
+    ) : (
+      hint
+    );
   const [error, setError] = useState<string | null>(null);
 
   const num = (s: string) => (s.trim() === "" ? null : Number(s));
@@ -469,34 +567,36 @@ function TermsForm({ d, onCancel, onSave }: { d: Details; onCancel: () => void; 
     });
   };
   return (
-    <form onSubmit={submit} className="grid grid-cols-1 gap-4 rounded-2xl border border-primary/30 p-4" aria-label="Terms">
+    <form ref={ref} onSubmit={submit} className="grid scroll-mt-4 grid-cols-1 gap-4 rounded-2xl border border-primary/30 p-4" aria-label="Terms">
       <p className="text-sm font-medium">{c ? "The CD's terms" : "Rate and fees"}</p>
       <p className="-mt-2 text-xs text-muted-foreground">
         From the {c ? "CD's receipt, a statement" : "bank's site or app"}. Leave anything you don&apos;t know blank.
       </p>
+      {reader}
       <Field
         id="t-apy"
         label="APY (%)"
-        hint={
+        hint={from(
+          "apy",
           d.bank_apy !== null
             ? `The bank reports ${percent(d.bank_apy)}. Blank uses that.`
             : d.implied_apy !== null
               ? `Recent interest works out to about ${percent(d.implied_apy)}. Blank uses that.`
-              : undefined
-        }
+              : undefined,
+        )}
       >
         <Input value={apy} onChange={(e) => setApy(e.target.value)} inputMode="decimal" placeholder="4.25" />
       </Field>
       {c && (
         <>
           <div className="grid grid-cols-2 gap-3">
-            <Field id="t-opened" label="Opened on">
+            <Field id="t-opened" label="Opened on" hint={from("opened")}>
               <Input type="date" value={opened} onChange={(e) => setOpened(e.target.value)} />
             </Field>
-            <Field id="t-term" label="Term">
+            <Field id="t-term" label="Term" hint={from("term_months")}>
               <Select value={term} onChange={(e) => setTerm(e.target.value)}>
                 <option value="">Not sure</option>
-                {TERMS.map((m) => (
+                {(term && !TERMS.includes(Number(term)) ? [...TERMS, Number(term)].sort((x, y) => x - y) : TERMS).map((m) => (
                   <option key={m} value={m}>
                     {m} months
                   </option>
@@ -504,13 +604,13 @@ function TermsForm({ d, onCancel, onSave }: { d: Details; onCancel: () => void; 
               </Select>
             </Field>
           </div>
-          <Field id="t-maturity" label="Matures on" hint="Blank works it out from the opening date and term.">
+          <Field id="t-maturity" label="Matures on" hint={from("maturity", "Blank works it out from the opening date and term.")}>
             <Input type="date" value={maturity} onChange={(e) => setMaturity(e.target.value)} />
           </Field>
-          <Field id="t-principal" label="Amount put in" hint={`Blank: about ${formatMoney(c.principal_cents)}, from the account's history.`}>
+          <Field id="t-principal" label="Amount put in" hint={from("principal_cents", `Blank: about ${formatMoney(c.principal_cents)}, from the account's history.`)}>
             <Input value={principal} onChange={(e) => setPrincipal(e.target.value)} inputMode="decimal" placeholder="25000.00" />
           </Field>
-          <Field id="t-pays" label="Interest">
+          <Field id="t-pays" label="Interest" hint={from("pays_out")}>
             <Select value={paysOut} onChange={(e) => setPaysOut(e.target.value)}>
               <option value="">Not sure (added to the CD)</option>
               <option value="false">Added to the CD</option>
@@ -518,14 +618,14 @@ function TermsForm({ d, onCancel, onSave }: { d: Details; onCancel: () => void; 
             </Select>
           </Field>
           <div className="grid grid-cols-2 gap-3">
-            <Field id="t-penalty" label="Early withdrawal penalty" hint="Days of interest">
+            <Field id="t-penalty" label="Early withdrawal penalty" hint={from("penalty_days", "Days of interest")}>
               <Input value={penalty} onChange={(e) => setPenalty(e.target.value)} inputMode="numeric" placeholder="90" />
             </Field>
-            <Field id="t-grace" label="Grace period" hint="Days after maturity">
+            <Field id="t-grace" label="Grace period" hint={from("grace_days", "Days after maturity")}>
               <Input value={grace} onChange={(e) => setGrace(e.target.value)} inputMode="numeric" placeholder="7" />
             </Field>
           </div>
-          <Field id="t-renew" label="At maturity">
+          <Field id="t-renew" label="At maturity" hint={from("auto_renew")}>
             <Select value={renew} onChange={(e) => setRenew(e.target.value)}>
               <option value="">Not sure</option>
               <option value="true">Renews by itself</option>
@@ -536,10 +636,10 @@ function TermsForm({ d, onCancel, onSave }: { d: Details; onCancel: () => void; 
       )}
       {d.kind === "checking" && (
         <div className="grid grid-cols-2 gap-3">
-          <Field id="t-fee" label="Monthly fee">
+          <Field id="t-fee" label="Monthly fee" hint={from("monthly_fee_cents")}>
             <Input value={fee} onChange={(e) => setFee(e.target.value)} inputMode="decimal" placeholder="0.00" />
           </Field>
-          <Field id="t-min" label="No fee above">
+          <Field id="t-min" label="No fee above" hint={from("min_balance_cents")}>
             <Input value={minimum} onChange={(e) => setMinimum(e.target.value)} inputMode="decimal" placeholder="1500.00" />
           </Field>
         </div>
