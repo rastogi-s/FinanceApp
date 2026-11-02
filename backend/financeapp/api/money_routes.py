@@ -13,6 +13,8 @@ from sqlalchemy.orm import Session as DbSession
 from financeapp import (
     auth,
     bills,
+    budget,
+    covers,
     crypto,
     dedupe,
     demo,
@@ -655,6 +657,39 @@ def recategorize(
         changed = review.learn(db, t, category, who.user.id)
     audit(db, request, "recategorized", who.user.id, category=category.name, remember=body.remember)
     return {"id": str(t.id), "category": category.name, "category_id": category.id, "also_changed": changed}
+
+
+class MonthPatch(BaseModel):
+    month: date | None = None  # any day in the month it counts toward; empty lets the app work it out again
+
+
+@router.patch("/transactions/{transaction_id}/month")
+def count_toward(transaction_id: int, body: MonthPatch, request: Request, who: Signed = Depends(signed_in)) -> dict:
+    """Which month a payment counts toward in the budget: the month before or after the one it was paid in."""
+    no_demo(who)
+    db = db_of(request)
+    t = db.get(Transaction, transaction_id)
+    if t is None:
+        raise HTTPException(404, "No such transaction.")
+    if t.amount_cents >= 0 or t.transfer_group_id is not None:
+        raise HTTPException(422, "Only money spent can count toward another month.")
+    posted = covers.month_start(t.date)
+    if body.month is not None:
+        month = covers.month_start(body.month)
+        if month not in (covers.add_months(posted, -1), posted, covers.add_months(posted, 1)):
+            raise HTTPException(422, "A payment can count toward the month it was paid in, or the one before or after.")
+        t.budget_month = month
+    else:
+        t.budget_month = None
+    db.flush()
+    auto = covers.Covers(db, [a.id for a in budget.counted_accounts(db)], budget.today()).auto(t)
+    counts = t.budget_month or auto
+    audit(db, request, "budget_month", who.user.id, month=counts.isoformat(), by_hand=t.budget_month is not None)
+    return {
+        "id": str(t.id),
+        "counts_toward": counts.isoformat() if counts != posted else None,
+        "counts_by_hand": t.budget_month is not None,
+    }
 
 
 # ---- file imports: upload -> preview -> confirm

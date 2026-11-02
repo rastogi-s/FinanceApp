@@ -34,7 +34,7 @@ import { toast } from "@/components/ui/toast";
 import { useAuth } from "@/lib/auth";
 import { useApi } from "@/lib/household";
 import type { ReviewState } from "@/lib/review";
-import { type BudgetLine, type BudgetState, type Forecast, type SavingsMonth, monthName, useBudget } from "@/lib/budget";
+import { type BudgetLine, type BudgetState, type Forecast, type MovedBill, type SavingsMonth, monthName, useBudget } from "@/lib/budget";
 import { monthOf } from "@/lib/search";
 import { cn } from "@/lib/utils";
 
@@ -255,6 +255,8 @@ function Budget() {
           ) : null;
         })}
 
+        {data.moved && data.moved.length > 0 && <Moved moved={data.moved} month={data.month} />}
+
         {data.unbudgeted.length > 0 && (
           <Card>
             <CardHeader>
@@ -362,6 +364,48 @@ function sortLines(lines: BudgetLine[], sort: LineSort): BudgetLine[] {
 }
 
 /** How far to trust the numbers above: the share of money sorted with confidence, and a way to fix the rest. */
+const paidDay = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+const monthOnly = new Intl.DateTimeFormat("en-US", { month: "long", timeZone: "UTC" });
+
+/** Bills that count in the month they're for, not the one they were paid in, so the rows above add up the way you'd
+ * expect: rent paid on the 28th is next month's, and a bill paid on the 2nd can be last month's. */
+function Moved({ moved, month }: { moved: MovedBill[]; month: string }) {
+  const here = monthOnly.format(new Date(`${month}T00:00:00Z`));
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Counted by the month they&apos;re for</CardTitle>
+        <CalendarClock className="size-4 text-muted-foreground" aria-hidden />
+      </CardHeader>
+      <CardContent className="pt-0">
+        <p className="mb-2 text-sm text-muted-foreground">
+          Bills you pay ahead count in the month they cover, so {here} has each one once. Tap one to see it, and change its month there if it&apos;s wrong.
+        </p>
+        <ul className="divide-y">
+          {moved.map((m) => (
+            <li key={m.id}>
+              <Link
+                href={`/spending?q=${encodeURIComponent(m.merchant)}&from=budget`}
+                className="-mx-2 flex items-center gap-3 rounded-lg px-2 py-2.5 text-sm transition-colors hover:bg-muted/50"
+              >
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate font-medium">{m.merchant}</span>
+                  <span className="block truncate text-xs text-muted-foreground">
+                    Paid {paidDay.format(new Date(`${m.date}T00:00:00Z`))}
+                    {m.into ? `, counts here` : `, counts in ${monthOnly.format(new Date(`${m.counts_toward}T00:00:00Z`))}`}
+                    {m.by_hand && " (you picked)"}
+                  </span>
+                </span>
+                <Money cents={-m.amount_cents} className={cn(!m.into && "text-muted-foreground")} />
+              </Link>
+            </li>
+          ))}
+        </ul>
+      </CardContent>
+    </Card>
+  );
+}
+
 function CategoryCheck() {
   const { data } = useApi<ReviewState>("/api/review");
   if (!data || data.score === null) return null;

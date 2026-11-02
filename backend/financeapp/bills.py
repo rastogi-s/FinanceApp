@@ -31,7 +31,7 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session as DbSession
 
-from financeapp import budget, plan, reminders
+from financeapp import budget, covers, plan, reminders
 from financeapp.categorize import merchant_key
 from financeapp.models import Account, AlertEvent, Connection, Preference, Transaction, now
 
@@ -65,6 +65,7 @@ class Bill:
     account_id: int  # where the last one came from
     expected: date
     grace: int
+    day: int | None = None  # its usual day of the month (covers.on_day), for a monthly bill that keeps to one
 
     @property
     def late_on(self) -> date:
@@ -89,20 +90,29 @@ class Bill:
 
 
 def usual_day(b: Bill) -> int | None:
-    return steady_day(b.dates) if b.cadence == "monthly" else None
+    """The day of the month it's usually paid, as a date in the month it's next expected."""
+    return b.expected.day if b.day is not None else None
 
 
 def steady_day(dates: list[date]) -> int | None:
-    """The day of the month a monthly bill usually comes, when it keeps to one (within a few days)."""
-    days = [d.day for d in dates[-RECENT:]]
-    mid = round(statistics.median(days))
-    return mid if all(abs(d - mid) <= GRACE_DAYS for d in days) else None
+    """The day of the month a monthly bill usually comes, when it keeps to one (within a few days). Days around
+    the turn of the month count as close: a bill paid on the 29th, the 31st and the 1st keeps to one day (the
+    month's third-to-last), and comes back as a day counted from the month's end (covers.on_day reads it)."""
+    recent = dates[-RECENT:]
+    # One bill paid well ahead of its day (the 28th, for a bill due on the 2nd) doesn't break the habit.
+    allowed = 1 if len(recent) >= 4 else 0
+    for days in ([d.day for d in recent], [covers.signed_day(d) for d in recent]):
+        mid = round(statistics.median(days))
+        if sum(abs(d - mid) > GRACE_DAYS for d in days) <= allowed:
+            return mid or -1
+    return None
 
 
 def next_on_day(last: date, day: int) -> date:
-    """That day in the month after the last bill's (a short month's last day for the 29th to 31st)."""
-    y, m = reminders.add_months(last.year, last.month, 1)
-    return reminders.statement_on(y, m, day)
+    """That day in the month after the one the last bill belongs to. A bill usually paid on the 30th that was paid
+    on the 2nd belongs to the month before: the next one is due on the 30th of the month it was paid in."""
+    month, _ = covers.nearest_month(last, day)
+    return covers.on_day(covers.add_months(month, 1), day)
 
 
 def spending_link(b: Bill) -> str:
@@ -170,6 +180,7 @@ def learn(payments: list[Transaction], name: str, key: str, category_id: int | N
         account_id=bills[-1][2],
         expected=expected,
         grace=min(MAX_GRACE, GRACE_DAYS + spread),
+        day=day,
     )
 
 

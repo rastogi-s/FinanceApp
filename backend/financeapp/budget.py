@@ -28,7 +28,7 @@ from datetime import date, timedelta
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session as DbSession
 
-from financeapp import forecast, goals, transfers
+from financeapp import covers, forecast, goals, transfers
 from financeapp.categorize import normalize_merchant
 from financeapp.models import (
     Account,
@@ -130,21 +130,35 @@ class Ledger:
     def __init__(self, db: DbSession, accounts: list[Account], since: date) -> None:
         self.categories = {c.id: c for c in db.scalars(select(Category))}
         self.accounts = {a.id: a for a in accounts}
-        self.txns = (
+        self.covers = covers.Covers(db, [a.id for a in accounts], today(), self.categories)
+        # A bill paid a little before `since` can count toward a month after it (rent paid ahead).
+        loaded = (
             db.scalars(
                 select(Transaction).where(
                     Transaction.account_id.in_([a.id for a in accounts]),
-                    Transaction.date >= since,
+                    Transaction.date >= since - timedelta(days=covers.LOOKAROUND_DAYS),
                     Transaction.transfer_group_id.is_(None),
                 )
             ).all()
             if accounts
             else []
         )
+        self.months: dict[int, date] = {}  # transaction id -> the month it counts toward, where that's not its own
+        self.txns = []
+        for t in loaded:
+            m = self.covers.month_of(t) if self.is_spending(t) else month_start(t.date)
+            if m != month_start(t.date):
+                self.months[t.id] = m
+            if t.date >= since or (m != month_start(t.date) and m >= month_start(since) and m > t.date):
+                self.txns.append(t)
         self.spent: dict[tuple[int | None, date], int] = defaultdict(int)  # (category, month) -> cents out
         for t in self.txns:
             if self.is_spending(t):
-                self.spent[(t.category_id, month_start(t.date))] -= t.amount_cents
+                self.spent[(t.category_id, self.month_of(t))] -= t.amount_cents
+
+    def month_of(self, t: Transaction) -> date:
+        """The month a transaction counts toward: where it was paid, except a bill paid for another month."""
+        return self.months.get(t.id) or month_start(t.date)
 
     def kind(self, t: Transaction) -> str:
         c = self.categories.get(t.category_id) if t.category_id else None
@@ -165,6 +179,11 @@ class Ledger:
         return self.kind(t) == "income" and t.amount_cents > 0
 
     def month(self, m: date) -> list[Transaction]:
+        """What counts toward month m: what happened in it, a bill paid ahead for it, less a bill it paid ahead."""
+        return [t for t in self.txns if self.month_of(t) == m]
+
+    def paid_in(self, m: date) -> list[Transaction]:
+        """What happened in month m, whichever month it counts toward."""
         nxt = add_months(m, 1)
         return [t for t in self.txns if m <= t.date < nxt]
 
@@ -252,7 +271,30 @@ def match_paydays(
                 matched[p.id] = ts
                 del groups[key]
                 break
+    # Part of take-home can go to an account the app doesn't see (a fourth account in a split, an ESPP), or each
+    # bank words its share differently. A payday near the stub's date that adds up to most of its take-home, and
+    # not more, is still that paycheck: otherwise the stub and its own deposits would both count as pay.
+    for p in sorted(stubs, key=lambda p: p.date):
+        if p.id in matched or p.net_cents <= 0:
+            continue
+        near_stub = sorted(
+            (kv for kv in groups.items() if abs((kv[0][1] - p.date).days) <= MATCH_DAYS),
+            key=lambda kv: abs((kv[0][1] - p.date).days),
+        )
+        picked: list[tuple[str, date]] = []
+        total = 0
+        for key, ts in near_stub:
+            cents = sum(t.amount_cents for t in ts)
+            same_day = not picked or abs((key[1] - picked[0][1]).days) <= PAYDAY_DAYS
+            if same_day and total + cents <= p.net_cents + MATCH_CENTS:
+                picked.append(key)
+                total += cents
+        if picked and total >= p.net_cents * MOST_OF_PAY:
+            matched[p.id] = [t for key in picked for t in groups.pop(key)]
     return matched
+
+
+MOST_OF_PAY = 0.5  # a payday this share of a stub's take-home (or more, up to all of it) is that stub's paycheck
 
 
 # Words a bank puts around an employer's name on a pay deposit. Wording differs from bank to bank ("Deposit from
@@ -624,6 +666,10 @@ def brokerage_of(text: str, invest: list[Account]) -> str | None:
     return None
 
 
+def bill_items(ts: list[Transaction]) -> list[dict]:
+    return [item(f"{t.merchant or t.description}, {t.date:%b} {t.date.day}", -t.amount_cents) for t in ts]
+
+
 def where_it_went(ledger: Ledger, moves: Moves, m: date, saved: int, put_away: int) -> tuple[list[dict], dict]:
     """Where the month's savings went, lines that add up to `saved`, and the sums worth a second look.
 
@@ -699,6 +745,21 @@ def where_it_went(ledger: Ledger, moves: Moves, m: date, saved: int, put_away: i
                 items=[item(k, v) for k, v in top],
             )
         )
+    # Bills counted in a month other than the one they were paid in: the money left in the month it was paid.
+    ahead: dict[date, list[Transaction]] = defaultdict(list)
+    for t in ledger.paid_in(m):
+        if t.id in ledger.months and ledger.is_spending(t):
+            ahead[ledger.month_of(t)].append(t)
+    for other, ts in sorted(ahead.items()):
+        label = f"Paid ahead for {other:%B}" if other > m else f"{other:%B}'s bills, paid in {m:%B}"
+        lines.append(item(label, -sum(t.amount_cents for t in ts), kind="paid_ahead", items=bill_items(ts)))
+    earlier = [t for t in ledger.month(m) if t.id in ledger.months and ledger.is_spending(t)]
+    by_month: dict[date, list[Transaction]] = defaultdict(list)
+    for t in earlier:
+        by_month[month_start(t.date)].append(t)
+    for other, ts in sorted(by_month.items()):
+        label = f"Paid in {other:%B} for {m:%B}"
+        lines.append(item(label, sum(t.amount_cents for t in ts), kind="paid_ahead", items=bill_items(ts)))
     left = saved - sum(x["cents"] for x in lines)
     lines.append(
         item(
@@ -906,6 +967,31 @@ def savings_for(
 # ---- everything the Budget page shows
 
 
+def moved_bills(ledger: Ledger, m: date) -> list[dict]:
+    """Bills that count toward month m but were paid in another (rent paid ahead), and bills paid in m that count
+    toward another month (next month's rent), so Budget can say why its rows aren't the calendar month's."""
+    out = []
+    for t in ledger.txns:
+        counts, paid = ledger.month_of(t), month_start(t.date)
+        if t.id not in ledger.months or m not in (counts, paid):
+            continue
+        c = ledger.categories.get(t.category_id) if t.category_id else None
+        out.append(
+            {
+                "id": str(t.id),
+                "date": t.date.isoformat(),
+                "merchant": t.merchant or t.description,
+                "category": c.name if c else "Uncategorized",
+                "category_id": t.category_id,
+                "amount_cents": t.amount_cents,
+                "counts_toward": counts.isoformat(),
+                "by_hand": t.budget_month is not None,
+                "into": counts == m,  # counted here, paid in another month
+            }
+        )
+    return sorted(out, key=lambda r: r["date"])
+
+
 def build(db: DbSession) -> dict:
     accounts = counted_accounts(db)
     end = today()
@@ -990,6 +1076,7 @@ def build(db: DbSession) -> dict:
         "unbudgeted": unbudgeted,
         "safe_to_spend": safe,
         "forecast": forecast.summary(lines),
+        "moved": moved_bills(ledger, this_month),
         "savings_rate": history[-1] if history else None,
         "savings_history": history,
         "emergency": {

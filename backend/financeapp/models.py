@@ -247,6 +247,9 @@ class Transaction(Base):
     category_id: Mapped[int | None] = mapped_column(ForeignKey("categories.id", ondelete="SET NULL"))
     # How the category was chosen: user | rule | builtin | provider | transfer | none. "user" is never overwritten.
     category_source: Mapped[str] = mapped_column(String(16), default="none")
+    # The month this counts toward in the budget, when someone picked one by hand (first of the month). Left empty,
+    # covers.py works it out: rent paid on the 28th is next month's, a utility paid on the 2nd can be last month's.
+    budget_month: Mapped["date | None"] = mapped_column(Date)  # quoted: `date` here is the column above
     transfer_group_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
     source: Mapped[str] = mapped_column(String(16))  # plaid | snaptrade | file | manual
     import_id: Mapped[int | None] = mapped_column(ForeignKey("imports.id", ondelete="SET NULL"))

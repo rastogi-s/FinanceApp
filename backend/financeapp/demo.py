@@ -113,6 +113,18 @@ def household(today: date | None = None) -> dict:
                 "account": "Amex Gold" if i % 3 else "Chase Sapphire",
             }
         )
+    # This month's rent, paid ahead on the 28th or so: it counts in this month's budget (covers.py).
+    transactions.append(
+        {
+            "id": "d-rent",
+            "date": (month_start - timedelta(days=4)).isoformat(),
+            "merchant": "Maple Court Apartments",
+            "category": "Rent",
+            "amount_cents": -_cents(2850),
+            "account": "Chase checking",
+            "counts_toward": month_start.isoformat(),
+        }
+    )
     transactions.insert(
         3,
         {
@@ -384,7 +396,7 @@ def _bills(today: date) -> dict[str, list[dict]]:
         b = bills.Bill(
             key=name.lower(), name=name, category_id=None, cadence="monthly", period=30, dates=dates,
             usual_cents=_cents(usual), last_cents=_cents(usual), account_id=1, expected=expected,
-            grace=bills.GRACE_DAYS,
+            grace=bills.GRACE_DAYS, day=bills.steady_day(dates),
         )  # fmt: skip
         return b.json(today)
 
@@ -690,6 +702,30 @@ def budget(today: date | None = None) -> dict:
         "unbudgeted": [{"category_id": 12, "category": "Uncategorized", "kind": "other", "spent_cents": _cents(38)}],
         "safe_to_spend": {"cents": flexible_left - _cents(38), "days_left": (next_month - today).days},
         "forecast": forecast.summary(lines),
+        "moved": [
+            {
+                "id": "d-rent",
+                "date": (month_start - timedelta(days=4)).isoformat(),
+                "merchant": "Maple Court Apartments",
+                "category": "Rent",
+                "category_id": ids["Rent"],
+                "amount_cents": -_cents(2850),
+                "counts_toward": month_start.isoformat(),
+                "by_hand": False,
+                "into": True,
+            },
+            {
+                "id": "d-power",
+                "date": (month_start + timedelta(days=1)).isoformat(),
+                "merchant": "City Power & Light",
+                "category": "Utilities",
+                "category_id": ids["Utilities"],
+                "amount_cents": -_cents(138.20),
+                "counts_toward": month(-1).isoformat(),
+                "by_hand": False,
+                "into": False,
+            },
+        ],
         "savings_rate": history[-1],
         "savings_history": history,
         "emergency": {
