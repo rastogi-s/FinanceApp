@@ -4,7 +4,8 @@ Two kinds of spending, projected differently.
 
 Charges that come once a month (the same merchant once in each of at least 2 of the last 3 full months: rent, a
 phone bill, a gym) are expected once more if they haven't come yet, at their usual amount. Once one has come it's
-just part of what's spent. One that is more than a week past its usual day is taken as skipped.
+just part of what's spent. One that is more than a week past its usual day is taken as skipped. Each charge is
+in the month it counts toward (covers.py): rent paid on Oct 28 is November's, already paid on November 1st.
 
 Everything else follows a daily pace: what this month's pace says, leaning on the category's usual month early on
 and more on this month as it goes (half and half by mid-month). A single big purchase (over a fifth of the
@@ -151,12 +152,16 @@ def for_lines(ledger, months: list[date], month: date, today: date, lines: list[
     charges: dict[int, dict[date, list[tuple[str, int, int]]]] = defaultdict(lambda: defaultdict(list))
     names: dict[str, str] = {}
     for t in ledger.txns:
-        if t.category_id not in wanted or t.date < since or t.amount_cents >= 0 or not ledger.is_spending(t):
+        if t.category_id not in wanted or t.amount_cents >= 0 or not ledger.is_spending(t):
+            continue
+        m = ledger.month_of(t)
+        if m < since:
             continue
         key = normalize_merchant(t.merchant or t.description or "")
         names.setdefault(key, t.merchant or t.description or "")
-        m = t.date.replace(day=1)
-        charges[t.category_id][m].append((key, -t.amount_cents, t.date.day))
+        # A bill paid ahead was ready on the month's first day; one paid just after its month, on its last.
+        day = t.date.day if m == t.date.replace(day=1) else (1 if m > t.date else days_in(m))
+        charges[t.category_id][m].append((key, -t.amount_cents, day))
     for line in lines:
         line["forecast"] = project(
             kind=line["kind"],

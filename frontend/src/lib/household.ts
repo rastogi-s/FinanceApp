@@ -18,6 +18,9 @@ export type Transaction = {
   pending?: boolean;
   needs_review?: boolean;
   by_hand?: boolean;
+  counts_toward?: string | null; // the budget month (yyyy-mm-01) when it isn't the month it was paid in
+  counts_by_hand?: boolean;
+  bill?: boolean; // money spent, which can count toward the month before or after
 };
 export type Holding = {
   symbol: string;

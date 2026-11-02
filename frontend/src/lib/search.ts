@@ -141,6 +141,8 @@ export function toQuery(f: Filters, offset = 0): string {
   const { start, end } = dates(f);
   if (start) p.set("start", start);
   if (end) p.set("end", end);
+  // A whole month of a category is a Budget row: bills count in the month they're for (rent paid ahead), as there.
+  if (f.categories.length && (f.range === "month" || f.range === "last-month")) p.set("budget", "true");
   if (f.sort) p.set("sort", f.sort);
   if (offset) p.set("offset", String(offset));
   return p.toString();

@@ -5,14 +5,14 @@ totals for everything that matches (not only the page shown). Transfers between 
 total, the same as everywhere else.
 """
 
-from datetime import date
+from datetime import date, timedelta
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.orm import Session as DbSession
 
-from financeapp import household
+from financeapp import budget, covers, household
 from financeapp.models import Category, Transaction
 
 PAGE = 100
@@ -33,6 +33,8 @@ class Filters(BaseModel):
     start: date | None = None
     end: date | None = None
     sort: Sort = "newest"
+    # Dates go by the month each bill counts toward (covers.py), so a list opened from Budget adds up to its row.
+    budget: bool = False
     offset: int = Field(0, ge=0, le=100_000)
 
     @model_validator(mode="after")
@@ -69,6 +71,34 @@ def _sample_key(sort: str):
     if sort == "merchant":
         return lambda r: r["merchant"].lower(), False
     return lambda r: r["date"], True
+
+
+def budget_range(db: DbSession, where: list, months: covers.Covers, f: Filters, dated):
+    """The date range, with each bill dated by the month it counts toward: rent paid on Oct 28 for November is in
+    November (as if paid on its first day), a utility paid on Nov 2 for October is in October (its last day)."""
+    wide = []
+    if f.start:
+        wide.append(Transaction.date >= f.start - timedelta(days=covers.LOOKAROUND_DAYS))
+    if f.end:
+        wide.append(Transaction.date <= f.end + timedelta(days=covers.LOOKAROUND_DAYS))
+    moved_in, moved_out = [], []
+    for t in db.scalars(select(Transaction).where(*where, *wide, Transaction.amount_cents < 0)):
+        posted = covers.month_start(t.date)
+        m = months.month_of(t)
+        if m == posted:
+            continue
+        c = months.categories.get(t.category_id) if t.category_id else None
+        if t.transfer_group_id is not None or (c is not None and c.kind in ("transfer", "income")):
+            continue
+        on = m if m > posted else covers.add_months(m, 1) - timedelta(days=1)
+        inside = (f.start is None or on >= f.start) and (f.end is None or on <= f.end)
+        was = (f.start is None or t.date >= f.start) and (f.end is None or t.date <= f.end)
+        if inside and not was:
+            moved_in.append(t.id)
+        elif was and not inside:
+            moved_out.append(t.id)
+    rule = and_(dated, Transaction.id.not_in(moved_out)) if moved_out else dated
+    return or_(rule, Transaction.id.in_(moved_in)) if moved_in else rule
 
 
 def search(db: DbSession, f: Filters) -> dict:
@@ -112,10 +142,16 @@ def search(db: DbSession, f: Filters) -> dict:
         where.append(func.abs(Transaction.amount_cents) >= f.min_cents)
     if f.max_cents is not None:
         where.append(func.abs(Transaction.amount_cents) <= f.max_cents)
+    months = covers.Covers(db, list(names), budget.today(), categories)
+    in_range = []
     if f.start:
-        where.append(Transaction.date >= f.start)
+        in_range.append(Transaction.date >= f.start)
     if f.end:
-        where.append(Transaction.date <= f.end)
+        in_range.append(Transaction.date <= f.end)
+    if in_range and f.budget:
+        where.append(budget_range(db, where, months, f, and_(*in_range)))
+    else:
+        where += in_range
 
     counted = ~is_transfer
     count, out_cents, in_cents, first, last = db.execute(
@@ -144,6 +180,8 @@ def search(db: DbSession, f: Filters) -> dict:
     def row(t: Transaction) -> dict:
         c = categories.get(t.category_id) if t.category_id else None
         spending = t.transfer_group_id is None and (c is None or c.kind not in ("transfer", "income"))
+        posted = covers.month_start(t.date)
+        counts = months.month_of(t) if spending else posted
         return {
             "id": str(t.id),
             "date": t.date.isoformat(),
@@ -156,6 +194,10 @@ def search(db: DbSession, f: Filters) -> dict:
             "pending": t.pending,
             "needs_review": t.category_source == "none" and spending,
             "by_hand": t.category_source == "user",
+            # The month it counts toward in the budget, when that isn't the month it was paid in.
+            "counts_toward": counts.isoformat() if counts != posted else None,
+            "counts_by_hand": t.budget_month is not None,
+            "bill": spending and t.amount_cents < 0,  # money out that could count toward another month
         }
 
     return {
@@ -198,7 +240,16 @@ def search_sample(rows: list[dict], categories: list[dict], f: Filters) -> dict:
             and (f.end is None or r["date"] <= f.end.isoformat())
         )
 
-    hits = [dict(r, category_id=by_name.get(r["category"])) for r in rows if keep(r)]
+    hits = [
+        {
+            "counts_toward": None,
+            **r,
+            "category_id": by_name.get(r["category"]),
+            "bill": not r.get("transfer") and r["amount_cents"] < 0,
+        }
+        for r in rows
+        if keep(r)
+    ]
     hits.sort(key=lambda r: r["date"], reverse=True)
     key, reverse = _sample_key(f.sort)
     hits.sort(key=key, reverse=reverse)

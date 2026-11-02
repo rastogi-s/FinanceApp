@@ -1,5 +1,16 @@
 [
   {
+    "version": "0.63.0",
+    "title": "Bills counted by the month they're for",
+    "features": [
+      {
+        "id": "budget-month",
+        "title": "Rent paid ahead counts in the month it's for",
+        "body": "Rent you pay around the 28th is next month's rent, so it now counts in next month's budget, savings rate and month-end forecast. Utilities count toward the month they're for too: the app learns when you usually pay each biller, even when the billing cycle moves the day around, so a bill you pay on the 2nd instead of the 29th still counts once, in the right month. Budget lists the bills it moved, and Spending marks each one with the month it counts in. If the app gets one wrong, tap it in Spending and pick the month before or after. Paying a bill a few days before its usual day no longer looks like a missed bill."
+      }
+    ]
+  },
+  {
     "version": "0.62.0",
     "title": "CD terms from the receipt",
     "features": [

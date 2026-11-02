@@ -107,7 +107,7 @@ def test_budget_page_shows_the_forecast(client, home, fixed_today):
     for m in range(5, 10):
         rows += [
             (f"2026-{m:02}-03", "Landlord", -2000, "Rent & mortgage"),
-            (f"2026-{m:02}-25", "Verizon", -80, "Rent & mortgage"),
+            (f"2026-{m:02}-22", "Verizon", -80, "Rent & mortgage"),
             (f"2026-{m:02}-12", "Whole Foods", -200, "Groceries"),
             (f"2026-{m:02}-19", "Whole Foods", -200, "Groceries"),
         ]
@@ -118,7 +118,7 @@ def test_budget_page_shows_the_forecast(client, home, fixed_today):
     add_transactions(client, rows)
     b = client.get("/api/budget").json()
     rent, groceries = line(b, "Rent & mortgage"), line(b, "Groceries")
-    assert rent["forecast"]["due"] == [{"merchant": "Verizon", "cents": 8_000, "day": 25}]
+    assert rent["forecast"]["due"] == [{"merchant": "Verizon", "cents": 8_000, "day": 22}]
     assert rent["forecast"]["projected_cents"] == 208_000 and rent["forecast"]["status"] == "on_track"
     assert groceries["limit_cents"] == 44_000 and groceries["forecast"]["status"] == "heading_over"
     assert b["forecast"]["heading_over"] == [groceries["category_id"]] and b["forecast"]["days_left"] == 11

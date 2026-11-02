@@ -85,6 +85,8 @@ export type BudgetState = {
   unbudgeted: { category_id: number | null; category: string; kind: string; spent_cents: number }[];
   safe_to_spend: { cents: number; days_left: number } | null;
   forecast: { projected_cents: number; limit_cents: number; heading_over: number[]; days_left: number } | null;
+  /** Bills counted in a month other than the one they were paid in: rent paid ahead, a bill paid just after its month. */
+  moved?: MovedBill[];
   savings_rate: SavingsMonth | null;
   savings_history: SavingsMonth[];
   emergency: {
@@ -148,4 +150,17 @@ export type StubRequest = {
   cents: number;
   before_cents: number | null;
   reason: "changed" | "new_year" | "bonus";
+};
+
+export type MovedBill = {
+  id: string;
+  date: string;
+  merchant: string;
+  category: string;
+  category_id: number | null;
+  amount_cents: number;
+  counts_toward: string; // yyyy-mm-01
+  by_hand: boolean;
+  /** Counted in this month, paid in another; otherwise paid this month for another. */
+  into: boolean;
 };

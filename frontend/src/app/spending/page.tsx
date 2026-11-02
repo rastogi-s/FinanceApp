@@ -429,6 +429,8 @@ const categoryName = (id: string, categories: Category[] | null) =>
   id === "none" ? "Uncategorized" : (categories?.find((x) => String(x.id) === id)?.name ?? "Category");
 
 const monthLong = new Intl.DateTimeFormat("en-US", { month: "long", year: "numeric" });
+const monthName = new Intl.DateTimeFormat("en-US", { month: "short" });
+const dayShort = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" });
 
 /**
  * One category for a month: the total the way Budget counts it (refunds taken off, transfers between your own
@@ -461,6 +463,17 @@ function CategoryMonth({ f, r, name }: { f: Filters; r: Results | null; name: st
             )}
           </p>
         </div>
+        {r.transactions.some((t) => t.counts_toward) && (
+          <p className="text-xs text-muted-foreground">
+            Like Budget, bills count in the month they&apos;re for:{" "}
+            {r.transactions
+              .filter((t) => t.counts_toward)
+              .slice(0, 3)
+              .map((t) => `${t.merchant}, paid ${dayShort.format(new Date(`${t.date}T12:00:00`))}`)
+              .join("; ")}
+            .
+          </p>
+        )}
         {top.length > 1 && net > 0 && (
           <div>
             <p className="mb-2 text-xs font-medium tracking-wide text-muted-foreground uppercase">Most of it went to</p>
@@ -546,6 +559,7 @@ function Row({ t, onPick, showDate }: { t: Transaction; onPick: () => void; show
             {showDate && `${short.format(new Date(t.date))} · `}
             {t.account}
             {t.pending && " · pending"}
+            {t.counts_toward && ` · for ${monthName.format(new Date(`${t.counts_toward}T12:00:00`))}`}
           </p>
         </div>
         <div className="flex flex-col items-end gap-1">

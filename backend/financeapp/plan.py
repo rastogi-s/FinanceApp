@@ -596,7 +596,7 @@ def recurring(ledger: budget.Ledger, on: date) -> tuple[list[dict], list[dict]]:
     for key, txns in charges.items():
         by_month: dict[date, int] = defaultdict(int)
         for t in txns:
-            by_month[budget.month_start(t.date)] -= t.amount_cents
+            by_month[ledger.month_of(t)] -= t.amount_cents
         if len(by_month) < SUBSCRIPTION_MIN_MONTHS or not key:
             continue
         latest = max(txns, key=lambda t: t.date)
