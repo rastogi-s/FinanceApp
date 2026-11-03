@@ -5,9 +5,17 @@ Credit card and loan balances are positive amounts owed. Only the last 4 digits 
 """
 
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from typing import Protocol
+
+
+def last_market_day(on: date) -> date:
+    """The weekday before `on`: holdings priced then are as new as a brokerage gets (holidays aside)."""
+    d = on - timedelta(days=1)
+    while d.weekday() >= 5:
+        d -= timedelta(days=1)
+    return d
 
 
 class ConnectorError(Exception):

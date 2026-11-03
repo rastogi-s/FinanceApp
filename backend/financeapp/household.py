@@ -25,7 +25,7 @@ from financeapp.models import (
     Transaction,
     now,
 )
-from financeapp.sync import today
+from financeapp.sync import holdings_freshness, today
 
 HISTORY_DAYS = 90
 TRANSACTION_DAYS = 62  # always reaches back to the start of last month
@@ -300,6 +300,12 @@ def build_with_plan(db: DbSession) -> tuple[dict, dict | None]:
                 {"id": c.id, "institution": c.institution, "error": c.last_error}
                 for c in connections
                 if c.status == "stale"
+            ],
+            # Brokerage logins whose holdings stopped moving, so a recent buy may be missing (connectors/plaid.py).
+            "holdings_behind": [
+                {"id": c.id, "institution": c.institution, "as_of": f["as_of"]}
+                for c in connections
+                if c.status != "stale" and (f := holdings_freshness(c, end)) and f["behind"]
             ],
             "last_sync_ok": last_run.ok if last_run else None,
             # Uploaded or typed-in accounts whose next statement should be out (reminders.py).

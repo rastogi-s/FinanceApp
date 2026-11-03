@@ -467,10 +467,11 @@ function ByType({
   onUpload: (accountId?: number) => void;
 }) {
   const stale = data.connections.filter((c) => c.status === "stale");
+  const behind = data.connections.filter((c) => c.status !== "stale" && c.holdings?.behind);
   const rows = data.connections.flatMap((c) => c.accounts.map((a) => ({ a, c })));
   return (
     <>
-      {stale.length > 0 && (
+      {stale.length + behind.length > 0 && (
         <Card className="border-warning/40">
           <CardHeader>
             <CardTitle>Needs you</CardTitle>
@@ -478,6 +479,9 @@ function ByType({
           <div className="grid grid-cols-1 gap-3 pt-3 pb-5">
             {stale.map((c) => (
               <StaleNotice key={c.id} connection={c} onRelink={() => onRelink(c)} onUpload={() => onUpload()} />
+            ))}
+            {behind.map((c) => (
+              <HoldingsBehindNotice key={c.id} connection={c} onRelink={() => onRelink(c)} />
             ))}
           </div>
         </Card>
@@ -641,6 +645,49 @@ function StaleNotice({
   );
 }
 
+const shortDay = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+const shortWhen = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" });
+
+/** A brokerage whose holdings stopped moving: a buy or sale from the last few days may be missing. */
+function HoldingsBehindNotice({
+  connection: c,
+  titled,
+  onRelink,
+}: {
+  connection: Connection;
+  titled?: boolean;
+  onRelink: () => void;
+}) {
+  const h = c.holdings;
+  if (!h) return null;
+  const asked = h.refresh_at ? shortWhen.format(new Date(h.refresh_at)) : null;
+  const failing = h.plaid_failed_at && (!h.plaid_pulled_at || h.plaid_failed_at > h.plaid_pulled_at);
+  return (
+    <div className="mx-5 rounded-xl bg-warning/10 p-3.5 text-sm">
+      <p className="flex items-start gap-2 font-medium text-warning">
+        <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden />{" "}
+        <span>
+          {titled !== false && <>{c.institution}: </>}
+          Holdings are from {shortDay.format(new Date(h.as_of))}, so a recent buy or sale may be missing.
+        </span>
+      </p>
+      <p className="mt-1.5 pl-6 text-muted-foreground">
+        {failing
+          ? `Plaid's own tries to read your holdings from ${c.institution} have been failing. `
+          : `Plaid hasn't brought newer holdings from ${c.institution}. `}
+        {h.refresh_result === "ok" && asked && `The app asked it to fetch them again on ${asked}. `}
+        {h.refresh_result === "unavailable" && `${c.institution} doesn't let the app ask for a fresh copy. `}
+        Reconnecting (signing in to {c.institution} again) usually gets them moving.
+      </p>
+      <div className="mt-3 pl-6">
+        <Button size="sm" onClick={onRelink}>
+          Reconnect
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 function ConnectionCard({
   connection: c,
   kinds,
@@ -692,6 +739,11 @@ function ConnectionCard({
       {c.status === "stale" && (
         <div className="mt-3">
           <StaleNotice connection={c} titled={false} onRelink={onRelink} onUpload={() => onUpload()} />
+        </div>
+      )}
+      {c.status !== "stale" && c.holdings?.behind && (
+        <div className="mt-3">
+          <HoldingsBehindNotice connection={c} titled={false} onRelink={onRelink} />
         </div>
       )}
       <ul className="divide-y pt-2 pb-1">

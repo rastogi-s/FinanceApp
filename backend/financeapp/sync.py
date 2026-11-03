@@ -26,6 +26,7 @@ from financeapp.connectors.base import (
     HoldingData,
     InvestmentTransactionData,
     TransactionData,
+    last_market_day,
 )
 from financeapp.db import Database
 from financeapp.models import (
@@ -279,6 +280,24 @@ def save_fetch(db: DbSession, connection: Connection, result: FetchResult, on: d
         "new_transactions": len(added),
         "removed": removed,
         "new_investment_activity": activity,
+    }
+
+
+def holdings_freshness(c: Connection, today: date) -> dict | None:
+    """For a brokerage login: how new its holdings are, and whether they've fallen behind (two market days or more,
+    so a buy from days ago may be missing), with what the sync did about it (connectors/plaid.py)."""
+    state = c.state or {}
+    if c.provider != "plaid" or not state.get("holdings_as_of"):
+        return None
+    as_of = date.fromisoformat(state["holdings_as_of"])
+    refresh = state.get("refresh") or {}
+    return {
+        "as_of": as_of.isoformat(),
+        "behind": as_of < last_market_day(last_market_day(today)),
+        "plaid_pulled_at": state.get("plaid_pulled_at"),
+        "plaid_failed_at": state.get("plaid_failed_at"),
+        "refresh_at": refresh.get("at"),
+        "refresh_result": refresh.get("result"),  # ok | unavailable | failed
     }
 
 

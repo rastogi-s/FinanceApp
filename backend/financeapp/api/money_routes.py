@@ -139,6 +139,7 @@ def connection_json(db: DbSession, c: Connection) -> dict:
         "last_error": c.last_error,
         "created_at": c.created_at.isoformat(),
         "accounts": accounts,
+        "holdings": sync.holdings_freshness(c, sync.today()),
     }
 
 
