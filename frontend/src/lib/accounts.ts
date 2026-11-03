@@ -169,6 +169,19 @@ export type Connection = {
   last_synced_at: string | null;
   last_error: string | null;
   accounts: Account[];
+  /** A brokerage login's holdings: how new they are and what the sync did when they fell behind. */
+  holdings: HoldingsFreshness | null;
+};
+export type HoldingsFreshness = {
+  /** The day the holdings are from (the older of the brokerage's prices and Plaid's last pull). */
+  as_of: string;
+  /** Two market days or more old, so a recent buy or sale may be missing. */
+  behind: boolean;
+  plaid_pulled_at: string | null;
+  plaid_failed_at: string | null;
+  /** When the sync last asked Plaid to fetch fresh holdings, and how that went. */
+  refresh_at: string | null;
+  refresh_result: "ok" | "unavailable" | "failed" | null;
 };
 export type ConnectionsData = {
   connections: Connection[];

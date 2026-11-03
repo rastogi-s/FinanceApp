@@ -138,6 +138,8 @@ type Item = {
   wide?: boolean;
 };
 
+const behindDay = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+
 const TONE = {
   accent: "bg-accent text-accent-foreground",
   warning: "bg-warning/15 text-warning",
@@ -163,6 +165,21 @@ export function NeedsYou({ h, className }: { h: LinkedHousehold; className?: str
       tone: "warning",
       title: `${s.institution} stopped syncing`,
       detail: "Reconnect it or upload a file",
+      actions: (
+        <Button size="sm" variant="secondary" asChild>
+          <Link href="/settings/accounts">Fix</Link>
+        </Button>
+      ),
+    });
+  }
+
+  for (const s of h.health?.holdings_behind ?? []) {
+    items.push({
+      key: `behind-${s.id}`,
+      icon: <AlertTriangle />,
+      tone: "warning",
+      title: `${s.institution} holdings are from ${behindDay.format(new Date(s.as_of))}`,
+      detail: "A recent buy or sale may be missing",
       actions: (
         <Button size="sm" variant="secondary" asChild>
           <Link href="/settings/accounts">Fix</Link>

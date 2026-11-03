@@ -1,5 +1,16 @@
 [
   {
+    "version": "0.64.0",
+    "title": "Holdings that stopped updating get a fresh pull",
+    "features": [
+      {
+        "id": "holdings-refresh",
+        "title": "A buy that never showed up gets pulled in",
+        "body": "Plaid reads your holdings from each brokerage on its own once or more a day, but for some brokerages that quietly stops working and a buy or sale never shows up. Now each sync checks how new the holdings really are, from the brokerage's own prices and when Plaid last reached it. When they're older than the last market day, the app asks Plaid to fetch them again right away (at most twice a day per login). If they're still two market days behind after that, Home's Needs you and Settings, Accounts tell you which brokerage and the date the holdings are from, with a Reconnect button, since signing in again usually gets them moving."
+      }
+    ]
+  },
+  {
     "version": "0.63.0",
     "title": "Bills counted by the month they're for",
     "features": [

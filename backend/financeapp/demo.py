@@ -506,6 +506,7 @@ def connections() -> dict:
             "last_error": None,
             "created_at": synced,
             "accounts": accounts,
+            "holdings": None,
         }
 
     by_account = _by_account()

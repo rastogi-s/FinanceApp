@@ -110,6 +110,8 @@ export type LinkedHousehold = {
   } | null;
   health?: {
     stale: { id: number; institution: string; error: string | null }[];
+    /** Brokerages whose holdings are two market days old or more (a recent buy may be missing). */
+    holdings_behind?: { id: number; institution: string; as_of: string }[];
     last_sync_ok: boolean | null;
     uploads?: UploadDue[];
     maturing?: Maturing[];

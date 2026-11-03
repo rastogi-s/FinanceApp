@@ -6,7 +6,7 @@ runs inside the app and its Content-Security-Policy stays closed. The app isn't 
 webhooks it asks for new transactions on every sync (/transactions/sync with a saved cursor).
 """
 
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 import httpx
@@ -24,6 +24,7 @@ from financeapp.connectors.base import (
     asset_class_for,
     cents,
     last4,
+    last_market_day,
 )
 
 HOSTS = {"sandbox": "https://sandbox.plaid.com", "production": "https://production.plaid.com"}
@@ -47,6 +48,12 @@ NOT_APPLICABLE = {
 }
 INVESTMENT_HISTORY_DAYS = 730  # Plaid keeps up to 24 months of brokerage activity
 INVESTMENT_OVERLAP_DAYS = 31  # look back again each time: activity can post late or be corrected
+# Plaid pulls holdings from the brokerage on its own once or more a day, but for some brokerages that pull quietly
+# stops working (or brings back the same old positions), and a buy never shows up. When the holdings are older than
+# the last market day, the sync asks Plaid for a fresh pull (/investments/refresh), at most this often per login:
+REFRESH_EVERY = timedelta(hours=12)
+REFRESH_RETRY_UNAVAILABLE = timedelta(days=7)  # not offered for this brokerage or this Plaid account: ask weekly
+REFRESH_UNAVAILABLE = NOT_APPLICABLE | {"PRODUCT_NOT_READY", "INVALID_REQUEST", "INVALID_FIELD"}
 TYPES = {
     "depository": "depository",
     "credit": "credit",
@@ -69,6 +76,14 @@ def mcc(value: str | None) -> str | None:
     return code if len(code) == 4 and code.isdigit() else None
 
 
+def moment(value: str | None) -> datetime | None:
+    try:
+        t = datetime.fromisoformat(value.replace("Z", "+00:00")) if value else None
+    except ValueError:
+        return None
+    return t.replace(tzinfo=UTC) if t and t.tzinfo is None else t
+
+
 class Plaid:
     provider = "plaid"
 
@@ -79,10 +94,14 @@ class Plaid:
         self.secret = secret
         self.base = HOSTS[env]
         self.http = http or httpx.Client(timeout=30)
+        self._items: dict[str, dict] = {}
 
-    def _post(self, path: str, body: dict) -> dict:
+    def _post(self, path: str, body: dict, timeout: float | None = None) -> dict:
+        extra = {"timeout": timeout} if timeout else {}
         try:
-            r = self.http.post(self.base + path, json={"client_id": self.client_id, "secret": self.secret, **body})
+            r = self.http.post(
+                self.base + path, json={"client_id": self.client_id, "secret": self.secret, **body}, **extra
+            )
         except httpx.HTTPError as e:
             raise ConnectorError(f"Couldn't reach Plaid ({type(e).__name__})", "NETWORK") from None
         data = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
@@ -196,7 +215,12 @@ class Plaid:
             )
 
         if any(t == "investment" for t in types.values()):
-            result.holdings = self._holdings(token)
+            self._pull_status(token, result.state)
+            result.holdings = self._holdings(token, result.state)
+            if result.holdings is not None and self._refresh_holdings(token, result.state):
+                self._items.pop(token, None)
+                self._pull_status(token, result.state)
+                result.holdings = self._holdings(token, result.state)
             self._investment_transactions(token, result)
 
         if any(t in ("depository", "credit", "loan") for t in types.values()):
@@ -213,10 +237,10 @@ class Plaid:
         """Card terms and statements from Liabilities, only where the login already has that product: asking an Item
         without it would add it, and Plaid bills Liabilities per login. Nothing else depends on it, so a problem
         here never stops the sync."""
+        item = self._item(token).get("item") or {}
+        if "liabilities" not in (item.get("products") or []) + (item.get("billed_products") or []):
+            return []
         try:
-            item = self._post("/item/get", {"access_token": token}).get("item") or {}
-            if "liabilities" not in (item.get("products") or []) + (item.get("billed_products") or []):
-                return []
             data = self._post("/liabilities/get", {"access_token": token})
         except ConnectorError:
             return []
@@ -244,7 +268,7 @@ class Plaid:
             )
         return out
 
-    def _holdings(self, token: str) -> list[HoldingData] | None:
+    def _holdings(self, token: str, state: dict | None = None) -> list[HoldingData] | None:
         try:
             data = self._post("/investments/holdings/get", {"access_token": token})
         except ConnectorError as e:
@@ -252,6 +276,22 @@ class Plaid:
                 return None
             raise
         securities = {s["security_id"]: s for s in data.get("securities") or []}
+        if state is not None:
+            # How new these holdings are: the newest price the brokerage itself put on them, and when Plaid last
+            # pulled from the brokerage. The older of the two is what the app can vouch for.
+            # (Cash is priced at $1 every day whether or not anything else moved, so it says nothing.)
+            priced = [
+                d
+                for h in data.get("holdings") or []
+                if not securities.get(h.get("security_id"), {}).get("is_cash_equivalent")
+                and (d := day(h.get("institution_price_as_of")))
+            ]
+            pulled = moment(state.get("plaid_pulled_at"))
+            dates = [d for d in (max(priced) if priced else None, pulled.date() if pulled else None) if d]
+            if dates:
+                state["holdings_as_of"] = min(dates).isoformat()
+            else:
+                state.pop("holdings_as_of", None)
         out = []
         for h in data.get("holdings") or []:
             s = securities.get(h.get("security_id"), {})
@@ -287,6 +327,49 @@ class Plaid:
                 )
             )
         return out
+
+    def _item(self, token: str) -> dict:
+        """/item/get, asked once per sync; {} when it can't be had (nothing that uses it is essential)."""
+        if token not in self._items:
+            try:
+                self._items[token] = self._post("/item/get", {"access_token": token})
+            except ConnectorError:
+                self._items[token] = {}
+        return self._items[token]
+
+    def _pull_status(self, token: str, state: dict) -> None:
+        """When Plaid last pulled this login's investments from the brokerage, and when a pull last failed."""
+        pulls = (self._item(token).get("status") or {}).get("investments") or {}
+        for key, field in (("plaid_pulled_at", "last_successful_update"), ("plaid_failed_at", "last_failed_update")):
+            if moment(pulls.get(field)):
+                state[key] = pulls[field]
+            else:
+                state.pop(key, None)
+
+    def _refresh_holdings(self, token: str, state: dict, at: datetime | None = None) -> bool:
+        """Asks Plaid to pull this login's holdings from the brokerage right now, when what it has is older than the
+        last market day. True when it did, so the holdings are fetched again. Never fails the sync: a brokerage or
+        Plaid account without the option is remembered and asked again a week later."""
+        at = at or datetime.now(UTC)
+        as_of = day(state.get("holdings_as_of"))
+        pulled, failed = moment(state.get("plaid_pulled_at")), moment(state.get("plaid_failed_at"))
+        old = as_of is not None and as_of < last_market_day(at.date())
+        failing = failed is not None and (pulled is None or failed > pulled)  # Plaid's own last pull didn't work
+        if not (old or failing):
+            return False
+        last = state.get("refresh") or {}
+        tried = moment(last.get("at"))
+        wait = REFRESH_RETRY_UNAVAILABLE if last.get("result") == "unavailable" else REFRESH_EVERY
+        if tried and at - tried < wait:
+            return False
+        try:
+            self._post("/investments/refresh", {"access_token": token}, timeout=90)
+        except ConnectorError as e:
+            outcome = "unavailable" if e.code in REFRESH_UNAVAILABLE else "failed"
+            state["refresh"] = {"at": at.isoformat(), "result": outcome, "code": e.code}
+            return False
+        state["refresh"] = {"at": at.isoformat(), "result": "ok"}
+        return True
 
     def _investment_transactions(self, token: str, result: FetchResult, today: date | None = None) -> None:
         """Dividends, interest, buys and sells: the full 24 months the first time, then the last month again."""
