@@ -1,5 +1,16 @@
 [
   {
+    "version": "0.65.0",
+    "title": "Find a holding from the top of Portfolio",
+    "features": [
+      {
+        "id": "portfolio-search-top",
+        "title": "Search for a ticker without scrolling",
+        "body": "The holdings search now sits right under Invested at the top of Portfolio, so you don't have to scroll past the other cards to find a ticker. Start typing and the matching holdings come up right below it, with the same sort and account filters as before. Clear the search and the full holdings list goes back to its place at the bottom of the page."
+      }
+    ]
+  },
+  {
     "version": "0.64.0",
     "title": "Holdings that stopped updating get a fresh pull",
     "features": [
