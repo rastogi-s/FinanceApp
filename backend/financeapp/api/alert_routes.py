@@ -146,7 +146,7 @@ def describe(r: AlertRule, categories: dict[int, str], goals: dict[int, str] | N
     p = r.params
     if r.kind == "goal":
         name = "Any goal" if p.get("goal_id") is None else (goals or {}).get(p["goal_id"], "A goal you removed")
-        return f"{name} reaches 25%, 50%, 75% and 100%"
+        return f"{name} reaches 25%, 50%, 75% and 100%, or goes down"
     if r.kind == "price":
         if "above" in p:
             return f"{p['symbol']} goes above {alerts.money(p['above'])}"

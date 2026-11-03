@@ -23,6 +23,11 @@ export type Goal = {
   needed_cents: number | null;
   /** The emergency fund with no accounts picked: it counts the cash no other goal has. */
   auto: boolean;
+  /** Down this much over the last 30 days (0 when it isn't), because money left these accounts. */
+  down_cents: number;
+  down_accounts: string[];
+  down_since: string;
+  was_percent: number | null;
   funding: Funding[];
   monthly_cents: number | null;
   monthly_source: "typed" | "savings" | "needed" | "done" | null;

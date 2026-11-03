@@ -388,7 +388,7 @@ function RuleForm({
       {kind === "goal" && (
         <Field
           id="rule-goal"
-          label="When this reaches 25%, 50%, 75% and 100%"
+          label="When this reaches 25%, 50%, 75% and 100%, or goes down"
           hint="Checked after every sync. Only the furthest step reached sends anything, and never for a change you make yourself."
           error={error}
         >

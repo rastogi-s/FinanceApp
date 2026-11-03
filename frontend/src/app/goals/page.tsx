@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { Suspense, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { ChevronRight, Flag, Plus, Target } from "lucide-react";
+import { ChevronRight, Flag, Plus, Target, TrendingDown } from "lucide-react";
 import { GoalSheet } from "@/components/goal-sheet";
 import { Money } from "@/components/money";
 import { BackLink, Notice, Wide } from "@/components/page";
@@ -223,6 +223,12 @@ function status(g: Goal): { text: React.ReactNode; badge?: { label: string; vari
   }
 }
 
+const dayMonth = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+
+function listOf(names: string[]): string {
+  return names.length < 2 ? (names[0] ?? "") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+}
+
 function GoalCard({ g, onOpen }: { g: Goal; onOpen: () => void }) {
   const Icon = ICONS[g.icon] ?? Target;
   const color = COLORS[g.color] ?? COLORS.teal;
@@ -291,6 +297,15 @@ function GoalCard({ g, onOpen }: { g: Goal; onOpen: () => void }) {
             </>
           )}
         </p>
+        {g.down_cents > 0 && (
+          <p className="mt-2 flex items-start gap-1.5 text-xs text-warning">
+            <TrendingDown className="mt-px size-3.5 shrink-0" aria-hidden />
+            <span>
+              Down <Money cents={g.down_cents} /> since {dayMonth.format(new Date(g.down_since))}
+              {g.down_accounts.length > 0 && <>: money left {listOf(g.down_accounts)}</>}. Put it back, or change the goal if your plans changed.
+            </span>
+          </p>
+        )}
       </button>
     </Card>
   );

@@ -16,11 +16,14 @@ Rules and their params
                  (look-through, when the fund's holdings are known)
   goal           {"goal_id": 3}: a savings goal reaches 25%, 50%, 75% and 100% of its target (goals.py); goal_id
                  null means every goal. Only the furthest milestone reached sends anything, and a goal changed in
-                 the app (a new target, an account added) never sends one for the change itself.
+                 the app (a new target, an account added) never sends one for the change itself. The same rule
+                 says when a goal goes down 5 points or more of its target in 30 days, because money left an
+                 account set aside for it.
 
 No repeats. A rule fires when its condition becomes true and re-arms only after it has clearly stopped being true:
 a price back across its line by 1%, a company back under its limit by a point, a dip back within 3 points of
-the 52-week high's line, a goal back 10 points under a milestone. A budget alert can fire once a
+the 52-week high's line, a goal back 10 points under a milestone, a goal that went down back within 2 points of
+where it was 30 days before. A budget alert can fire once a
 month (a heads-up once a month per category) and a daily move once a day. Every alert carries a dedup key that
 the database keeps unique, so even two copies of the app checking at once can't save or send the same alert twice.
 
@@ -42,6 +45,7 @@ amounts of the household's own money.
 """
 
 import logging
+import math
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
 from urllib.parse import urlencode
@@ -60,6 +64,8 @@ log = logging.getLogger("financeapp")
 REARM_PRICE = 0.01  # back across the line by 1%
 REARM_POINTS = 1.0  # back under a concentration limit by 1 point
 REARM_GOAL = 10.0  # back 10 points under a goal milestone
+GOAL_DOWN = 5.0  # a goal down 5 points of its target in 30 days
+REARM_GOAL_DOWN = 2.0  # back within 2 points
 REARM_DIP = 3.0  # back within 7% of the 52-week high, after a "10% under" alert
 DIP_MAX = 90  # the deepest "under its 52-week high" step
 TREND_DAYS = 7  # a dip is only judged on a price and trend from the last week
@@ -282,7 +288,20 @@ def goal_hits(rule: AlertRule, goals: list[dict], silent: bool = False) -> list[
                 if g.get("projected_month"):
                     body += f" On pace for {date.fromisoformat(g['projected_month']).strftime('%B %Y')}."
             hits.append(Hit(key, pct >= m, pct < m - REARM_GOAL, title, body, quiet, f"/goals?goal={g['id']}"))
+        was = g.get("was_percent")
+        points = was - pct if was is not None else 0.0
+        where = and_list(g.get("down_accounts") or [])
+        hits.append(
+            Hit(f"{g['id']}:down", points >= GOAL_DOWN, points < REARM_GOAL_DOWN, f"{g['name']} went down",
+                f"It's {math.floor(pct)}% of the way now, from {math.floor(was or 0)}% a month ago."
+                + (f" Money left {where}, which is set aside for it." if where else ""),
+                silent, f"/goals?goal={g['id']}")
+        )  # fmt: skip
     return hits
+
+
+def and_list(names: list[str]) -> str:
+    return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1] if names else ""
 
 
 def settle_goals(db: DbSession, goals: list[dict]) -> None:
