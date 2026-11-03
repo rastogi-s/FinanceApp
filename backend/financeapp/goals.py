@@ -16,10 +16,16 @@ share of what the household actually saves a month (plan.py's measured savings):
 priority order, each up to what it needs; whatever is left goes to the goals with no date, three shares to a
 high-priority one, two to a medium and one to a low. The projected month is when that monthly amount, growing at
 the goal's rate, reaches the target.
+
+Going backwards. Money that leaves an account set aside for a goal (an emergency, a big bill paid from it) takes the
+goal down with it. Each goal says how much it's down over the last 30 days and which accounts the money left. That's
+worked out with the goal's accounts as they're set up today against their balances 30 days ago, so changing a goal
+in the app never reads as money leaving. A goal that drops 5 points or more of its target sends an alert
+(alerts.goal_hits).
 """
 
 import math
-from datetime import date
+from datetime import date, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
@@ -34,6 +40,8 @@ MILESTONES = (25, 50, 75, 100)
 ICONS = ("house", "car", "plane", "ring", "school", "baby", "heart", "gift", "laptop", "piggy", "shield", "star")
 COLORS = ("teal", "blue", "amber", "pink", "slate")
 PRIORITY = {1: "High", 2: "Medium", 3: "Low"}
+DOWN_DAYS = 30  # how far back "down" looks
+DOWN_MIN_CENTS = 100_00  # smaller dips (a fee, a rounding) aren't worth a line
 WEIGHT = {1: 3, 2: 2, 3: 1}  # how what's left is split between goals with no date
 # Ideas to start from on an empty Goals page; nothing is created until someone picks one and sets the amount.
 SUGGESTIONS = [
@@ -77,6 +85,22 @@ def latest_balances(db: DbSession, accounts: list[Account]) -> dict[int, int]:
     for a in accounts:
         b = db.scalar(select(Balance).where(Balance.account_id == a.id).order_by(Balance.date.desc()).limit(1))
         out[a.id] = max(b.current_cents, 0) if b else 0
+    return out
+
+
+def balances_on(db: DbSession, accounts: list[Account], day: date) -> dict[int, int]:
+    """Each account's balance as of a day (its latest on or before it); accounts with no balance that far back are
+    left out, so they count as unchanged."""
+    out = {}
+    for a in accounts:
+        b = db.scalar(
+            select(Balance)
+            .where(Balance.account_id == a.id, Balance.date <= day)
+            .order_by(Balance.date.desc())
+            .limit(1)
+        )
+        if b:
+            out[a.id] = max(b.current_cents, 0)
     return out
 
 
@@ -148,7 +172,8 @@ def build(db: DbSession, on: date | None = None, inputs: dict | None = None) -> 
     balances = latest_balances(db, accounts)
     funding = list(db.scalars(select(GoalFunding).where(GoalFunding.account_id.in_(list(balances)))))
     shown = [(a.id, household.display_name(a), a.type) for a in accounts]
-    return assemble(list(db.scalars(select(Goal))), funding, balances, shown, em, monthly_savings, on)
+    before = balances_on(db, accounts, on - timedelta(days=DOWN_DAYS))
+    return assemble(list(db.scalars(select(Goal))), funding, balances, shown, em, monthly_savings, on, before)
 
 
 def assemble(
@@ -159,11 +184,16 @@ def assemble(
     em: dict,
     monthly_savings: int | None,
     on: date,
+    before: dict[int, int] | None = None,
 ) -> dict:
-    """The Goals page from the goals, what funds them, the balances, and the budget's emergency fund numbers."""
+    """The Goals page from the goals, what funds them, the balances, and the budget's emergency fund numbers.
+    `before` is the balances DOWN_DAYS ago (balances_on); left out, nothing reads as down."""
     goals = sorted(goals, key=lambda g: (g.kind != "emergency", *rank(g)))
     names = {aid: name for aid, name, _ in accounts}
     counted = share_out(goals, funding, balances)
+    then_balances = {**balances, **(before or {})}
+    then_counted = share_out(goals, funding, then_balances)
+    cash = [aid for aid, _, kind in accounts if kind == CASH]
 
     rows = []
     for g in goals:
@@ -174,6 +204,9 @@ def assemble(
         rate = float(g.rate_percent) if g.rate_percent is not None else DEFAULT_RATE
         months_left = months_between(on, g.target_date) if g.target_date else None
         needed = needed_monthly(target, saved, months_left, rate) if months_left is not None and target else None
+        down, down_from = went_down(g, own, auto, counted, then_counted, balances, then_balances, cash, names)
+        if down < DOWN_MIN_CENTS or (target > 0 and down * 100 < target):  # under $100, or under 1% of the target
+            down, down_from = 0, []
         rows.append(
             {
                 "id": g.id,
@@ -193,6 +226,11 @@ def assemble(
                 "months_left": months_left,
                 "needed_cents": needed,
                 "auto": auto,
+                # Down this much over the last DOWN_DAYS days, because money left these accounts.
+                "down_cents": down,
+                "down_accounts": down_from,
+                "down_since": (on - timedelta(days=DOWN_DAYS)).isoformat(),
+                "was_percent": round((saved + down) / target * 100, 1) if target > 0 and down else None,
                 "funding": [
                     {
                         "account_id": f.account_id,
@@ -242,6 +280,33 @@ def assemble(
         "default_rate": DEFAULT_RATE,
         "month": on.replace(day=1).isoformat(),
     }
+
+
+def went_down(
+    g: Goal,
+    own: list[GoalFunding],
+    auto: bool,
+    counted: dict[tuple[int, int], int],
+    then_counted: dict[tuple[int, int], int],
+    balances: dict[int, int],
+    then_balances: dict[int, int],
+    cash: list[int],
+    names: dict[int, str],
+) -> tuple[int, list[str]]:
+    """How much less the goal has than DOWN_DAYS ago, and the accounts it came out of. The emergency fund with no
+    accounts picked has the cash no other goal claimed, so it's down when that is."""
+    if auto:
+
+        def free(c, b):  # fmt: skip
+            return sum(b.get(a, 0) for a in cash) - sum(v for (gid, a), v in c.items() if gid != g.id and a in cash)
+
+        down = free(then_counted, then_balances) - free(counted, balances)
+        fell = [a for a in cash if then_balances.get(a, 0) > balances.get(a, 0)]
+    else:
+        ids = [f.account_id for f in own]
+        down = sum(then_counted.get((g.id, a), 0) - counted.get((g.id, a), 0) for a in ids)
+        fell = [a for a in ids if then_counted.get((g.id, a), 0) > counted.get((g.id, a), 0)]
+    return max(down, 0), sorted(names.get(a, "Account") for a in fell) if down > 0 else []
 
 
 def plan_monthly(rows: list[dict], savings: int | None) -> None:

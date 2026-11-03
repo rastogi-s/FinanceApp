@@ -1250,7 +1250,7 @@ def alerts() -> dict:
                 "params": {"goal_id": None},
                 "enabled": True,
                 "priority": "default",
-                "summary": "Any goal reaches 25%, 50%, 75% and 100%",
+                "summary": "Any goal reaches 25%, 50%, 75% and 100%, or goes down",
                 "triggered": False,
             },
         ],
@@ -1595,7 +1595,9 @@ def goals_page(today: date | None = None) -> dict:
     saved = [m["saved_cents"] for m in b["savings_history"]]
     # The 401(k) part of what's saved goes into the 401(k), not into goals: the demo shows the cash part.
     monthly = round(sum(saved) / len(saved) * 0.4)
-    out = goals.assemble(rows, funding, balances, accounts, b["emergency"], monthly, today)
+    # A month ago checking had $1,800 more (a car repair since), so the emergency fund shows what going down looks like.
+    before = {1: _cents(14_350 + 1_800)}
+    out = goals.assemble(rows, funding, balances, accounts, b["emergency"], monthly, today, before)
     return {**out, "demo": True}
 
 

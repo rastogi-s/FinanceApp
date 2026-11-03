@@ -171,10 +171,10 @@ def test_milestone_alerts_once_and_never_for_an_edit(client, home, sent, monkeyp
         titles = [e.title for e in db.scalars(select(AlertEvent).where(AlertEvent.kind == "goal"))]
     assert titles == ["House is 75% of the way there"]
     rules = client.get("/api/alerts").json()
-    assert "Any goal reaches 25%, 50%, 75% and 100%" in [r["summary"] for r in rules["rules"]]
+    assert "Any goal reaches 25%, 50%, 75% and 100%, or goes down" in [r["summary"] for r in rules["rules"]]
     assert {"id": gid, "name": "House"} in rules["goals"]
     r = client.post("/api/alerts/rules", json={"rule": {"kind": "goal", "goal_id": gid}}, headers=csrf(client))
-    assert "House reaches 25%, 50%, 75% and 100%" in [x["summary"] for x in r.json()["rules"]]
+    assert "House reaches 25%, 50%, 75% and 100%, or goes down" in [x["summary"] for x in r.json()["rules"]]
     r = client.post("/api/alerts/rules", json={"rule": {"kind": "goal", "goal_id": 999}}, headers=csrf(client))
     assert r.status_code == 422
 
@@ -189,3 +189,56 @@ def test_demo_goals_are_read_only(tmp_path):
     b = c.get("/api/budget").json()["emergency"]
     assert b["have_cents"] == by_name(g, "Emergency fund")["saved_cents"] and b["set_aside_cents"] == 52_500_00
     assert c.post("/api/goals", json={"name": "x", "target_cents": 100}).status_code == 403
+
+
+def test_a_goal_that_goes_down_says_so_and_alerts_once(client, home, sent, monkeypatch):  # noqa: F811
+    monkeypatch.setattr(alerts, "now", lambda: NOON)
+    home.setup()
+    history(client)
+    checking = account(client, "checking", "depository", 10_000)
+    hysa = account(client, "hysa", "depository", 60_000)
+    with db_of(client).session() as db:  # 40 days ago both had the same as today
+        for aid, cents in ((checking, 10_000_00), (hysa, 60_000_00)):
+            db.add(Balance(account_id=aid, date=date.fromordinal(TODAY.toordinal() - 40), current_cents=cents))
+    body = {"name": "House", "target_cents": 100_000_00, "funding": [{"account_id": hysa}]}
+    g = client.post("/api/goals", json=body, headers=csrf(client)).json()
+    assert by_name(g, "House")["down_cents"] == 0 and by_name(g, "Emergency fund")["down_cents"] == 0
+    settings = client.app.state.settings
+    assert alerts.check(db_of(client), settings, {"goal"}) == 0
+
+    # An emergency: $8,000 comes out of the house account, $50 out of checking.
+    account(client, "hysa", "depository", 52_000)
+    account(client, "checking", "depository", 9_950)
+    g = client.get("/api/goals").json()
+    house = by_name(g, "House")
+    assert (house["down_cents"], house["down_accounts"], house["percent"], house["was_percent"]) == (
+        8_000_00, ["Bank Hysa"], 52.0, 60.0)  # fmt: skip
+    # The emergency fund is the cash no goal claims: down $50, too little to mention. Nothing counted twice.
+    em = by_name(g, "Emergency fund")
+    assert em["saved_cents"] == 9_950_00 and em["down_cents"] == 0
+
+    assert alerts.check(db_of(client), settings, {"goal"}) == 1
+    title, msg = sent[-1][0], sent[-1][1]
+    assert title == "House went down" and "52%" in msg and "60%" in msg and "Hysa" in msg and "$" not in msg
+    assert alerts.check(db_of(client), settings, {"goal"}) == 0  # no repeats
+
+    # Money put back: no longer down, and the alert is ready for next time.
+    account(client, "hysa", "depository", 60_000)
+    assert by_name(client.get("/api/goals").json(), "House")["down_cents"] == 0
+    assert alerts.check(db_of(client), settings, {"goal"}) == 0
+    account(client, "hysa", "depository", 50_000)
+    assert alerts.check(db_of(client), settings, {"goal"}) == 1
+
+
+def test_changing_a_goal_is_not_money_leaving(client, home):
+    home.setup()
+    hysa = account(client, "hysa", "depository", 60_000)
+    other = account(client, "other", "depository", 5_000)
+    with db_of(client).session() as db:
+        db.add(Balance(account_id=hysa, date=date.fromordinal(TODAY.toordinal() - 40), current_cents=60_000_00))
+    body = {"name": "House", "target_cents": 100_000_00, "funding": [{"account_id": hysa}, {"account_id": other}]}
+    g = client.post("/api/goals", json=body, headers=csrf(client)).json()
+    gid = by_name(g, "House")["id"]
+    g = client.put(f"/api/goals/{gid}", json={**body, "funding": [{"account_id": hysa, "cents": 30_000_00}]},
+                   headers=csrf(client)).json()  # fmt: skip
+    assert by_name(g, "House")["saved_cents"] == 30_000_00 and by_name(g, "House")["down_cents"] == 0
