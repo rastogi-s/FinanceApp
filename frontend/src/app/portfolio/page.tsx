@@ -68,6 +68,12 @@ export default function PortfolioPage() {
 function Body({ h }: { h: LinkedHousehold }) {
   const { data: p, reload } = usePortfolio();
   const { state } = useAuth();
+  // The holdings search sits at the top of the page, so finding a ticker doesn't start with a long scroll. It stays
+  // put for as long as the app is open, however you come back to Portfolio.
+  const [q, setQ] = useRemembered("holdings-q", "", { always: true, valid: (v) => typeof v === "string" });
+  const findable = h.holdings.length > 3;
+  const query = findable ? q : "";
+  const searching = query.trim() !== "";
   const demo = state.status === "signed-in" && state.demo;
   const [refreshing, setRefreshing] = useState(false);
 
@@ -118,6 +124,18 @@ function Body({ h }: { h: LinkedHousehold }) {
         </CardContent>
       </Card>
 
+      {findable && (
+        <SearchBox
+          value={q}
+          onChange={setQ}
+          label="Search holdings"
+          placeholder="Find a holding by ticker or name"
+          className="md:col-span-2"
+        />
+      )}
+      {/* While searching, the matching holdings come up right under the search instead of at the bottom. */}
+      {searching && <Holdings holdings={h.holdings} trends={p?.trends} q={query} />}
+
       <Column className="md:contents xl:grid">
         {h.holdings.length > 0 && <MovesLink />}
         <IncomeLink />
@@ -141,7 +159,7 @@ function Body({ h }: { h: LinkedHousehold }) {
           </CardContent>
         </Card>
       )}
-      <Holdings holdings={h.holdings} trends={p?.trends} />
+      {!searching && <Holdings holdings={h.holdings} trends={p?.trends} q={query} />}
     </Columns>
   );
 }
@@ -584,11 +602,10 @@ function savedLayout(): Layout {
 
 const shares = new Intl.NumberFormat("en-US", { maximumFractionDigits: 3 });
 
-function Holdings({ holdings, trends }: { holdings: Holding[]; trends?: Record<string, Trend> }) {
+function Holdings({ holdings, trends, q }: { holdings: Holding[]; trends?: Record<string, Trend>; q: string }) {
   const accounts = useMemo(() => [...new Set(holdings.map((x) => x.account))].sort(), [holdings]);
   const classes = useMemo(() => [...new Set(holdings.map((x) => x.asset_class))].sort(), [holdings]);
-  // The search, sort and filters stay put for as long as the app is open, however you come back to Portfolio.
-  const [q, setQ] = useRemembered("holdings-q", "", { always: true, valid: (v) => typeof v === "string" });
+  // The sort and filters stay put for as long as the app is open, however you come back to Portfolio.
   // The sort also lasts across visits: someone who wants losers first wants them first tomorrow too.
   const [chosen, setChosen] = useRemembered<Sort>("holdings-sort", savedSort, {
     always: true,
@@ -711,9 +728,9 @@ function Holdings({ holdings, trends }: { holdings: Holding[]; trends?: Record<s
         )}
       </CardHeader>
       {(holdings.length > 3 || accounts.length > 1) && (
-        <CardContent className="grid grid-cols-1 gap-2 pt-1 pb-3 sm:grid-cols-[1fr_auto]">
+        <CardContent className="grid grid-cols-1 gap-2 pt-1 pb-3 sm:grid-cols-[auto_1fr]">
           {accounts.length > 1 && (
-            <div className="grid grid-cols-2 rounded-full bg-muted p-1 sm:col-span-2 sm:w-80" role="group" aria-label="Show holdings">
+            <div className="grid grid-cols-2 rounded-full bg-muted p-1 sm:w-72" role="group" aria-label="Show holdings">
               {(
                 [
                   ["combined", "By investment"],
@@ -737,8 +754,7 @@ function Holdings({ holdings, trends }: { holdings: Holding[]; trends?: Record<s
           )}
           {holdings.length > 3 && (
             <>
-              <SearchBox value={q} onChange={setQ} label="Search holdings" placeholder="Ticker or name" />
-              <div className="grid grid-cols-1 gap-2 sm:flex">
+              <div className={cn("grid grid-cols-1 gap-2 sm:flex", accounts.length < 2 && "sm:col-span-2")}>
                 <Select aria-label="Sort holdings" value={sort} onChange={(e) => setSort(e.target.value as Sort)} className="rounded-full">
                   {SORT_GROUPS.map((g) => (
                     <optgroup key={g.label} label={g.label}>

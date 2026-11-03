@@ -23,8 +23,8 @@ for (const [name, opts] of Object.entries(sizes)) {
   await page.goto(BASE + "/portfolio");
   const search = page.getByLabel("Search holdings");
   await search.waitFor();
-  // 1. scroll to holdings, open a holding, back link
-  await search.scrollIntoViewIfNeeded();
+  // 1. scroll down to the holdings list (the search sits at the top of the page), open a holding, back link
+  await page.getByLabel("Sort holdings").scrollIntoViewIfNeeded();
   await page.mouse.wheel(0, 300); await page.waitForTimeout(400);
   let row = page.locator('a[href^="/portfolio/holding"]').filter({ visible: true }).last();
   await row.scrollIntoViewIfNeeded();
