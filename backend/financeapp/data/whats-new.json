@@ -1,5 +1,21 @@
 [
   {
+    "version": "0.66.0",
+    "title": "A yearly estimate for dividends and interest, and accounts you can leave out",
+    "features": [
+      {
+        "id": "income-yearly-estimate",
+        "title": "Your yearly estimate, and this year from start to finish",
+        "body": "The top of Dividends & interest now calls the next 12 months what it is: your yearly estimate at today's holdings and rates. Expected from what you hold now also shows the calendar year: what this year comes to in full (paid so far plus what's still due before January 1), and next year at today's holdings and rates."
+      },
+      {
+        "id": "income-leave-out",
+        "title": "Leave accounts out of dividends and interest",
+        "body": "Tap Choose under the totals at the top of Dividends & interest and turn off any account you don't want counted, like a checking account or someone else's brokerage. It leaves every total, estimate, chart and by-account list on the page, and the Portfolio card too. For taxes still counts every account, since taxes are owed either way. Turn it back on any time."
+      }
+    ]
+  },
+  {
     "version": "0.65.0",
     "title": "Find a holding from the top of Portfolio",
     "features": [

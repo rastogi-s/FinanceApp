@@ -784,17 +784,60 @@ def history_start(db: DbSession, accounts: list[Account], today: date) -> date:
     return max(max(firsts) if firsts else today, since_for(today))
 
 
+PREF_KEY = "income"
+
+
+def left_out(db: DbSession) -> set[int]:
+    """Accounts the person took out of Dividends & interest (preference "income": {"excluded": [account ids]})."""
+    p = db.get(Preference, PREF_KEY)
+    return {int(i) for i in ((p.value or {}).get("excluded") or [])} if p else set()
+
+
+def set_left_out(db: DbSession, account_id: int, excluded: bool) -> None:
+    p = db.get(Preference, PREF_KEY)
+    if p is None:
+        p = Preference(key=PREF_KEY, value={})
+        db.add(p)
+    ids = left_out(db)
+    if excluded:
+        ids.add(account_id)
+    else:
+        ids.discard(account_id)
+    p.value = {**(p.value or {}), "excluded": sorted(ids)}
+
+
+def payers(accounts: list[Account]) -> list[Account]:
+    """The accounts that can pay dividends or interest: brokerage and retirement accounts, checking, savings, CDs."""
+    return [a for a in accounts if a.type in ("investment", "depository")]
+
+
 def build(db: DbSession, today: date) -> dict:
-    accounts = household.counted(db)
+    counted = household.counted(db)
+    excluded = left_out(db)
+    accounts = [a for a in counted if a.id not in excluded]
     since = since_for(today)
     pays = payments(db, accounts, since)
     cash_symbols: set[str] = set()
     hs = holdings(db, accounts, cash_symbols)
     hist = history(db, [h.symbol for h in hs])
     drip = reinvesting(db, accounts, today - timedelta(days=400))
-    return build_from(
-        pays, hs, hist, drip, cash_accounts(db, accounts), history_start(db, accounts, today), today, cash_symbols
-    )
+    start = history_start(db, counted, today)
+    out = build_from(pays, hs, hist, drip, cash_accounts(db, accounts), start, today, cash_symbols)
+    if excluded & {a.id for a in counted}:
+        # Taxes are owed on every account, left out of the page or not, so the For taxes card keeps them all.
+        every = payments(db, counted, since)
+        classes = {h.symbol: h.asset_class for h in holdings(db, counted)}
+        out["tax"] = [tax_summary(every, y, today, classes, start) for y in (today.year, today.year - 1)]
+    out["choose"] = [
+        {
+            "id": a.id,
+            "name": household.display_name(a),
+            "kind": "investment" if a.type == "investment" else "bank",
+            "excluded": a.id in excluded,
+        }
+        for a in sorted(payers(counted), key=lambda a: (a.type != "investment", household.display_name(a).lower()))
+    ]
+    return out
 
 
 def tax_year(db: DbSession, year: int, today: date) -> dict:

@@ -58,3 +58,22 @@ def set_account(account_id: int, body: InterestAccountIn, request: Request, who:
     audit(db, request, "interest_account_changed", who.user.id, account=a.id)
     db.flush()
     return income.build(db, today())
+
+
+class LeaveOutIn(BaseModel):
+    excluded: bool
+
+
+@router.put("/income/counted/{account_id}")
+def set_counted(account_id: int, body: LeaveOutIn, request: Request, who: Signed = Depends(signed_in)) -> dict:
+    """Take an account out of Dividends & interest (every total, the estimate and by account), or put it back."""
+    if who.demo:
+        raise HTTPException(403, "Not available with sample data.")
+    db = db_of(request)
+    a = db.get(Account, account_id)
+    if a is None or a not in income.payers(household.counted(db)):
+        raise HTTPException(404, "No such account.")
+    income.set_left_out(db, a.id, body.excluded)
+    audit(db, request, "income_account_counted", who.user.id, account=a.id, excluded=body.excluded)
+    db.flush()
+    return income.build(db, today())

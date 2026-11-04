@@ -1563,6 +1563,11 @@ def income(today: date | None = None) -> dict:
     hs.sort(key=lambda h: -h.value_cents)
     return {
         **income_.build_from(pays, hs, hist, DEMO_REINVESTING, cash, today - timedelta(days=730), today),
+        "choose": [
+            {"id": -(i + 1), "name": name, "kind": "investment", "excluded": False}
+            for i, name in enumerate(sorted({a for h in hs for a in h.account_shares}, key=str.lower))
+        ]
+        + [{"id": c.id, "name": c.name, "kind": "bank", "excluded": False} for c in cash],
         "demo": True,
     }
 
