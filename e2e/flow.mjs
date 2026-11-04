@@ -381,6 +381,32 @@ try {
     await page.waitForURL((u) => u.pathname === "/settings");
   });
 
+  await check("coming-back-from-plaid-stays-signed-in", async () => {
+    // Reconnecting a bank leaves for Plaid's page for minutes; the page Plaid sends you back to isn't a swipe-away.
+    // Opening that same page without having gone to Plaid from here still locks.
+    await page.addInitScript(() => {
+      if (!window.name.startsWith("to-plaid")) return;
+      const sent = window.name === "to-plaid-sent";
+      window.name = "";
+      localStorage.setItem("left-at", String(Date.now() - 180_000));
+      if (sent) sessionStorage.setItem("left-to-link", String(Date.now() - 180_000));
+    });
+    let asks = 0;
+    const count = (req) => req.url().endsWith("/api/auth/passkey/options") && (asks += 1);
+    page.on("request", count);
+    await page.evaluate(() => (window.name = "to-plaid-sent"));
+    await page.goto(BASE + "/settings/accounts?linked=plaid");
+    await page.waitForURL((u) => u.pathname === "/settings/accounts" && !u.search);
+    await main().getByRole("heading", { name: "Accounts" }).first().waitFor();
+    await page.waitForTimeout(1500);
+    if (asks !== 0 || new URL(page.url()).pathname !== "/settings/accounts") throw new Error("coming back from Plaid locked the app");
+    page.off("request", count);
+    await page.evaluate(() => (window.name = "to-plaid-forged"));
+    const verified = page.waitForResponse((r) => r.url().endsWith("/api/auth/passkey/verify") && r.ok());
+    await page.goto(BASE + "/settings/accounts?linked=plaid");
+    await verified;
+  });
+
   await check("sign-in-with-password-and-code", async () => {
     await page.goto(BASE + "/settings");
     await button("Sign out").click();

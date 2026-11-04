@@ -51,7 +51,7 @@ import {
   shortDate,
 } from "@/lib/accounts";
 import { api } from "@/lib/api";
-import { useAuth } from "@/lib/auth";
+import { leavingToLink, useAuth } from "@/lib/auth";
 import { resetHousehold, useApi } from "@/lib/household";
 import { cn } from "@/lib/utils";
 
@@ -165,6 +165,7 @@ function Accounts() {
       try {
         sessionStorage.setItem(LINK_KEY, r.token);
       } catch {}
+      leavingToLink();
       window.location.assign(r.url);
     } catch (e) {
       toast((e as Error).message, "error");

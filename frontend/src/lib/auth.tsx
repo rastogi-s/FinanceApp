@@ -69,15 +69,54 @@ function noteLeft() {
   } catch {}
 }
 
-function awayTooLong(opened: boolean): boolean {
+// Linking or reconnecting a bank leaves the app for Plaid's (or SnapTrade's) own page, and the bank's sign-in can
+// take minutes, so coming back to the page they send you to isn't a swipe-away. The app notes, in this tab only, that
+// it sent you there; the note works once, only on that return page, and only for half an hour. The server still ends
+// the session after 15 idle minutes, so a long detour asks for Face ID as before.
+const TO_LINK = "left-to-link";
+const LINK_RELOADED = "link-reloaded";
+const LINK_GRACE_MS = 30 * 60_000;
+
+/** Call just before sending the browser to a linking page. */
+export function leavingToLink() {
+  try {
+    sessionStorage.setItem(TO_LINK, String(Date.now()));
+  } catch {}
+}
+
+function backFromLink(): boolean {
+  let at = 0;
+  try {
+    at = Number(sessionStorage.getItem(TO_LINK)) || 0;
+    sessionStorage.removeItem(TO_LINK);
+  } catch {}
+  const here = window.location.pathname.replace(/\/$/, "") === "/settings/accounts";
+  return here && new URLSearchParams(window.location.search).has("linked") && at > 0 && Date.now() - at < LINK_GRACE_MS;
+}
+
+function awayTooLong(opened: boolean, fromLink = false): boolean {
   let at = 0;
   try {
     at = Number(localStorage.getItem(LEFT)) || 0;
     localStorage.removeItem(LEFT);
   } catch {}
+  if (fromLink) return false;
   const nav = performance.getEntriesByType("navigation")[0] as PerformanceNavigationTiming | undefined;
   const grace = opened && nav?.type !== "reload" ? LOCK_AFTER_CLOSE_MS : LOCK_AFTER_MS;
   return at > 0 && Date.now() - at > grace && passkeyHere();
+}
+
+function firstLinkReload(): boolean {
+  try {
+    if (sessionStorage.getItem(LINK_RELOADED)) {
+      sessionStorage.removeItem(LINK_RELOADED);
+      return false;
+    }
+    sessionStorage.setItem(LINK_RELOADED, "1");
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function lock() {
@@ -89,11 +128,24 @@ async function lock() {
 type ServerState = { demo: boolean; setup_required: boolean; user: User | null; csrf: string | null; idle_minutes?: number };
 
 async function fetchState(idleMinutes: { current: number }, opened = false): Promise<AuthState> {
+  const fromLink = opened && backFromLink();
   try {
     const s = await api<ServerState>("/api/auth/state", { quiet401: true });
     setCsrf(s.csrf);
     idleMinutes.current = s.idle_minutes ?? 15;
-    if (s.user && !s.demo && awayTooLong(opened)) {
+    if (fromLink && !s.user && !s.setup_required && firstLinkReload()) {
+      // Safari can hold back the session cookie (it's SameSite=Strict) from a page the bank's site redirected to.
+      // Loading the page again from here is a same-site visit, so the cookie goes along; done once only.
+      leavingToLink();
+      window.location.replace(window.location.href);
+      return new Promise<AuthState>(() => {});
+    }
+    if (fromLink && s.user) {
+      try {
+        sessionStorage.removeItem(LINK_RELOADED);
+      } catch {}
+    }
+    if (s.user && !s.demo && awayTooLong(opened, fromLink)) {
       await lock();
       return { status: "signed-out", reason: "idle" };
     }
