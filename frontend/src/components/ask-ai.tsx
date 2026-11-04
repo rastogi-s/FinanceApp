@@ -59,6 +59,9 @@ export function useResearch(symbol: string) {
   // Kept with the ticker it's for, so moving to another holding never shows the last one's answers.
   const [loaded, setLoaded] = useState<{ symbol: string; offer: ResearchOffer | null; error: string | null } | null>(null);
   const [busy, setBusy] = useState<string | null>(null); // the question being researched
+  // When the server started on it, so the progress shown picks up where the research is, not from the top, when
+  // the sheet or the page is opened again while it's still going.
+  const [since, setSince] = useState<number | null>(null);
   const offer = loaded?.symbol === symbol ? loaded.offer : null;
   const error = loaded?.symbol === symbol ? loaded.error : null;
   const setOffer = (f: (o: ResearchOffer | null) => ResearchOffer | null) =>
@@ -68,9 +71,11 @@ export function useResearch(symbol: string) {
   // the connection for a while (a locked phone, a flaky network) doesn't lose the answer: checking just resumes.
   const polling = useRef<string | null>(null);
   const [offline, setOffline] = useState(false);
-  const follow = async (sym: string, question: string): Promise<boolean> => {
+  const follow = async (sym: string, question: string, startedAt?: string | null): Promise<boolean> => {
     polling.current = sym;
     setBusy(question);
+    const at = startedAt ? Date.parse(startedAt) : NaN;
+    setSince(Number.isNaN(at) ? Date.now() : Math.min(at, Date.now()));
     const started = Date.now();
     try {
       while (polling.current === sym) {
@@ -100,6 +105,7 @@ export function useResearch(symbol: string) {
       if (polling.current === sym) {
         polling.current = null;
         setBusy(null);
+        setSince(null);
         setOffline(false);
       }
     }
@@ -112,7 +118,7 @@ export function useResearch(symbol: string) {
       (o) => {
         if (!live) return;
         setLoaded({ symbol, offer: o, error: null });
-        if (o.job?.state === "running") follow(symbol, o.job.question); // asked earlier and still going
+        if (o.job?.state === "running") follow(symbol, o.job.question, o.job.started); // asked earlier and still going
       },
       (e: Error) => live && setLoaded({ symbol, offer: null, error: e.message }),
     );
@@ -125,8 +131,10 @@ export function useResearch(symbol: string) {
   const ask = async (question: string) => {
     const shown = question.trim() || "What's the sentiment on this, and why?";
     setBusy(shown);
+    let startedAt: string | null = null;
     try {
-      await api(askPath(symbol), { body: { question } });
+      const res = await api<{ job: ResearchJob | null }>(askPath(symbol), { body: { question } });
+      startedAt = res.job?.started ?? null;
     } catch (e) {
       // The request may have reached the server even if the reply didn't make it back: look before giving up.
       if (!(e instanceof ApiError && e.status === 0)) {
@@ -135,7 +143,7 @@ export function useResearch(symbol: string) {
         return false;
       }
     }
-    return follow(symbol, shown);
+    return follow(symbol, shown, startedAt);
   };
 
   const clear = async () => {
@@ -143,7 +151,7 @@ export function useResearch(symbol: string) {
     setOffer((o) => (o ? { ...o, thread: [] } : o));
   };
 
-  return { offer, error, busy, offline, ask, clear };
+  return { offer, error, busy, since, offline, ask, clear };
 }
 
 export type Research = ReturnType<typeof useResearch>;
@@ -194,8 +202,9 @@ export function AskAICard({ symbol, r, open }: { symbol: string; r: Research; op
               <button
                 key={q}
                 type="button"
+                disabled={!!r.busy}
                 onClick={() => open(q)}
-                className="rounded-full border px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                className="rounded-full border px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
               >
                 {q}
               </button>
@@ -353,7 +362,7 @@ export function AskAISheet({
           {thread.map((t, i) => (
             <Exchange key={t.at} id={i === thread.length - 1 ? "ask-ai-latest" : undefined} t={t} />
           ))}
-          {r.busy && <Researching question={r.busy} offer={offer} offline={r.offline} />}
+          {r.busy && <Researching question={r.busy} since={r.since} offer={offer} offline={r.offline} />}
           {thread.length > 0 && !r.busy && offer.preview !== null && (
             <div className="flex justify-center">
               <Button variant="ghost" size="sm" onClick={() => r.clear().catch((e: Error) => toast(e.message, "error"))}>
@@ -417,13 +426,24 @@ function Intro({ offer, symbol, ask }: { offer: ResearchOffer; symbol: string; a
 
 const STEPS = ["Reading the latest headlines", "Searching for analyst views and earnings", "Weighing both sides", "Checking it against your position"];
 
-function Researching({ question, offer, offline }: { question: string; offer: ResearchOffer; offline: boolean }) {
+const STEP_SECONDS = 9;
+
+/** How far along the research is, counted from when the server started on it, so closing the sheet, leaving the
+ * page or locking the phone never sends the steps back to the first one. */
+function stepAt(since: number | null, now: number, count: number): number {
+  if (since === null) return 0;
+  return Math.max(0, Math.min(count - 1, Math.floor((now - since) / 1000 / STEP_SECONDS)));
+}
+
+function Researching({ question, since, offer, offline }: { question: string; since: number | null; offer: ResearchOffer; offline: boolean }) {
   const steps = STEPS.filter((s, i) => (i !== 1 || offer.web_search) && (i !== 3 || offer.held));
-  const [step, setStep] = useState(0);
+  const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    const t = setInterval(() => setStep((s) => Math.min(s + 1, steps.length - 1)), 9000);
+    const t = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(t);
-  }, [steps.length]);
+  }, []);
+  const step = stepAt(since, now, steps.length);
+  const minutes = since === null ? 0 : Math.floor((now - since) / 60_000);
   return (
     <div id="ask-ai-researching" className="grid scroll-mt-2 grid-cols-1 gap-3" aria-live="polite" aria-busy="true">
       <Question text={question} />
@@ -444,6 +464,7 @@ function Researching({ question, offer, offline }: { question: string; offer: Re
           ))}
         </ol>
         <p className="text-xs text-muted-foreground">
+          {minutes >= 1 && `Started ${minutes} min ago, still going. `}
           {offline
             ? "Lost the connection for a moment. The server keeps working on it, and the answer shows up here once you're back."
             : "Careful research takes a minute or two. You can close this or lock your phone: the answer will be here when you come back."}
