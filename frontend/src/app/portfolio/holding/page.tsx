@@ -181,7 +181,17 @@ function Holding() {
         <AlertsCard s={data} onAdd={() => setAlertOpen(true)} />
       </div>
 
-      <AskAISheet symbol={data.symbol} name={data.name} r={research} open={askOpen} onOpenChange={setAskOpen} start={askStart} />
+      <AskAISheet
+        symbol={data.symbol}
+        name={data.name}
+        r={research}
+        open={askOpen}
+        onOpenChange={(o) => {
+          setAskOpen(o);
+          if (!o) setAskStart(null); // a picked question is asked once: opening the sheet again only shows the thread
+        }}
+        start={askStart}
+      />
       <RuleSheet open={alertOpen} onOpenChange={setAlertOpen} symbol={data.symbol} currentPrice={data.price} save={saveRule} />
     </>
   );
