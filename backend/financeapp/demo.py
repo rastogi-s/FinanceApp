@@ -208,6 +208,7 @@ def household(today: date | None = None) -> dict:
             "uploads": [_upload_due()],
             "maturing": deposits.maturing(_deposit_details(today), {9: "Marcus 12-month CD ••7781"}),
             "bills": _bills(today)["late"],
+            "funding": [r for r in _funding(today) if r["state"] == "short"],
         },
         "holdings": [
             {
@@ -263,6 +264,7 @@ def upcoming_events(today: date | None = None) -> dict:
             upcoming.dividends([bnd], today, end),
             upcoming.ending_offers(demo_offers(today), {2: "Sapphire Preferred ••9012"}, today),
             upcoming.utility_bills(_bills(today)["soon"], today),
+            upcoming.scheduled(_funding(today), today, end),
         ),
     }
 
@@ -404,6 +406,55 @@ def _bills(today: date) -> dict[str, list[dict]]:
         "late": [bill("City Power & Light", 141, today - timedelta(days=6))],
         "soon": [bill("City Water & Sewer", 61.80, today + timedelta(days=9))],
     }
+
+
+def _funding(today: date) -> list[dict]:
+    """Low cash reminders in demo mode (funding.py's rows): a weekly E*TRADE buy short of cash this week, and a monthly
+    move into savings that checking covers."""
+    from financeapp import funding
+
+    def row(r: funding.Reminder, account: str, cash: int) -> dict:
+        nxt = funding.on_or_after(r, today)
+        needed = r.amount_cents + r.cushion_cents
+        short = max(needed - cash, 0)
+        c = funding.Check(
+            r, account, funding.Cash(cash, today, "holdings"), nxt, "short" if short else "ok", short, needed
+        )
+        return c.json(today)
+
+    thursday = today + timedelta(days=1)  # tomorrow, whatever day that is: the push is out already
+    first = today.replace(day=1) + timedelta(days=32)
+    return [
+        row(funding.Reminder(1, "E*TRADE weekly buy", 11, _cents(105), "week", thursday, _cents(20)),
+            "E*TRADE Brokerage ••6621", _cents(62.40)),
+        row(funding.Reminder(2, "Into Ally savings", 1, _cents(1_500), "month", first.replace(day=1)),
+            "Chase checking ••4410", _cents(14_350)),
+    ]  # fmt: skip
+
+
+def funding_state(today: date | None = None) -> dict:
+    """Settings, Alerts' low cash reminders in demo mode, with one suggestion found in the activity."""
+    today = today or datetime.now(UTC).date()
+    friday = today + timedelta(days=(4 - today.weekday()) % 7 or 7)
+    return {
+        "today": today.isoformat(),
+        "reminders": _funding(today),
+        "suggestions": [
+            {"key": "12:50", "account_id": 12, "account": "Fidelity Roth IRA ••3390", "name": "Fidelity weekly buy",
+             "amount_cents": _cents(50), "every": "week", "start": friday.isoformat(), "schedule": f"Every {friday:%A}",
+             "times": 9, "last": (friday - timedelta(days=7)).isoformat()},
+        ],
+        "accounts": [
+            {"id": 11, "name": "E*TRADE Brokerage ••6621", "type": "investment", "cash_cents": _cents(62.40),
+             "cash_as_of": today.isoformat()},
+            {"id": 12, "name": "Fidelity Roth IRA ••3390", "type": "investment", "cash_cents": _cents(310),
+             "cash_as_of": today.isoformat()},
+            {"id": 1, "name": "Chase checking ••4410", "type": "depository", "cash_cents": _cents(14_350),
+             "cash_as_of": today.isoformat()},
+            {"id": 3, "name": "Ally savings ••2207", "type": "depository", "cash_cents": _cents(38_900),
+             "cash_as_of": today.isoformat()},
+        ],
+    }  # fmt: skip
 
 
 def _upload_due() -> dict:

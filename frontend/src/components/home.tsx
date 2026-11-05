@@ -15,6 +15,7 @@ import {
   Receipt,
   Sparkles,
   Sunrise,
+  Wallet,
 } from "lucide-react";
 import type { BriefState } from "@/components/brief";
 import { Money, formatMoney } from "@/components/money";
@@ -30,6 +31,7 @@ import { type UploadDue, dueLabel, shortDate } from "@/lib/accounts";
 import { api } from "@/lib/api";
 import { type ColorName, type Goal, type GoalsState, monthYear } from "@/lib/goals";
 import type { CardPayment } from "@/lib/cards";
+import { type FundingRow, whenLabel } from "@/lib/funding";
 import { type BillDue, type LinkedHousehold, type Maturing, resetHousehold, useApi, useHousehold } from "@/lib/household";
 import { GROUP_COLOR, type NetWorth, type NetWorthWindow } from "@/lib/networth";
 import { monthOf } from "@/lib/search";
@@ -149,7 +151,7 @@ const TONE = {
 
 /**
  * What needs you, each with the button that deals with it: a bank that stopped syncing, a utility bill not paid yet,
- * a statement to upload, a CD about to mature, a budget at its limit, categories to check. Says so when there's
+ * an account short of cash for a payment you make on a schedule, a statement to upload, a CD about to mature, a budget at its limit, categories to check. Says so when there's
  * nothing.
  */
 export function NeedsYou({ h, className }: { h: LinkedHousehold; className?: string }) {
@@ -221,6 +223,28 @@ export function NeedsYou({ h, className }: { h: LinkedHousehold; className?: str
             </Link>
           </Button>
         </>
+      ),
+    });
+  }
+
+  for (const f of h.health?.funding ?? []) {
+    items.push({
+      key: `funding-${f.id}`,
+      icon: <Wallet />,
+      tone: "warning",
+      title: (
+        <>
+          Add <Money cents={f.short_cents} style="exact" /> to {f.account}
+        </>
+      ),
+      detail: fundingDetail(f),
+      wide: true,
+      actions: (
+        <Button size="sm" variant="secondary" asChild>
+          <Link href={f.href} aria-label={`See the ${f.name} reminder`}>
+            See
+          </Link>
+        </Button>
       ),
     });
   }
@@ -389,6 +413,21 @@ const ordinal = (n: number) => n + (n % 100 >= 11 && n % 100 <= 13 ? "th" : ({ 1
 /** "Usually paid around the 14th", or the date for a bill that wanders or comes every few months. */
 function billWhen(b: BillDue) {
   return `Usually paid around ${b.usual_day ? `the ${ordinal(b.usual_day)}` : shortDate(b.expected)}`;
+}
+
+/** "For E*TRADE weekly buy tomorrow · has $62.40 of $125" (with the cushion and any other payments counted). */
+function fundingDetail(f: FundingRow) {
+  return (
+    <>
+      For {f.name} {whenLabel(f.next, f.days_left)}
+      {f.with_others.length > 0 && ` and ${f.with_others.join(", ")}`}
+      {f.cash_cents !== null && (
+        <>
+          {" · "}has <Money cents={f.cash_cents} style="exact" /> of <Money cents={f.needed_cents} style={f.needed_cents % 100 ? "exact" : "whole"} />
+        </>
+      )}
+    </>
+  );
 }
 
 function cdTitle(m: Maturing) {
@@ -739,13 +778,15 @@ export type Upcoming = {
   days: number;
   events: {
     date: string;
-    kind: "pay" | "card" | "bill" | "cd" | "dividend" | "offer";
+    kind: "pay" | "card" | "bill" | "funding" | "cd" | "dividend" | "offer";
     title: string;
     detail: string;
     cents: number | null;
     href: string | null;
     /** Card payments: paid since the statement, and what's left (backend cardpay.py). */
     payment?: CardPayment & { minimum_cents: number | null };
+    /** Low cash reminders: whether the account has the cash, and what to add (backend funding.py). */
+    funding?: { state: FundingRow["state"]; short_cents: number; cash_cents: number | null; account: string };
   }[];
 };
 
@@ -783,6 +824,17 @@ function cardDetail(p: NonNullable<Upcoming["events"][number]["payment"]>) {
 const weekday = new Intl.DateTimeFormat("en-US", { weekday: "short", timeZone: "UTC" });
 const monthShort = new Intl.DateTimeFormat("en-US", { month: "short", timeZone: "UTC" });
 
+/** A low cash reminder's second line: how much to add first, in the warning color, or that the account has it. */
+function fundedDetail(f: NonNullable<Upcoming["events"][number]["funding"]>, detail: string) {
+  if (f.state === "short")
+    return (
+      <span className="font-medium text-warning">
+        Add <Money cents={f.short_cents} style="exact" /> to {f.account} first
+      </span>
+    );
+  return detail;
+}
+
 /** The next two weeks: paydays, card payments, utility bills, CDs, dividends, offers ending (backend upcoming.py). */
 export function ComingUp({ data, className }: { data: Upcoming | null; className?: string }) {
   if (!data) return null;
@@ -811,7 +863,9 @@ export function ComingUp({ data, className }: { data: Upcoming | null; className
                   </span>
                   <span className="min-w-0 flex-1">
                     <span className="block text-sm font-medium wrap-anywhere">{e.title}</span>
-                    <span className="block text-xs text-muted-foreground">{e.payment ? cardDetail(e.payment) : e.detail}</span>
+                    <span className="block text-xs text-muted-foreground">
+                      {e.payment ? cardDetail(e.payment) : e.funding ? fundedDetail(e.funding, e.detail) : e.detail}
+                    </span>
                   </span>
                   {e.payment?.state === "paid" ? (
                     <span className="flex shrink-0 items-center gap-1 rounded-full bg-positive/12 px-2 py-0.5 text-xs font-medium text-positive">
