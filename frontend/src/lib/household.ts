@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import type { UploadDue } from "@/lib/accounts";
+import type { FundingRow } from "@/lib/funding";
 import { forgetPortfolio } from "@/lib/portfolio";
 
 export type Budget = { category: string; category_id?: number; kind: "fixed" | "flexible"; limit_cents: number; spent_cents: number };
@@ -36,11 +37,11 @@ export type Holding = {
   live?: boolean;
 };
 /** The dot beside an alert, by what kind of rule sent it. */
-export const KIND_DOT = { price: "bg-chart-2", dip: "bg-chart-3", budget: "bg-warning", concentration: "bg-chart-4", goal: "bg-positive", upload: "bg-primary", account: "bg-chart-1", card: "bg-negative", bill: "bg-warning" } as const;
+export const KIND_DOT = { price: "bg-chart-2", dip: "bg-chart-3", budget: "bg-warning", concentration: "bg-chart-4", goal: "bg-positive", upload: "bg-primary", account: "bg-chart-1", card: "bg-negative", bill: "bg-warning", funding: "bg-warning" } as const;
 
 export type Alert = {
   id: string;
-  kind: "budget" | "price" | "dip" | "concentration" | "goal" | "upload" | "account" | "card" | "bill";
+  kind: "budget" | "price" | "dip" | "concentration" | "goal" | "upload" | "account" | "card" | "bill" | "funding";
   title: string;
   body: string;
   at: string;
@@ -116,6 +117,8 @@ export type LinkedHousehold = {
     uploads?: UploadDue[];
     maturing?: Maturing[];
     bills?: BillDue[];
+    /** Accounts short of cash for a payment made on a schedule, in the next week (backend funding.py). */
+    funding?: FundingRow[];
   };
 };
 

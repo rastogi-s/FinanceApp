@@ -5,6 +5,7 @@ import { useState } from "react";
 import { BellRing, ChevronRight, Mail, Moon, Plus, Send, Smartphone } from "lucide-react";
 import { KIND_ICON, type Rule, type RuleIn, RuleSheet } from "@/components/alert-sheets";
 import { BriefSettingsCard } from "@/components/brief";
+import { FundingCard } from "@/components/funding";
 import { SubPageTitle } from "@/components/page";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -110,7 +111,7 @@ export default function AlertsPage() {
 
   return (
     <>
-      <SubPageTitle title="Alerts" back="/settings" subtitle="Prices, dips, budgets and how concentrated you are, sent to your phone." />
+      <SubPageTitle title="Alerts" back="/settings" subtitle="Prices, dips, budgets, low cash before a payment, and how concentrated you are, sent to your phone." />
       {!s && !error && (
         <div className="grid grid-cols-1 gap-4" aria-busy="true" aria-label="Loading">
           <Skeleton className="h-28 rounded-xl" />
@@ -161,6 +162,8 @@ export default function AlertsPage() {
           </Card>
 
           <BriefSettingsCard demo={demo} />
+
+          <FundingCard demo={demo} className="md:col-span-2" />
 
           <Card className="md:col-span-2">
             <CardHeader>

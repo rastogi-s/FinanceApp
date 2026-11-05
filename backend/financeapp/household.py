@@ -128,6 +128,12 @@ def last_close(
     return out
 
 
+def funding_status(db: DbSession) -> list[dict]:
+    from financeapp import funding  # funding reads accounts through this module
+
+    return funding.status(db, reminders.local_today(db))["short"]
+
+
 def counted(db: DbSession) -> list[Account]:
     """The accounts that count: not hidden, and the authoritative source of each real account."""
     return list(db.scalars(select(Account).where(Account.hidden.is_(False), Account.is_authoritative.is_(True))))
@@ -315,5 +321,7 @@ def build_with_plan(db: DbSession) -> tuple[dict, dict | None]:
             ],
             "maturing": maturing,  # CDs to decide about (deposits.maturing)
             "bills": bills.status(db, reminders.local_today(db))["late"],  # utility bills not paid yet (bills.py)
+            # Accounts short of cash for a payment made on a schedule, in the next week (funding.py).
+            "funding": funding_status(db),
         },
     }, plan_inputs
