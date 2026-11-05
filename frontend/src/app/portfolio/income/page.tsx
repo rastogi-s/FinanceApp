@@ -21,14 +21,15 @@ import {
   FREQUENCY,
   HORIZONS,
   type DividendHolding,
+  type CountedAccount,
   type Income,
   type InterestAccount,
-  type Estimate,
   type TaxYear,
   WINDOWS,
   type Window,
   type WindowAccount,
   apyOf,
+  calendarYearEstimate,
   estimateFor,
   cdWhatIf,
   dayLabel,
@@ -70,8 +71,8 @@ export default function IncomePage() {
       )}
       {p && (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          <Summary p={p} />
-          <Ahead e={p.estimate} />
+          <Summary p={p} onSaved={setLocal} />
+          <Ahead p={p} />
           <div className="md:col-span-2">
             <div className="grid grid-cols-2 gap-1 rounded-full bg-muted p-1" role="radiogroup" aria-label="Show">
               {(["dividends", "interest"] as const).map((t) => (
@@ -101,7 +102,7 @@ export default function IncomePage() {
 
 // ---- the top: both kinds together
 
-function Summary({ p }: { p: Income }) {
+function Summary({ p, onSaved }: { p: Income; onSaved: (p: Income) => void }) {
   const d = p.dividends;
   const i = p.interest;
   const total = d.received_12m_cents + i.received_12m_cents;
@@ -135,10 +136,11 @@ function Summary({ p }: { p: Income }) {
               </>
             )}
           </Stat>
-          <Stat label="Next 12 months" value={<Money cents={p.estimate.annual_cents} />}>
-            At today&apos;s holdings and rates
+          <Stat label="Yearly estimate" value={<Money cents={p.estimate.annual_cents} />}>
+            The next 12 months at today&apos;s holdings and rates
           </Stat>
         </div>
+        <Counted p={p} onSaved={onSaved} />
       </CardContent>
     </Card>
   );
@@ -148,11 +150,16 @@ function Summary({ p }: { p: Income }) {
 
 const WINDOW_LABEL: Record<Window, string> = { 1: "1 month", 2: "2 months", 3: "3 months", 6: "6 months", 12: "1 year" };
 
-function Ahead({ e }: { e: Estimate }) {
+function Ahead({ p }: { p: Income }) {
+  const e = p.estimate;
   const [months, setMonths] = useRemembered<Window>("ahead", 12, { valid: (v) => (WINDOWS as readonly number[]).includes(v) });
   const [split, setSplit] = useRemembered("ahead-by-account", false);
   const w = useMemo(() => estimateFor(e, months), [e, months]);
-  const label = months === 12 ? "a year" : months === 1 ? "in the next month" : `in the next ${months} months`;
+  const cal = useMemo(
+    () => calendarYearEstimate(e, p.dividends.this_year_cents + p.interest.this_year_cents),
+    [e, p.dividends.this_year_cents, p.interest.this_year_cents],
+  );
+  const label = months === 12 ? "over the next 12 months" : months === 1 ? "in the next month" : `in the next ${months} months`;
   return (
     <Card className="md:col-span-2">
       <CardHeader>
@@ -184,7 +191,7 @@ function Ahead({ e }: { e: Estimate }) {
           Dividends and interest {label}
           {months === 12 && (
             <>
-              , about <Money cents={Math.round(w.totalCents / 12)} /> a month
+              , your yearly estimate. About <Money cents={Math.round(w.totalCents / 12)} /> a month
             </>
           )}
           .
@@ -195,6 +202,16 @@ function Ahead({ e }: { e: Estimate }) {
           </Stat>
           <Stat label="Interest" value={<Money cents={w.interestCents} />}>
             Savings, CDs and brokerage cash at today&apos;s rates
+          </Stat>
+        </div>
+
+        <p className="mt-5 text-xs font-medium text-muted-foreground">By calendar year</p>
+        <div className="mt-2 grid grid-cols-2 gap-2 sm:gap-3">
+          <Stat label={`${cal.year}, the whole year`} value={<Money cents={cal.totalCents} />}>
+            <Money cents={cal.paidCents} /> paid so far + <Money cents={cal.restCents} /> still to come
+          </Stat>
+          <Stat label={`${cal.year + 1}`} value={<Money cents={e.annual_cents} />}>
+            A full year at today&apos;s holdings and rates
           </Stat>
         </div>
 
@@ -251,6 +268,80 @@ function AheadRow({ a, total }: { a: WindowAccount; total: number }) {
         )}
       </div>
     </li>
+  );
+}
+
+// ---- which accounts count on this page
+
+function Counted({ p, onSaved }: { p: Income; onSaved: (p: Income) => void }) {
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState<number | null>(null);
+  const all = p.choose ?? [];
+  const out = all.filter((a) => a.excluded);
+  if (all.length === 0) return null;
+  const toggle = async (a: CountedAccount, counted: boolean) => {
+    if (p.demo) return toast("Accounts can't be left out while the app shows sample data.");
+    setBusy(a.id);
+    try {
+      onSaved(await api<Income>(`/api/income/counted/${a.id}`, { method: "PUT", body: { excluded: !counted } }));
+      toast(counted ? `${a.name} counts again.` : `${a.name} left out.`);
+    } catch (e) {
+      toast((e as Error).message, "error");
+    } finally {
+      setBusy(null);
+    }
+  };
+  const group = (kind: CountedAccount["kind"], title: string) => {
+    const rows = all.filter((a) => a.kind === kind);
+    if (rows.length === 0) return null;
+    return (
+      <section className="mt-4 first:mt-0">
+        <h3 className="mb-1 text-xs font-medium text-muted-foreground">{title}</h3>
+        <ul className="divide-y">
+          {rows.map((a) => (
+            <li key={a.id} className="py-1">
+              <Switch
+                checked={!a.excluded}
+                disabled={busy === a.id}
+                onCheckedChange={(on) => toggle(a, on)}
+                label={a.name}
+                description={a.excluded ? "Left out" : "Counted"}
+              />
+            </li>
+          ))}
+        </ul>
+      </section>
+    );
+  };
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="mt-4 flex min-h-11 w-full items-center gap-2 rounded-lg text-left text-sm text-muted-foreground hover:text-foreground"
+      >
+        <span className="min-w-0 flex-1 truncate">
+          {out.length === 0 ? (
+            <>Counting all {all.length} accounts</>
+          ) : (
+            <>
+              Counting {all.length - out.length} of {all.length} accounts · leaving out {out.map((a) => a.name).join(", ")}
+            </>
+          )}
+        </span>
+        <span className="shrink-0 font-medium text-primary">Choose</span>
+        <ChevronRight className="size-4 shrink-0 text-primary" aria-hidden />
+      </button>
+      <Sheet
+        open={open}
+        onOpenChange={setOpen}
+        title="Accounts counted"
+        description="Turn an account off to leave it out of everything on this page: what was paid, the estimates, by account and the charts. For taxes still counts every account, since taxes are owed either way."
+      >
+        {group("investment", "Investment accounts")}
+        {group("bank", "Bank accounts")}
+      </Sheet>
+    </>
   );
 }
 

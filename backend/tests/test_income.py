@@ -74,6 +74,21 @@ def test_brokerage_dividends_and_bank_interest(client, home, plaid):  # noqa: F8
         assert tax["estimated"] is True and tax["tax_advantaged_cents"] == 0
     assert set(tax) >= {"year", "through", "complete", "covers_whole_year", "dividends", "interest"}
 
+    # Leave the checking account out: its interest leaves every total and the estimate, but taxes still count it.
+    assert any(a["id"] == checking_id and not a["excluded"] for a in page["choose"])
+    r = client.put(f"/api/income/counted/{checking_id}", json={"excluded": True}, headers=csrf(client))
+    assert r.status_code == 200, r.text
+    out = r.json()
+    assert out["interest"]["received_12m_cents"] == 125
+    assert all(a["id"] != checking_id for a in out["interest"]["accounts"])
+    assert all(a["account"] != "Checking" for a in out["estimate"]["accounts"])
+    assert next(a for a in out["choose"] if a["id"] == checking_id)["excluded"] is True
+    assert out["tax"][0]["interest"]["total_cents"] == page["tax"][0]["interest"]["total_cents"]
+    assert client.get("/api/income").json()["interest"]["received_12m_cents"] == 125
+    r = client.put(f"/api/income/counted/{checking_id}", json={"excluded": False}, headers=csrf(client))
+    assert r.json()["interest"]["received_12m_cents"] == 125 + 1_234
+    assert client.put("/api/income/counted/99999", json={"excluded": True}, headers=csrf(client)).status_code == 404
+
 
 def test_retirement_accounts_are_not_taxable():
     def a(subtype, name="Account"):
@@ -150,6 +165,8 @@ def test_demo_income(tmp_path):
     assert any(a["kind"] == "cd" and a["maturity"] for a in page["interest"]["accounts"])
     assert c.get("/api/income/tax", params={"year": 2026}).json()["year"] == 2026
     assert c.put("/api/income/accounts/2", json={"apy": 4}).status_code == 403
+    assert c.put("/api/income/counted/2", json={"excluded": True}).status_code == 403
+    assert {a["kind"] for a in page["choose"]} == {"investment", "bank"}
 
 
 def test_estimate_a_year_by_account_and_short_windows():

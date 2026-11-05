@@ -101,7 +101,11 @@ export type Income = {
   };
   tax: TaxYear[];
   estimate: Estimate;
+  /** Every account that can pay dividends or interest, and whether it's left out of this page. */
+  choose: CountedAccount[];
 };
+
+export type CountedAccount = { id: number; name: string; kind: "investment" | "bank"; excluded: boolean };
 
 export type EstimateAccount = {
   account: string;
@@ -152,6 +156,25 @@ export function estimateFor(e: Estimate, months: Window, today = new Date()) {
   const dividendsCents = accounts.reduce((s, a) => s + a.dividendsCents, 0);
   const interestCents = accounts.reduce((s, a) => s + a.interestCents, 0);
   return { dividendsCents, interestCents, totalCents: dividendsCents + interestCents, accounts };
+}
+
+/**
+ * This calendar year from start to finish: what has been paid so far plus what's still expected before January 1 (the
+ * dividends due at each holding's usual schedule, and the rest of the year's interest at today's rates).
+ */
+export function calendarYearEstimate(e: Estimate, paidSoFarCents: number, today = new Date()) {
+  const year = today.getFullYear();
+  const start = isoDay(today);
+  const end = `${year + 1}-01-01`;
+  let restDividendsCents = 0;
+  for (const p of e.payments) if (p.pay_date >= start && p.pay_date < end) restDividendsCents += p.cents;
+  const dayMs = 86_400_000;
+  const midnight = new Date(year, today.getMonth(), today.getDate()).getTime();
+  const daysLeft = Math.round((new Date(year + 1, 0, 1).getTime() - midnight) / dayMs);
+  const daysInYear = Math.round((new Date(year + 1, 0, 1).getTime() - new Date(year, 0, 1).getTime()) / dayMs);
+  const restInterestCents = Math.round((e.interest_annual_cents * daysLeft) / daysInYear);
+  const restCents = restDividendsCents + restInterestCents;
+  return { year, paidCents: paidSoFarCents, restDividendsCents, restInterestCents, restCents, totalCents: paidSoFarCents + restCents };
 }
 
 function isoDay(d: Date): string {
