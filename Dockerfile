@@ -27,8 +27,10 @@ ARG APP_VERSION=dev
 LABEL org.opencontainers.image.title="Finance App" \
       org.opencontainers.image.source="https://github.com/rastogi-s/FinanceApp" \
       org.opencontainers.image.version="${APP_VERSION}"
-# Security fixes released since the base image was built; pip is not needed at runtime.
-RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/* \
+# Security fixes released since the base image was built; pip is not needed at runtime. CI passes today's date as
+# SECURITY_DAY so its build cache can't keep yesterday's packages past a fix (a cached layer once held apt 3.0.3).
+ARG SECURITY_DAY=
+RUN : "${SECURITY_DAY}" && apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/* \
  && python -m pip uninstall -y pip \
  && useradd --system --uid 10001 --no-create-home --shell /usr/sbin/nologin finance
 COPY --from=python /app/.venv /app/.venv
