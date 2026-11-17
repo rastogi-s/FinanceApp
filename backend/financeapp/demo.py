@@ -1163,6 +1163,64 @@ def _sample_lots(symbol: str, held: list, price: float, today: date) -> dict | N
     return {"rows": rows, **lots.summary(rows, today)} if rows else None
 
 
+# Sample sales: (days ago, symbol, account, shares, proceeds, cost (None: from before the history), held long?)
+SAMPLE_SALES = [
+    (12, "AAPL", "E*TRADE", 6, 2_037, 1_612, False),
+    (75, "MSFT", "E*TRADE", 4, 1_986, 1_204, True),
+    (160, "VTI", "E*TRADE", 10, 3_050, None, True),
+    (230, "VXUS", "Fidelity 401(k)", 40, 2_660, 2_310, True),
+    (410, "AAPL", "E*TRADE", 5, 1_150, 1_310, False),
+]
+
+
+def profit(today: date | None = None) -> dict:
+    """The Profit page from the sample holdings' lots, and a few sample sales."""
+    from financeapp import income
+    from financeapp import profit as profits
+
+    today = today or datetime.now(UTC).date()
+    names = list(dict.fromkeys(h[3] for h in HOLDINGS if h[2] != "Cash"))
+    ids = {n: i + 1 for i, n in enumerate(names)}
+    rows = []
+    for h in HOLDINGS:
+        if h[2] == "Cash":
+            continue
+        got = _sample_lots(h[0], [h], SAMPLE_PRICES.get(h[0], 100.0), today)
+        for r in (got or {}).get("rows", []):
+            rows.append({**r, "account_id": ids[h[3]]})
+    held = {(ids[h[3]], h[0]): h[1] for h in HOLDINGS if h[2] != "Cash"}
+    sales = []
+    for days, symbol, account, shares, proceeds, cost, long_ in sorted(SAMPLE_SALES):
+        p, c = _cents(proceeds), _cents(cost) if cost is not None else None
+        gain = p - c if c is not None else None
+        sales.append(
+            {
+                "date": (today - timedelta(days=days)).isoformat(),
+                "symbol": symbol,
+                "name": next(h[1] for h in HOLDINGS if h[0] == symbol),
+                "account_id": ids[account],
+                "taxable": not income.TAX_ADVANTAGED.search(account.lower()),
+                "quantity": float(shares),
+                "proceeds_cents": p,
+                "cost_cents": c,
+                "gain_cents": gain,
+                "short_gain_cents": gain if gain is not None and not long_ else 0,
+                "long_gain_cents": gain if gain is not None and long_ else 0,
+                "uncosted_proceeds_cents": p if c is None else 0,
+            }
+        )
+    accounts = [
+        {
+            "id": ids[n],
+            "name": n,
+            "taxable": not income.TAX_ADVANTAGED.search(n.lower()),
+            "history_from": (today - timedelta(days=730)).isoformat(),
+        }
+        for n in names
+    ]
+    return profits.report(profits.holdings(rows, held), sales, accounts, today)
+
+
 def security(symbol: str, range_: str, today: date | None = None) -> dict:
     """A holding's detail page with a made-up but steady price history."""
     today = today or datetime.now(UTC).date()
