@@ -1,5 +1,21 @@
 [
   {
+    "version": "0.67.0",
+    "title": "A heads-up when an account is short for a payment you make on a schedule",
+    "features": [
+      {
+        "id": "low-cash-reminders",
+        "title": "Low cash reminders",
+        "body": "Settings, Alerts has a new Low cash reminders card. Add any payment you make on a schedule, like a $105 buy in E*TRADE every Thursday, a monthly move into savings or a loan paid from one checking account: pick the account, the amount, how often and the next date. Before each one the app checks that account's cash (a brokerage's cash position, a bank's available balance), counting every other reminder on the same account and an optional cushion. When it's short, Home's Needs you says how much to add and by when, Coming up marks it, and your phone gets a push one to three days ahead (you choose) so a transfer has time to land. The push names the account and the day, never an amount."
+      },
+      {
+        "id": "low-cash-found",
+        "title": "Repeating buys found for you",
+        "body": "Buys of the same total in a brokerage that repeat every week, every two weeks or every month show up under Found in your activity on the same card. Tap Add to turn one into a reminder with the amount and day already filled in, or Not this to stop it being offered."
+      }
+    ]
+  },
+  {
     "version": "0.66.0",
     "title": "A yearly estimate for dividends and interest, and accounts you can leave out",
     "features": [

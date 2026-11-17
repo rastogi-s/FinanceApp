@@ -4,8 +4,8 @@ concentration alerts; after the close, a year of daily prices for the dip alerts
 look-through once a week, each holding's dividend history and the market's deposit rates once a day, the morning
 brief at the time the owner picked, whether a newer version is out every few hours, and once an hour whether an
 uploaded or typed-in account is due a new statement (reminders.py), a utility bill is late (bills.py), a CD is about
-to mature (deposits.py), a card offer at a store you shop at is about to end (offers.py) or a card statement is due
-and not paid (cardpay.py).
+to mature (deposits.py), a card offer at a store you shop at is about to end (offers.py), a card statement is due
+and not paid (cardpay.py), or an account is short of cash for a payment made on a schedule (funding.py).
 
 It checks every minute whether each is due, from what's saved in the database, so restarts and updates don't cause
 extra runs, and the sync's own database lock means two copies of the app never sync at once. It also clears out
@@ -24,6 +24,7 @@ from financeapp import (
     brief,
     cardpay,
     deposits,
+    funding,
     income,
     lookthrough,
     offers,
@@ -94,7 +95,7 @@ class Scheduler:
             with self.database.session() as db:
                 on = reminders.local_today(db)
                 queued = reminders.queue(db, on) + deposits.queue(db, on) + offers.queue(db, on)
-                if queued + cardpay.queue(db, on) + bills.queue(db, on):
+                if queued + cardpay.queue(db, on) + bills.queue(db, on) + funding.queue(db, on):
                     alerts.send_pending(db, self.settings)
         brief.run(self.database, self.settings)
 

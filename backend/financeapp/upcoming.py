@@ -7,6 +7,8 @@ card offers about to end. Each comes from the page that already works it out:
 - dividends: Dividends & interest's expected payments (income.build), at each holding's usual amount.
 - offers: card offers ending within a week (offers.load).
 - utility bills: when each is usually paid (bills.status), at its usual amount. Late ones are in "Needs you" instead.
+- payments you make on a schedule from one account (funding.py, the low cash reminders): each one's next date, and
+  whether the account has the cash for it or how much to add.
 Amounts are what's expected, not promised; the rows say so where it matters.
 """
 
@@ -15,7 +17,7 @@ from datetime import date, timedelta
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
 
-from financeapp import bills, budget, cardpay, cards, deposits, household, income, offers
+from financeapp import bills, budget, cardpay, cards, deposits, funding, household, income, offers
 from financeapp.models import Account, CardLink, CardStatement, Paycheck, User
 
 DAYS = 14
@@ -136,9 +138,29 @@ def utility_bills(soon: list[dict], today: date) -> list[dict]:
     return out
 
 
+def scheduled(rows: list[dict], today: date, end: date) -> list[dict]:
+    """Each low cash reminder's next date in the window. `funding` carries whether it's covered, and how much to add
+    when it isn't, so the page can show it (and hide the amounts with the rest)."""
+    out = []
+    for r in rows:
+        on = date.fromisoformat(r["next"])
+        if r["state"] == "off" or not today <= on <= end:
+            continue
+        if r["state"] == "short":
+            detail = f"Not enough in {r['account']} yet"
+        elif r["state"] == "ok":
+            detail = f"{r['account']} has enough cash"
+        else:
+            detail = f"From {r['account']}, cash not known"
+        row = event(on, "funding", r["name"], detail, -r["amount_cents"], "/" if r["state"] == "short" else r["href"])
+        row["funding"] = {k: r[k] for k in ("state", "short_cents", "cash_cents", "account")}
+        out.append(row)
+    return out
+
+
 def merge(*groups: list[dict]) -> list[dict]:
     rows = [r for g in groups for r in g]
-    order = {"pay": 0, "card": 1, "bill": 2, "cd": 3, "dividend": 4, "offer": 5}
+    order = {"pay": 0, "card": 1, "bill": 2, "funding": 3, "cd": 4, "dividend": 5, "offer": 6}
     return sorted(rows, key=lambda r: (r["date"], order[r["kind"]], r["title"]))
 
 
@@ -176,5 +198,6 @@ def build(db: DbSession, today: date) -> dict:
             dividends(expected, today, end),
             ending_offers(offers.load(db, today), card_names, today),
             utility_bills(bills.status(db, today)["soon"], today),
+            scheduled(funding.status(db, today)["all"], today, end),
         ),
     }

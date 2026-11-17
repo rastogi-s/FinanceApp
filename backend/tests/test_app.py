@@ -126,12 +126,14 @@ def test_demo_household_adds_up(site):
     assert all(isinstance(t["amount_cents"], int) for t in h["transactions"])
     # Home's "Needs you" has the sample CD, and the FI tile has what the projection starts from.
     assert [m["name"] for m in h["health"]["maturing"]] == ["Marcus 12-month CD ••7781"]
+    assert [f["name"] for f in h["health"]["funding"]] == ["E*TRADE weekly buy"]
+    assert client(site, demo_mode=True).get("/api/funding").json()["suggestions"]
     assert h["projection"]["start_cents"] > 0 and h["projection"]["target_cents"] > 0
 
 
 def test_demo_coming_up(site):
     r = client(site, demo_mode=True).get("/api/upcoming").json()
-    assert {e["kind"] for e in r["events"]} == {"pay", "card", "bill", "cd", "dividend", "offer"}
+    assert {e["kind"] for e in r["events"]} == {"pay", "card", "bill", "funding", "cd", "dividend", "offer"}
     assert [e["date"] for e in r["events"]] == sorted(e["date"] for e in r["events"])
 
 
