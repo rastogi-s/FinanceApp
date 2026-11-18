@@ -1187,6 +1187,8 @@ def profit(today: date | None = None) -> dict:
             continue
         got = _sample_lots(h[0], [h], SAMPLE_PRICES.get(h[0], 100.0), today)
         for r in (got or {}).get("rows", []):
+            if h[3] == "Fidelity 401(k)" and h[0] == "VXUS":  # a plan fund the brokerage sends no cost for
+                r = {**r, "cost_cents": None, "gain_cents": None}
             rows.append({**r, "account_id": ids[h[3]]})
     held = {(ids[h[3]], h[0]): h[1] for h in HOLDINGS if h[2] != "Cash"}
     sales = []

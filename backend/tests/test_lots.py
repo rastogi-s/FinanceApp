@@ -4,7 +4,7 @@ from decimal import Decimal
 from financeapp import lots, security
 from financeapp.models import Account, Connection, HoldingSnapshot, InvestmentTransaction
 from financeapp.portfolio import Position
-from tests.conftest import db_of, needs_db
+from tests.conftest import csrf, db_of, needs_db
 
 TODAY = date.today()
 
@@ -183,5 +183,67 @@ def test_demo_profit_has_every_account_with_lots():
 
     p = demo.profit(date(2026, 11, 17))
     assert {a["name"] for a in p["accounts"]} == {"Fidelity 401(k)", "E*TRADE", "Fidelity IRA"}
-    assert all(h["cost_cents"] > 0 for h in p["holdings"])
+    assert [h["symbol"] for h in p["holdings"] if h["uncosted_value_cents"]] == ["VXUS"]  # the plan fund with no cost
     assert p["sales_by_year"][0]["year"] == 2026
+
+
+def test_money_market_sales_are_not_sales():
+    from financeapp import profit
+
+    mmf = [txn(30, "buy", 500, -500, price=1), txn(10, "sell", -120, 120, price=1)]
+    for t in mmf:
+        t.symbol = "SPAXX"
+    assert profit.cash_like("SPAXX", mmf, set())
+    assert profit.cash_like("VMFXX", [], {"VMFXX"})
+    assert not profit.cash_like("AAPL", [txn(30, "buy", 2, -600, price=300)], set())
+
+
+def test_a_fund_without_a_ticker_keeps_its_name_in_the_activity():
+    from financeapp.connectors.plaid import activity_symbol
+
+    assert activity_symbol({"ticker_symbol": "VTI", "name": "Vanguard"}) == "VTI"
+    assert activity_symbol({"ticker_symbol": None, "name": "NETAPP TARGET 2050"}) == "NETAPP TARGET 2050"
+    assert activity_symbol({"ticker_symbol": None, "name": "Cash", "is_cash_equivalent": True}) is None
+    assert activity_symbol({}) is None
+
+
+@needs_db
+def test_what_you_paid_fills_a_holding_with_no_cost(client, home):
+    home.setup()
+    with db_of(client).session() as db:
+        c = Connection(provider="plaid", institution="Fidelity", state={}, created_at=datetime.now(UTC))
+        db.add(c)
+        db.flush()
+        a = Account(connection_id=c.id, external_id="k", name="401(K) Savings", institution="Fidelity",
+                    type="investment", subtype="401k")  # fmt: skip
+        db.add(a)
+        db.flush()
+        db.add(HoldingSnapshot(date=TODAY, account_id=a.id, symbol="NETAPP TARGET 2050", name="NETAPP TARGET 2050",
+                               asset_class="Funds", quantity=Decimal(100), price=Decimal(50), value_cents=500_000,
+                               cost_basis_cents=None))  # fmt: skip
+        db.add(HoldingSnapshot(date=TODAY, account_id=a.id, symbol="SPAXX", name="Fidelity Government Money Market",
+                               asset_class="Cash", quantity=Decimal(10), price=Decimal(1), value_cents=1_000,
+                               cost_basis_cents=None))  # fmt: skip
+        db.add(InvestmentTransaction(account_id=a.id, external_id="m", date=TODAY - timedelta(days=5), type="sell",
+                                     subtype="sell", symbol="SPAXX", name="Fidelity Government Money Market",
+                                     quantity=Decimal(-50), price=Decimal(1), amount_cents=5_000,
+                                     source="plaid"))  # fmt: skip
+        db.flush()
+        aid = a.id
+    p = client.get("/api/portfolio/profit").json()
+    h = next(x for x in p["holdings"] if x["account_id"] == aid)
+    assert h["uncosted_value_cents"] == 500_000 and h["cost_cents"] == 0 and not h["typed"]
+    assert not [s for s in p["sales"] if s["symbol"] == "SPAXX"]  # the sweep isn't a sale
+    h = csrf(client)
+    r = client.put("/api/portfolio/paid", json={"account_id": aid, "symbol": "NETAPP TARGET 2050", "cents": 400_000},
+                   headers=h)  # fmt: skip
+    assert r.status_code == 200, r.text
+    got = next(x for x in r.json()["holdings"] if x["account_id"] == aid)
+    assert got["cost_cents"] == 400_000 and got["uncosted_value_cents"] == 0 and got["typed"]
+    assert got["short_gain_cents"] + got["long_gain_cents"] + got["unknown_gain_cents"] == 100_000
+    nope = {"account_id": aid, "symbol": "NOPE", "cents": 1}
+    assert client.put("/api/portfolio/paid", json=nope, headers=h).status_code == 404
+    forget = {"account_id": aid, "symbol": "NETAPP TARGET 2050", "cents": None}
+    client.put("/api/portfolio/paid", json=forget, headers=h)
+    got = next(x for x in client.get("/api/portfolio/profit").json()["holdings"] if x["account_id"] == aid)
+    assert got["uncosted_value_cents"] == 500_000

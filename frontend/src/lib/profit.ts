@@ -13,7 +13,9 @@ export type ProfitHolding = {
   long_gain_cents: number;
   unknown_gain_cents: number; // shares from before the activity on file, buy date not known yet
   uncosted_value_cents: number; // lots with no cost on file: left out of the gain
+  quantity: number;
   lots: number;
+  typed: boolean; // the cost is what you typed in (the brokerage sends none)
 };
 
 export type ProfitSale = {
@@ -109,6 +111,8 @@ export function byHolding(p: Profit, ids: Set<number>) {
     r.unknown_gain_cents += h.unknown_gain_cents;
     r.uncosted_value_cents += h.uncosted_value_cents;
     r.lots += h.lots;
+    r.quantity += h.quantity;
+    r.typed = r.typed || h.typed;
     r.accounts.push(h.account_id);
   }
   return [...rows.values()];
