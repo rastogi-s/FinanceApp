@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
 
-from financeapp import demo, household, lookthrough, lots, portfolio, profit, quotes, security
+from financeapp import costs, demo, household, lookthrough, lots, portfolio, profit, quotes, security
 from financeapp.ai import moves, research
 from financeapp.ai.providers import ProviderError
 from financeapp.ai.service import AIUnavailable
@@ -91,6 +91,26 @@ def get_profit(request: Request, who: Signed = Depends(signed_in)) -> dict:
         return demo.profit()
     db = db_of(request)
     accounts = household.counted(db)
+    return profit.of(db, accounts, portfolio.positions(db, accounts))
+
+
+class PaidIn(BaseModel):
+    account_id: int
+    symbol: str = Field(min_length=1, max_length=40)
+    cents: int | None = Field(default=None, ge=0, le=100_000_000_000)  # None or 0: forget it
+
+
+@router.put("/portfolio/paid")
+def set_paid(body: PaidIn, request: Request, who: Signed = Depends(signed_in)) -> dict:
+    """What you paid for a holding the brokerage sends no cost for (a 401(k) plan fund, say)."""
+    if who.demo:
+        raise HTTPException(403, "Not available with sample data.")
+    db = db_of(request)
+    accounts = household.counted(db)
+    if not any(p.account_id == body.account_id and p.symbol == body.symbol for p in portfolio.positions(db, accounts)):
+        raise HTTPException(404, "Couldn't find that holding.")
+    costs.save(db, body.account_id, body.symbol, body.cents or None)
+    audit(db, request, "portfolio.paid", who.user.id, account=body.account_id)
     return profit.of(db, accounts, portfolio.positions(db, accounts))
 
 
@@ -304,7 +324,7 @@ def detail(
             ],
             "as_of": max(p.as_of for p in mine).isoformat(),
         }
-        rows = lots.of(db, accounts, mine)
+        rows = lots.of(db, accounts, costs.fill(db, mine)[0])
         if rows:
             position["lots"] = {"rows": rows, **lots.summary(rows)}
     locked = portfolio.unvested(db, accounts, symbol)

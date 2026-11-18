@@ -1,5 +1,21 @@
 [
   {
+    "version": "0.69.0",
+    "title": "Profit for your 401(k), and money market sweeps left out",
+    "features": [
+      {
+        "id": "profit-what-you-paid",
+        "title": "Add what you paid",
+        "body": "Some brokerages, like Fidelity for 401(k) plan funds, don't send what you paid, so Profit couldn't count those holdings. A new What you paid card on Profit lists each one: tap Add and type its cost basis from the brokerage's site, and its profit shows up everywhere on the page. A cost the brokerage sends later always wins. 401(k) contributions are now also matched to their funds, so new buys get their own lots after the next sync."
+      },
+      {
+        "id": "profit-no-sweeps",
+        "title": "Money market sweeps aren't sales",
+        "body": "Cash moving out of a money market fund like SPAXX to pay for a buy no longer shows up under Sold, so the list and its totals are only real sales."
+      }
+    ]
+  },
+  {
     "version": "0.68.0",
     "title": "See how much your portfolio has actually made, by account",
     "features": [

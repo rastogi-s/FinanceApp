@@ -2,25 +2,31 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { ChevronRight, TrendingUp } from "lucide-react";
+import { ChevronRight, PenLine, TrendingUp } from "lucide-react";
 import { Money } from "@/components/money";
 import { BackLink, Column, Columns, Notice, Wide } from "@/components/page";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Select } from "@/components/ui/input";
+import { Field, Input, Select } from "@/components/ui/input";
+import { Sheet } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
+import { toast } from "@/components/ui/toast";
+import { api } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 import { useApi } from "@/lib/household";
 import { useRemembered } from "@/lib/nav";
 import { asOf, hasDetail, holdingHref } from "@/lib/portfolio";
-import { type Profit, byHolding, gainOf, picked, signedPercent, soldIn, totals } from "@/lib/profit";
+import { type Profit, type ProfitHolding, byHolding, gainOf, picked, signedPercent, soldIn, totals } from "@/lib/profit";
 import { cn } from "@/lib/utils";
 
 const shareCount = new Intl.NumberFormat("en-US", { maximumFractionDigits: 3 });
 const FIRST_SALES = 8;
 
 export default function ProfitPage() {
-  const { data: p, error } = useApi<Profit>("/api/portfolio/profit");
+  const { data, error } = useApi<Profit>("/api/portfolio/profit");
+  const [local, setLocal] = useState<Profit | null>(null);
+  const p = local ?? data;
   return (
     <>
       <Wide />
@@ -48,12 +54,12 @@ export default function ProfitPage() {
           Link a brokerage or retirement account and your profit shows up here, holding by holding.
         </Notice>
       )}
-      {p && p.accounts.length > 0 && <Body p={p} />}
+      {p && p.accounts.length > 0 && <Body p={p} onSaved={setLocal} />}
     </>
   );
 }
 
-function Body({ p }: { p: Profit }) {
+function Body({ p, onSaved }: { p: Profit; onSaved: (p: Profit) => void }) {
   const [chosen, setChosen] = useRemembered<number[]>("accounts", [], {
     always: true,
     valid: (v) => Array.isArray(v) && v.every((x) => typeof x === "number"),
@@ -75,7 +81,9 @@ function Body({ p }: { p: Profit }) {
             </Chip>
             {p.accounts.map((a) => (
               <Chip key={a.id} on={!all && ids.has(a.id)} onClick={() => toggle(a.id)}>
-                {a.name}
+                <span className="truncate" title={a.name}>
+                  {a.name}
+                </span>
               </Chip>
             ))}
           </div>
@@ -84,6 +92,7 @@ function Body({ p }: { p: Profit }) {
       <Columns>
         <Column>
           <Unrealized p={p} ids={ids} />
+          <WhatYouPaid p={p} ids={ids} onSaved={onSaved} />
           <Realized p={p} ids={ids} />
         </Column>
         <Column>
@@ -101,7 +110,7 @@ function Chip({ on, onClick, children }: { on: boolean; onClick: () => void; chi
       aria-pressed={on}
       onClick={onClick}
       className={cn(
-        "inline-flex h-9 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border px-3.5 text-sm font-medium transition-colors",
+        "inline-flex h-9 max-w-[16rem] shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border px-3.5 text-sm font-medium transition-colors",
         on ? "border-transparent bg-foreground text-background" : "bg-card text-muted-foreground hover:text-foreground",
       )}
     >
@@ -148,6 +157,38 @@ function Unrealized({ p, ids }: { p: Profit; ids: Set<number> }) {
         <Badge variant="muted">Unrealized</Badge>
       </CardHeader>
       <CardContent>
+        {t.cost === 0 && t.uncosted > 0 ? (
+          <>
+            <p className="text-4xl font-semibold tracking-tight tabular-nums">
+              <Money cents={t.value} />
+            </p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Worth today. {ids.size === 1 ? "This account's brokerage doesn't" : "The brokerage doesn't"} send what you paid
+              for {ids.size === 1 ? "its" : "these"} holdings, so the profit can&apos;t be worked out yet. Add it under What
+              you paid and it shows up here.
+            </p>
+          </>
+        ) : (
+          <UnrealizedBody t={t} tiles={tiles} paidShare={paidShare} taxed={taxed} />
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function UnrealizedBody({
+  t,
+  tiles,
+  paidShare,
+  taxed,
+}: {
+  t: ReturnType<typeof totals>;
+  tiles: { label: string; cents: number; hint: string }[];
+  paidShare: number;
+  taxed: boolean;
+}) {
+  return (
+    <>
         <p className="text-4xl font-semibold tracking-tight tabular-nums">
           <Tone cents={t.gain}>
             <Money cents={t.gain} signed />
@@ -191,13 +232,125 @@ function Unrealized({ p, ids }: { p: Profit; ids: Set<number> }) {
           {t.uncosted > 0 && (
             <>
               {" "}
-              <Money cents={t.uncosted} /> of holdings have no cost on file, so they&apos;re left out.
+              <Money cents={t.uncosted} /> of holdings have no cost on file, so they&apos;re left out until you add what
+              you paid.
             </>
           )}
           {taxed && t.unknown !== 0 && " Shares older than the first activity your brokerage sent count once their buy date is clear."}
         </p>
+    </>
+  );
+}
+
+// ---- what you paid, where the brokerage sends nothing
+
+function WhatYouPaid({ p, ids, onSaved }: { p: Profit; ids: Set<number>; onSaved: (p: Profit) => void }) {
+  const { state } = useAuth();
+  const demo = state.status === "signed-in" && state.demo;
+  const [editing, setEditing] = useState<ProfitHolding | null>(null);
+  const rows = p.holdings.filter((h) => ids.has(h.account_id) && (h.uncosted_value_cents > 0 || h.typed));
+  if (rows.length === 0) return null;
+  const names = new Map(p.accounts.map((a) => [a.id, a.name]));
+  const missing = rows.filter((h) => h.uncosted_value_cents > 0).length;
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>What you paid</CardTitle>
+        {missing > 0 && <Badge variant="warning">{missing} missing</Badge>}
+      </CardHeader>
+      <CardContent>
+        <p className="text-sm text-muted-foreground">
+          Some brokerages, like Fidelity for 401(k) plan funds, don&apos;t send what you paid. Add each one&apos;s cost basis
+          from their site or a statement to see the profit.
+        </p>
+        <ul className="mt-3 divide-y">
+          {rows.map((h) => (
+            <li key={`${h.account_id}-${h.symbol}`} className="flex items-center gap-3 py-2.5">
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-medium">{h.name}</p>
+                <p className="truncate text-xs text-muted-foreground">
+                  Worth <Money cents={h.value_cents} />
+                  {h.typed && h.uncosted_value_cents === 0 ? (
+                    <>
+                      {" "}
+                      · paid <Money cents={h.cost_cents} />, as you entered
+                    </>
+                  ) : null}{" "}
+                  · {names.get(h.account_id)}
+                </p>
+              </div>
+              <Button
+                variant={h.uncosted_value_cents > 0 ? "outline" : "ghost"}
+                size="sm"
+                onClick={() => (demo ? toast("Not available with sample data.") : setEditing(h))}
+              >
+                <PenLine aria-hidden /> {h.uncosted_value_cents > 0 ? "Add" : "Edit"}
+              </Button>
+            </li>
+          ))}
+        </ul>
       </CardContent>
+      <Sheet
+        open={editing !== null}
+        onOpenChange={(o) => !o && setEditing(null)}
+        title={editing ? `What you paid for ${editing.name}` : "What you paid"}
+        description="The total cost basis of every share you hold now, from your brokerage's site. A cost your brokerage sends later always wins."
+      >
+        {editing && <PaidForm key={`${editing.account_id}-${editing.symbol}`} h={editing} onClose={() => setEditing(null)} onSaved={onSaved} />}
+      </Sheet>
     </Card>
+  );
+}
+
+function PaidForm({ h, onClose, onSaved }: { h: ProfitHolding; onClose: () => void; onSaved: (p: Profit) => void }) {
+  const [text, setText] = useState(h.typed ? (h.cost_cents / 100).toFixed(2) : "");
+  const [saving, setSaving] = useState(false);
+  const dollars = Number(text.replace(/[$,\s]/g, ""));
+  const bad = text.trim() !== "" && (!Number.isFinite(dollars) || dollars <= 0 || dollars > 1_000_000_000);
+  const save = async (clear = false) => {
+    setSaving(true);
+    try {
+      const body = { account_id: h.account_id, symbol: h.symbol, cents: clear ? null : Math.round(dollars * 100) };
+      onSaved(await api<Profit>("/api/portfolio/paid", { method: "PUT", body }));
+      toast(clear ? "Removed." : "Saved.");
+      onClose();
+    } catch (e) {
+      toast((e as Error).message, "error");
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <form
+      className="grid grid-cols-1 gap-4 pb-2"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (!bad && text.trim() !== "") save();
+      }}
+    >
+      <Field
+        id="paid"
+        label="Cost basis ($)"
+        hint={
+          <>
+            {shareCount.format(h.quantity)} shares worth <Money cents={h.value_cents} /> today.
+          </>
+        }
+        error={bad ? "Enter an amount in dollars, like 182,400." : null}
+      >
+        <Input inputMode="decimal" value={text} onChange={(e) => setText(e.target.value)} placeholder="182,400" autoComplete="off" autoFocus />
+      </Field>
+      <div className="flex gap-2">
+        <Button type="submit" disabled={saving || bad || text.trim() === ""} className="flex-1">
+          Save
+        </Button>
+        {h.typed && (
+          <Button type="button" variant="outline" disabled={saving} onClick={() => save(true)}>
+            Remove
+          </Button>
+        )}
+      </div>
+    </form>
   );
 }
 
@@ -371,7 +524,15 @@ function Holdings({ p, ids }: { p: Profit; ids: Set<number> }) {
                       <span className="truncate text-xs text-muted-foreground">{h.name}</span>
                     </p>
                     <p className="truncate text-xs text-muted-foreground">
-                      Paid <Money cents={h.cost_cents} /> · worth <Money cents={h.value_cents - h.uncosted_value_cents} />
+                      {h.cost_cents > 0 ? (
+                        <>
+                          Paid <Money cents={h.cost_cents} /> · worth <Money cents={h.value_cents - h.uncosted_value_cents} />
+                        </>
+                      ) : (
+                        <>
+                          Worth <Money cents={h.value_cents} />
+                        </>
+                      )}
                       {ids.size > 1 && where ? ` · ${where}` : ""}
                     </p>
                     <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-muted" aria-hidden>

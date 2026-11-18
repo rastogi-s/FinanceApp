@@ -10,13 +10,14 @@ Everything is reported per account and per holding so the page can show any mix 
 Gains in retirement and health accounts are growth all the same, but nothing there is taxed on a sale.
 """
 
+import re
 from datetime import date
 from decimal import Decimal
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
 
-from financeapp import household, income, lots
+from financeapp import costs, household, income, lots
 from financeapp.models import Account, InvestmentTransaction
 from financeapp.portfolio import Position
 
@@ -27,8 +28,21 @@ def _cents(d: Decimal) -> int:
     return int(d.to_integral_value())
 
 
-def realized(db: DbSession, accounts: list[Account]) -> list[dict]:
-    """Every sale on file in the investment accounts, newest first, with its gain by term where the cost is known."""
+MONEY_MARKET = re.compile(r"money market|government cash|treasury cash|cash reserves|sweep", re.I)
+
+
+def cash_like(symbol: str, txns: list[InvestmentTransaction], cash: set[str]) -> bool:
+    """A money market or sweep fund (SPAXX, VMFXX): held as cash, named like one, or always traded at $1 a share.
+    Its "sales" are cash moving out to pay for something else, never a gain."""
+    if symbol in cash or symbol.endswith("**") or any(MONEY_MARKET.search(t.name or "") for t in txns):
+        return True
+    prices = [t.price for t in txns if t.price and t.type.lower() in ("buy", "sell")]
+    return bool(prices) and all(Decimal("0.995") <= p <= Decimal("1.005") for p in prices)
+
+
+def realized(db: DbSession, accounts: list[Account], cash: set[str] | None = None) -> list[dict]:
+    """Every sale on file in the investment accounts, newest first, with its gain by term where the cost is known.
+    Money market and sweep funds are left out (`cash`: symbols held as cash)."""
     ids = {a.id for a in accounts if a.type == "investment"}
     if not ids:
         return []
@@ -42,6 +56,8 @@ def realized(db: DbSession, accounts: list[Account]) -> list[dict]:
         activity.setdefault((t.account_id, t.symbol or ""), []).append(t)
     out = []
     for (account_id, symbol), txns in activity.items():
+        if cash_like(symbol, txns, cash or set()):
+            continue
         found: list[lots.Sale] = []
         lots.replay(txns, found)
         account = by_id[account_id]
@@ -82,8 +98,9 @@ def sale_row(s: lots.Sale, symbol: str, name: str, account: Account) -> dict:
     }
 
 
-def holdings(rows: list[dict], names: dict[tuple[int, str], str]) -> list[dict]:
-    """The lots added up per holding per account: value, cost and gain by term. `names`: (account id, symbol)."""
+def holdings(rows: list[dict], names: dict[tuple[int, str], str], typed: set[str] | None = None) -> list[dict]:
+    """The lots added up per holding per account: value, cost and gain by term. `names`: (account id, symbol).
+    `typed`: holdings (costs.key) whose cost was typed in."""
     out: dict[tuple[int, str], dict] = {}
     for r in rows:
         key = (r["account_id"], r["symbol"])
@@ -99,10 +116,13 @@ def holdings(rows: list[dict], names: dict[tuple[int, str], str]) -> list[dict]:
                 "long_gain_cents": 0,
                 "unknown_gain_cents": 0,
                 "uncosted_value_cents": 0,
+                "quantity": 0.0,
                 "lots": 0,
+                "typed": costs.key(*key) in (typed or set()),
             },
         )
         h["value_cents"] += r["value_cents"]
+        h["quantity"] += r["quantity"]
         h["lots"] += 1
         if r["cost_cents"] is None:
             h["uncosted_value_cents"] += r["value_cents"]
@@ -159,6 +179,8 @@ def of(db: DbSession, accounts: list[Account], positions: list[Position], today:
                 "history_from": start.isoformat() if start else None,
             }
         )
+    positions, typed = costs.fill(db, positions)
     rows = lots.of(db, accounts, positions)
     names = {(p.account_id, p.symbol): p.name for p in positions}
-    return report(holdings(rows, names), realized(db, accounts), meta, today)
+    cash = {p.symbol for p in positions if p.asset_class == "Cash"}
+    return report(holdings(rows, names, typed), realized(db, accounts, cash), meta, today)
