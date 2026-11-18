@@ -18,6 +18,7 @@ import {
   Search,
   Sparkles,
   Table2,
+  TrendingUp,
   X,
 } from "lucide-react";
 import { ExposureGraph } from "@/components/exposure-graph";
@@ -37,6 +38,7 @@ import { type Holding, type LinkedHousehold, resetHousehold, useApi } from "@/li
 import { type Income, dayLabel } from "@/lib/income";
 import { type MovesResult, VERDICT_TEXT, checkedAt } from "@/lib/moves";
 import { useRemembered } from "@/lib/nav";
+import { type Profit, picked, signedPercent, totals } from "@/lib/profit";
 import {
   type Company,
   type Portfolio,
@@ -138,6 +140,7 @@ function Body({ h }: { h: LinkedHousehold }) {
 
       <Column className="md:contents xl:grid">
         {h.holdings.length > 0 && <MovesLink />}
+        {h.holdings.length > 0 && <ProfitLink />}
         <IncomeLink />
         <Allocation h={h} />
         {p ? <Largest p={p} /> : <ListSkeleton title="Largest positions" rows={6} />}
@@ -223,6 +226,44 @@ function MovesLink() {
             </>
           ) : (
             "Ask AI whether to buy, sell or hold, from your holdings, taxes, goals and today's market"
+          )}
+        </span>
+      </span>
+      <ChevronRight className="size-5 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5" aria-hidden />
+    </Link>
+  );
+}
+
+/** The way to Profit, with how much everything has grown over what it cost. */
+function ProfitLink() {
+  const { data } = useApi<Profit>("/api/portfolio/profit");
+  const t = data && data.accounts.length ? totals(data, picked(data, [])) : null;
+  return (
+    <Link
+      href="/portfolio/profit"
+      className="group flex items-center gap-4 rounded-xl border bg-card px-5 py-4 shadow-[0_1px_2px_rgb(0_0_0/0.04)] hover:bg-muted/40 md:max-xl:col-span-2"
+    >
+      <span className="grid size-10 shrink-0 place-items-center rounded-full bg-positive/10 text-positive">
+        <TrendingUp className="size-5" aria-hidden />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block font-medium">Profit</span>
+        <span className="block text-sm text-muted-foreground">
+          {t && t.cost > 0 ? (
+            <>
+              <span className={cn("block font-medium", t.gain >= 0 ? "text-positive" : "text-negative")}>
+                <Money cents={t.gain} signed /> {t.percent !== null && `(${signedPercent(t.percent)})`} on what you paid
+              </span>
+              {data!.accounts.some((a) => a.taxable) ? (
+                <>
+                  <Money cents={t.long} signed /> long-term, <Money cents={t.short} signed /> short-term in taxable accounts
+                </>
+              ) : (
+                "Not sold yet, by holding and account"
+              )}
+            </>
+          ) : (
+            "How much your holdings have grown, from your tax lots, by account"
           )}
         </span>
       </span>

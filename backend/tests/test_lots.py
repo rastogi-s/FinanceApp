@@ -124,3 +124,64 @@ def test_a_short_history_leaves_earlier_shares_term_unknown(client, home, monkey
     assert earlier["acquired"] is None and earlier["acquired_before"] == (TODAY - timedelta(days=30)).isoformat()
     assert earlier["term"] is None
     assert earlier["long_term_on"] == lots.long_term_on(TODAY - timedelta(days=31)).isoformat()
+
+
+def test_a_sale_is_matched_to_the_lots_it_closed():
+    sales: list[lots.Sale] = []
+    lots.replay(
+        [
+            txn(600, "buy", 10, -1_000),  # $100 a share, long-term by the sale
+            txn(200, "buy", 10, -2_000),  # $200 a share, short-term at the sale
+            txn(100, "sell", -15, 3_750),  # $250 a share: all of the first lot, 5 of the second
+            txn(90, "transfer", -1, 0),  # shares moved out aren't a sale
+        ],
+        sales,
+    )
+    assert len(sales) == 1
+    from financeapp import profit
+    from financeapp.models import Account
+
+    row = profit.sale_row(sales[0], "AAPL", "Apple", Account(id=1, name="Brokerage", subtype="brokerage"))
+    assert row["proceeds_cents"] == 375_000 and row["cost_cents"] == 200_000
+    assert row["long_gain_cents"] == 250_000 - 100_000 and row["short_gain_cents"] == 125_000 - 100_000
+    assert row["uncosted_proceeds_cents"] == 0 and row["taxable"]
+
+
+def test_shares_sold_from_before_the_history_have_no_cost():
+    sales: list[lots.Sale] = []
+    lots.replay([txn(100, "buy", 2, -400), txn(50, "sell", -4, 1_000)], sales)
+    from financeapp import profit
+    from financeapp.models import Account
+
+    row = profit.sale_row(sales[0], "AAPL", "Apple", Account(id=1, name="Roth IRA", subtype="roth"))
+    assert row["cost_cents"] == 40_000 and row["short_gain_cents"] == 50_000 - 40_000
+    assert row["uncosted_proceeds_cents"] == 50_000 and not row["taxable"]
+
+
+@needs_db
+def test_profit_adds_up_the_lots_and_the_sales(client, home):
+    home.setup()
+    seed_lots(client, [(400, 4, -800), (30, 2, -460)])
+    with db_of(client).session() as db:
+        a = db.query(Account).filter_by(external_id="brokerage").one()
+        db.add(InvestmentTransaction(account_id=a.id, external_id="s1", date=TODAY - timedelta(days=10), type="sell",
+                                     subtype="sell", symbol="AAPL", name="Apple", quantity=Decimal(-1),
+                                     price=Decimal(300), amount_cents=30_000, source="plaid"))  # fmt: skip
+        db.flush()
+    p = client.get("/api/portfolio/profit").json()
+    assert [x["name"] for x in p["accounts"]] == ["E*TRADE Brokerage"]
+    h = next(x for x in p["holdings"] if x["symbol"] == "AAPL")
+    assert h["value_cents"] == 300_000 and h["cost_cents"] == 200_000 and h["uncosted_value_cents"] == 0
+    # The sale took the first of the four shares bought 400 days ago at $200 (+$100, long-term).
+    assert p["sales"][0]["long_gain_cents"] == 10_000 and p["sales"][0]["short_gain_cents"] == 0
+    sold_in = next(y for y in p["sales_by_year"] if y["year"] == (TODAY - timedelta(days=10)).year)
+    assert sold_in["by_account"][0]["count"] == 1 and sold_in["by_account"][0]["long_gain_cents"] == 10_000
+
+
+def test_demo_profit_has_every_account_with_lots():
+    from financeapp import demo
+
+    p = demo.profit(date(2026, 11, 17))
+    assert {a["name"] for a in p["accounts"]} == {"Fidelity 401(k)", "E*TRADE", "Fidelity IRA"}
+    assert all(h["cost_cents"] > 0 for h in p["holdings"])
+    assert p["sales_by_year"][0]["year"] == 2026

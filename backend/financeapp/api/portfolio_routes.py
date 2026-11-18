@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
 
-from financeapp import demo, household, lookthrough, lots, portfolio, quotes, security
+from financeapp import demo, household, lookthrough, lots, portfolio, profit, quotes, security
 from financeapp.ai import moves, research
 from financeapp.ai.providers import ProviderError
 from financeapp.ai.service import AIUnavailable
@@ -82,6 +82,16 @@ def get_portfolio(request: Request, who: Signed = Depends(signed_in)) -> dict:
         "market_open": quotes.market_open(now()),
         "sources": sources(request, db),
     }
+
+
+@router.get("/portfolio/profit")
+def get_profit(request: Request, who: Signed = Depends(signed_in)) -> dict:
+    """How much the holdings have grown over what they cost (from the tax lots), and what sales made, by account."""
+    if who.demo:
+        return demo.profit()
+    db = db_of(request)
+    accounts = household.counted(db)
+    return profit.of(db, accounts, portfolio.positions(db, accounts))
 
 
 @router.get("/portfolio/companies")
