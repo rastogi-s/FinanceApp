@@ -2,10 +2,11 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { BellRing, ChevronRight, Mail, Moon, Plus, Send, Smartphone } from "lucide-react";
+import { BellRing, ChevronRight, Landmark, Mail, Moon, Plus, Send, Smartphone } from "lucide-react";
 import { KIND_ICON, type Rule, type RuleIn, RuleSheet } from "@/components/alert-sheets";
 import { BriefSettingsCard } from "@/components/brief";
 import { FundingCard } from "@/components/funding";
+import { type MarketDrop, MarketDropRow, underText } from "@/components/market-drops";
 import { SubPageTitle } from "@/components/page";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -31,6 +32,7 @@ type AlertsState = {
   symbols: string[];
   categories: { id: number; name: string }[];
   goals?: { id: number; name: string }[];
+  markets?: MarketDrop[];
 };
 
 const when = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
@@ -111,7 +113,7 @@ export default function AlertsPage() {
 
   return (
     <>
-      <SubPageTitle title="Alerts" back="/settings" subtitle="Prices, dips, budgets, low cash before a payment, and how concentrated you are, sent to your phone." />
+      <SubPageTitle title="Alerts" back="/settings" subtitle="Prices, dips, market drops, budgets, low cash before a payment, and how concentrated you are, sent to your phone." />
       {!s && !error && (
         <div className="grid grid-cols-1 gap-4" aria-busy="true" aria-label="Loading">
           <Skeleton className="h-28 rounded-xl" />
@@ -165,6 +167,20 @@ export default function AlertsPage() {
 
           <FundingCard demo={demo} className="md:col-span-2" />
 
+          {s.markets && s.markets.length > 0 && (
+            <Card className="md:col-span-2">
+              <CardHeader>
+                <CardTitle>The market</CardTitle>
+                <Landmark className="size-4 text-muted-foreground" aria-hidden />
+              </CardHeader>
+              <CardContent className="grid grid-cols-1 gap-5 md:grid-cols-2">
+                {s.markets.map((d) => (
+                  <MarketDropRow key={d.symbol} d={d} />
+                ))}
+              </CardContent>
+            </Card>
+          )}
+
           <Card className="md:col-span-2">
             <CardHeader>
               <CardTitle>Rules</CardTitle>
@@ -174,7 +190,7 @@ export default function AlertsPage() {
             </CardHeader>
             {s.rules.length === 0 && (
               <CardContent>
-                <p className="text-sm text-muted-foreground">No alerts yet. Add one for a price, a dip, a budget, a savings goal, or any one company getting too big.</p>
+                <p className="text-sm text-muted-foreground">No alerts yet. Add one for a price, a dip, a market drop, a budget, a savings goal, or any one company getting too big.</p>
               </CardContent>
             )}
             <ul className="divide-y pb-2">
@@ -188,7 +204,11 @@ export default function AlertsPage() {
                     <button className="min-w-0 flex-1 text-left" onClick={() => !guard() && setEditing(r)}>
                       <span className={cn("block text-sm font-medium wrap-anywhere", !r.enabled && "text-muted-foreground")}>{r.summary}</span>
                       <span className="block text-xs text-muted-foreground">
-                        {r.kind === "price"
+                        {r.kind === "market"
+                          ? r.market
+                            ? `Now ${underText(r.market.under_percent)} under its record close`
+                            : "Checked with every price update, from its record close"
+                          : r.kind === "price"
                           ? "Checked every 15 minutes while markets are open"
                           : r.kind === "dip"
                             ? "Checked with every price update, against yesterday's trends"

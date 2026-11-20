@@ -1294,10 +1294,23 @@ def security(symbol: str, range_: str, today: date | None = None) -> dict:
     }
 
 
+# The S&P 500 a little over 5% under its record close, for the market drop alert and "Any moves today?".
+SP500_DROP = {
+    "symbol": "^GSPC",
+    "name": "S&P 500",
+    "level": 6812.4,
+    "peak": 7180.12,
+    "peak_on": "2026-10-29",
+    "under_percent": 5.12,
+    "as_of": "2026-11-20T21:00:00+00:00",
+}
+
+
 def alerts() -> dict:
     """Settings → Alerts in demo mode."""
     at = datetime.now(UTC)
     return {
+        "markets": [SP500_DROP],
         "rules": [
             {
                 "id": 1,
@@ -1356,6 +1369,16 @@ def alerts() -> dict:
                 "triggered": False,
             },
             {
+                "id": 9,
+                "kind": "market",
+                "params": {"symbol": "^GSPC", "step": 5},
+                "enabled": True,
+                "priority": "high",
+                "summary": "The S&P 500 falls 5% from its high, and each 5% more",
+                "triggered": False,
+                "market": SP500_DROP,
+            },
+            {
                 "id": 8,
                 "kind": "goal",
                 "params": {"goal_id": None},
@@ -1397,6 +1420,17 @@ def alerts() -> dict:
                 "channel": "ntfy",
                 "read": False,
                 "link": "/portfolio/holding?s=AAPL",
+            },
+            {
+                "id": "a5",
+                "kind": "market",
+                "title": "The S&P 500 is down 5% from its high",
+                "body": "At 6,812, 5.1% under its record close of 7,180 on Oct 29, 2026. Information only, not advice.",
+                "at": (at - timedelta(days=1)).isoformat(),
+                "status": "sent",
+                "channel": "ntfy",
+                "read": False,
+                "link": "/portfolio/moves?market=%5EGSPC",
             },
             {
                 "id": "a4",
@@ -1873,6 +1907,7 @@ def moves_offer(today: date | None = None) -> dict:
         "holdings": len({h[0] for h in HOLDINGS}),
         "headlines": 0,
         "preview": None,
+        "drops": [{k: v for k, v in SP500_DROP.items() if k != "as_of"}],
         "last": {
             "at": at.isoformat(),
             "model": "claude-opus-5-5",

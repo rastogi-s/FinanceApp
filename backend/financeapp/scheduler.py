@@ -78,7 +78,7 @@ class Scheduler:
                 log.info("scheduled sync finished: %s", "ok" if run.ok else "with problems")
         if quotes.refresh(self.database, self.settings) is not None:
             quotes.refresh_trends(self.database, now())  # once a day after the close; a no-op the rest of the time
-            alerts.check(self.database, self.settings, {"price", "dip", "concentration"})
+            alerts.check(self.database, self.settings, {"price", "dip", "market", "concentration"})
         else:
             # Held alerts go out when quiet hours end, even if no new prices came in.
             with self.database.session() as db:

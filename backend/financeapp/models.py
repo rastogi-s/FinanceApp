@@ -488,14 +488,19 @@ class Quote(Base):
     average_200: Mapped[Decimal | None]
     trend_as_of: Mapped[date | None]  # the trading day of the last close counted
     closes: Mapped[list | None] = mapped_column(JSONB)  # a month of daily closes, oldest first (the sparkline)
+    # A market index's record close and its day (quotes.refresh_trends), for the market drop alerts; peak_full once
+    # it's been checked against all of the index's history, not only the last year.
+    peak: Mapped[Decimal | None]
+    peak_on: Mapped[date | None]
+    peak_full: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
 
 
 class AlertRule(Base):
-    """A price, dip, budget, concentration or goal rule (see alerts.py for the params of each)."""
+    """A price, dip, market drop, budget, concentration or goal rule (see alerts.py for the params of each)."""
 
     __tablename__ = "alert_rules"
     id: Mapped[int] = mapped_column(primary_key=True)
-    kind: Mapped[str] = mapped_column(String(16))  # price | dip | budget | concentration | goal
+    kind: Mapped[str] = mapped_column(String(16))  # price | dip | market | budget | concentration | goal
     params: Mapped[dict] = mapped_column(default=dict)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     # Which conditions have fired and not re-armed yet, so a rule never sends the same thing twice.

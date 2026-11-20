@@ -1,5 +1,21 @@
 [
   {
+    "version": "0.70.0",
+    "title": "Know when the market falls, and ask what to do about it",
+    "features": [
+      {
+        "id": "market-drops",
+        "title": "Market drop alerts",
+        "body": "You'll now hear when the S&P 500 falls 5% from its record close, then again at 10%, 15%, 20% and so on. Each step sends one alert per fall, and they reset once the index closes at a new high. 10% is a correction and 20% a bear market. Change the step, switch to the Nasdaq or the Dow, or turn it off in Settings, Alerts, where a new The market card shows how far each index is under its high."
+      },
+      {
+        "id": "market-ask-ai",
+        "title": "Ask AI what to do",
+        "body": "Tap a market drop alert, or Ask AI what to do on the market card, and Any moves today? opens with the fall as the question. The answer weighs it against your holdings, cash, emergency fund, goals and taxes, and says whether to invest more, hold or sell. Ideas only: nothing is bought or sold."
+      }
+    ]
+  },
+  {
     "version": "0.69.0",
     "title": "Profit for your 401(k), and money market sweeps left out",
     "features": [

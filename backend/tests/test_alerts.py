@@ -123,6 +123,48 @@ def test_dip_from_high_steps_down_once_each(client, sent):
 
 
 @needs_db
+def test_market_drop_once_per_step_until_a_new_high(client, sent):
+    with db_of(client).session() as db:
+        db.execute(delete(AlertRule))
+        db.add(AlertRule(kind="market", params={"symbol": "^GSPC", "step": 5}, enabled=True, state={}))
+        set_quote(db, "^GSPC", 6800)
+        assert alerts.evaluate(db, {"market"}, t=NOON) == 0  # the record close isn't known yet
+        q = db.get(Quote, "^GSPC")
+        q.peak, q.peak_on = Decimal("7000"), date(2026, 10, 1)
+        db.flush()
+        assert alerts.evaluate(db, {"market"}, t=NOON) == 0  # 2.9% under
+        set_quote(db, "^GSPC", 6640)
+        assert alerts.evaluate(db, {"market"}, t=NOON) == 1  # 5.1%
+        set_quote(db, "^GSPC", 6600)
+        assert alerts.evaluate(db, {"market"}, t=NOON) == 0  # still the 5% step
+        set_quote(db, "^GSPC", 5550)
+        assert alerts.evaluate(db, {"market"}, t=NOON) == 1  # straight through 10% and 15%: one alert, for 20%
+        set_quote(db, "^GSPC", 6900)
+        assert alerts.evaluate(db, {"market"}, t=NOON) == 0  # recovering, but not to a new high
+        set_quote(db, "^GSPC", 6600)
+        assert alerts.evaluate(db, {"market"}, t=NOON) == 0  # the same fall: 5% was already told
+        set_quote(db, "^GSPC", 7010)
+        alerts.evaluate(db, {"market"}, t=NOON)  # a new high: every step re-armed
+        q.peak = Decimal("7010")
+        set_quote(db, "^GSPC", 6650)
+        assert alerts.evaluate(db, {"market"}, t=NOON) == 1
+        events = db.scalars(select(AlertEvent).order_by(AlertEvent.id)).all()
+        assert [e.title for e in events] == [
+            "The S&P 500 is down 5% from its high",
+            "The S&P 500 is down 20% from its high",
+            "The S&P 500 is down 5% from its high",
+        ]
+        assert events[0].body == (
+            "At 6,640, 5.1% under its record close of 7,000 on Oct 1, 2026. Information only, not advice."
+        )
+        assert "Bear market territory (20% or more)." in events[1].body
+        assert events[0].link == "/portfolio/moves?market=%5EGSPC"  # tapping it asks what to do about it
+        # A price from weeks ago isn't news.
+        set_quote(db, "^GSPC", 4000, at=NOON - timedelta(days=10))
+        assert alerts.evaluate(db, {"market"}, t=NOON) == 0
+
+
+@needs_db
 def test_dip_below_average_for_everything_held(client, sent, monkeypatch):
     monkeypatch.setattr(alerts.quotes, "holding_symbols", lambda db: {"VTI", "AAPL"})
     with db_of(client).session() as db:
@@ -268,7 +310,9 @@ def test_starter_rules_and_check_after_budget(client, home, sent, monkeypatch):
     r = client.get("/api/alerts")
     assert r.status_code == 200
     kinds = sorted(x["kind"] for x in r.json()["rules"])
-    assert kinds == ["budget", "budget", "concentration", "dip", "dip", "goal"]  # from the migrations
+    assert kinds == ["budget", "budget", "concentration", "dip", "dip", "goal", "market"]  # from the migrations
+    market = next(x for x in r.json()["rules"] if x["kind"] == "market")
+    assert market["summary"] == "The S&P 500 falls 5% from its high, and each 5% more" and market["market"] is None
     assert "Any category is on pace to go over its budget" in [x["summary"] for x in r.json()["rules"]]
     monkeypatch.setattr(budget, "today", lambda: date(2026, 10, 21))
     assert alerts.check(db_of(client), client.app.state.settings, {"budget", "concentration"}) == 0
@@ -288,6 +332,8 @@ def test_rules_api(client, home, sent):
         {"kind": "dip", "from_high_percent": 10, "below_average": 200},
         {"kind": "dip", "below_average": 100},
         {"kind": "dip", "symbol": "not a ticker", "from_high_percent": 10},
+        {"kind": "market", "symbol": "^FTSE"},
+        {"kind": "market", "step": 0.5},
         {"kind": "email-everyone"},
     ]
     for rule in bad:
@@ -316,6 +362,16 @@ def test_rules_api(client, home, sent):
     assert client.delete(f"/api/alerts/rules/{rule['id']}", headers=h).status_code == 404
     # A rule from another household member's session still needs the CSRF token.
     assert client.post("/api/alerts/rules", json={"rule": {"kind": "concentration", "percent": 5}}).status_code == 403
+
+    with db_of(client).session() as db:
+        set_quote(db, "^IXIC", 20000, at=datetime.now(UTC))
+        q = db.get(Quote, "^IXIC")
+        q.peak, q.peak_on = Decimal("25000"), date(2026, 10, 30)
+    r = client.post("/api/alerts/rules", json={"rule": {"kind": "market", "symbol": "^IXIC", "step": 10}}, headers=h)
+    nasdaq = next(x for x in r.json()["rules"] if x["params"].get("symbol") == "^IXIC")
+    assert nasdaq["summary"] == "The Nasdaq falls 10% from its high, and each 10% more"
+    assert nasdaq["market"]["under_percent"] == 20 and r.json()["markets"][0]["name"] == "Nasdaq"
+    assert r.json()["events"][0]["title"] == "The Nasdaq is down 20% from its high"  # checked right away
 
     q = {"enabled": True, "start": "21:30", "end": "06:45", "timezone": "America/Los_Angeles"}
     assert client.put("/api/alerts/quiet", json=q, headers=h).json()["quiet"] == q

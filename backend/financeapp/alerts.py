@@ -8,6 +8,10 @@ Rules and their params
                  again at 20%, 30%...; {"symbol": "VOO", "below_average": 200}: the price drops under its 200-day
                  (or 50-day) average. symbol null means every stock and fund held. Facts about the price, worded
                  as information: the app never says whether to buy.
+  market         {"symbol": "^GSPC", "step": 5}: a market index (quotes.INDEXES: the S&P 500, Nasdaq or Dow) is 5% under
+                 its record close, and again at 10%, 15%, 20%... Only the deepest step reached sends anything. Every
+                 step re-arms once the index closes at a new record, so each fall from a high is told once per step.
+                 Tapping it opens "Any moves today?" with the drop as the question.
   budget         {"category_id": 12, "percent": 90}: a category reaches 90% of its monthly limit; category_id null
                  means the whole everyday budget
                  {"category_id": null, "forecast": true}: a heads-up when a category is on pace to go over its limit
@@ -22,8 +26,8 @@ Rules and their params
 
 No repeats. A rule fires when its condition becomes true and re-arms only after it has clearly stopped being true:
 a price back across its line by 1%, a company back under its limit by a point, a dip back within 3 points of
-the 52-week high's line, a goal back 10 points under a milestone, a goal that went down back within 2 points of
-where it was 30 days before. A budget alert can fire once a
+the 52-week high's line, a market index back at a new high, a goal back 10 points under a milestone, a goal that went
+down back within 2 points of where it was 30 days before. A budget alert can fire once a
 month (a heads-up once a month per category) and a daily move once a day. Every alert carries a dedup key that
 the database keeps unique, so even two copies of the app checking at once can't save or send the same alert twice.
 
@@ -68,6 +72,8 @@ GOAL_DOWN = 5.0  # a goal down 5 points of its target in 30 days
 REARM_GOAL_DOWN = 2.0  # back within 2 points
 REARM_DIP = 3.0  # back within 7% of the 52-week high, after a "10% under" alert
 DIP_MAX = 90  # the deepest "under its 52-week high" step
+MARKET_MAX = 60  # the deepest "under its record" step (the S&P 500 fell 57% in 2007-09)
+MARKET_WORDS = ((20, "Bear market territory (20% or more)."), (10, "Correction territory (10% or more)."))
 TREND_DAYS = 7  # a dip is only judged on a price and trend from the last week
 NOT_ADVICE = "Information only, not advice."
 MAX_ATTEMPTS = 3
@@ -202,6 +208,58 @@ def dip_hits(rule: AlertRule, live: dict, held: set[str], t: datetime) -> list[H
                     f"{s} is at {money(price)}, {percent(max(under, 0.1))} under its {days}-day average of "
                     f"{money(line)}. {NOT_ADVICE}", link=holding_link(s))
             )  # fmt: skip
+    return hits
+
+
+def index_level(x: float) -> str:
+    return f"{x:,.0f}"
+
+
+def drawdown(q) -> dict | None:
+    """How far an index is under its record close, from its latest quote; None until the record is known."""
+    if q is None or not q.peak:
+        return None
+    price, peak = float(q.price), float(q.peak)
+    record = max(price, peak)  # above the last record close: a new high in the making
+    return {
+        "symbol": q.symbol,
+        "name": quotes.INDEXES.get(q.symbol, q.symbol),
+        "level": round(price, 2),
+        "peak": round(peak, 2),
+        "peak_on": q.peak_on.isoformat() if q.peak_on else None,
+        "under_percent": round((record - price) / record * 100, 2),
+        "as_of": q.as_of.astimezone(UTC).isoformat(),
+    }
+
+
+def market_link(symbol: str) -> str:
+    return f"/portfolio/moves?{urlencode({'market': symbol})}"
+
+
+def market_hits(rule: AlertRule, live: dict, t: datetime) -> list[Hit]:
+    p = rule.params
+    s = str(p.get("symbol") or "^GSPC")
+    q = live.get(s)
+    d = drawdown(q)
+    if d is None or t - q.as_of > timedelta(days=TREND_DAYS):
+        return []
+    under, name = d["under_percent"], d["name"]
+    step = float(p.get("step") or 5)
+    steps = [step * i for i in range(1, int(MARKET_MAX // step) + 1)]
+    deepest = max((x for x in steps if under >= x), default=None)
+    keys = (rule.state or {}).get("keys", {})
+    since = date.fromisoformat(d["peak_on"]).strftime("%b %-d, %Y") if d["peak_on"] else "its high"
+    words = next((w for line, w in MARKET_WORDS if under >= line), "")
+    hits = []
+    for x in steps:
+        key = f"{s}:{x:g}"
+        silent = deepest is not None and x < deepest and not keys.get(key, {}).get("on")
+        hits.append(
+            Hit(key, under >= x, under <= 0, f"The {name} is down {percent(x)} from its high",
+                f"At {index_level(d['level'])}, {percent(round(under, 1))} under its record close of "
+                f"{index_level(d['peak'])} on {since}. {words + ' ' if words else ''}{NOT_ADVICE}", silent,
+                market_link(s))
+        )  # fmt: skip
     return hits
 
 
@@ -355,7 +413,7 @@ def evaluate(db: DbSession, kinds: set[str], companies: list[dict] | None = None
     t = t or now()
     rules = list(db.scalars(select(AlertRule).where(AlertRule.enabled.is_(True), AlertRule.kind.in_(kinds))))
     held = quotes.holding_symbols(db) if any(r.kind == "dip" and not r.params.get("symbol") for r in rules) else set()
-    watched = {r.params.get("symbol") for r in rules if r.kind in ("price", "dip")} | held
+    watched = {r.params.get("symbol") for r in rules if r.kind in ("price", "dip", "market")} | held
     live = quotes.latest(db, {s for s in watched if s})
     fired = 0
     for r in rules:
@@ -363,6 +421,8 @@ def evaluate(db: DbSession, kinds: set[str], companies: list[dict] | None = None
             hits = price_hits(r, live.get(r.params.get("symbol")), t)
         elif r.kind == "dip":
             hits = dip_hits(r, live, held, t)
+        elif r.kind == "market":
+            hits = market_hits(r, live, t)
         elif r.kind == "budget" and budget_state is not None:
             day = t.astimezone(zone(quiet_hours(db)["timezone"])).date()
             hits = (forecast_hits if r.params.get("forecast") else budget_hits)(r, budget_state, day)

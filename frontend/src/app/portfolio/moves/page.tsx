@@ -17,6 +17,7 @@ import {
   Sparkles,
   Zap,
 } from "lucide-react";
+import { type MarketDrop, MarketDropRow, dropQuestion } from "@/components/market-drops";
 import { Money } from "@/components/money";
 import { BackLink, Notice } from "@/components/page";
 import { Badge } from "@/components/ui/badge";
@@ -57,12 +58,21 @@ export default function MovesPage() {
   const [busy, setBusy] = useState(false);
   const [question, setQuestion] = useState("");
 
+  // Opened from a market drop alert (or "Ask AI what to do"): that fall becomes the question.
+  const [focus, setFocus] = useState<MarketDrop | null>(null);
+
   useEffect(() => {
+    const market = new URLSearchParams(window.location.search).get("market");
     api<MovesOffer>("/api/portfolio/moves").then(
       (o) => {
         setOffer(o);
         setResult(o.last);
-        setAsking(!o.last);
+        const d = market ? (o.drops ?? []).find((x) => x.symbol === market) : undefined;
+        if (d) {
+          setFocus(d);
+          setQuestion(dropQuestion(d));
+        }
+        setAsking(!o.last || !!d);
       },
       (e: Error) => setError(e.message),
     );
@@ -111,6 +121,13 @@ export default function MovesPage() {
       )}
       {offer && (
         <div className="mx-auto grid w-full max-w-3xl grid-cols-1 gap-4">
+          {focus && (asking || !result) && !busy && (
+            <Card>
+              <CardContent className="pt-5">
+                <MarketDropRow d={focus} ask={false} />
+              </CardContent>
+            </Card>
+          )}
           {(asking || !result) && !busy && <Ask offer={offer} question={question} setQuestion={setQuestion} busy={busy} ask={ask} />}
           {result && !asking && !busy && (
             <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-1">
@@ -166,13 +183,15 @@ function Ask({
             id="moves-question"
             value={question}
             onChange={(e) => setQuestion(e.target.value.slice(0, 500))}
-            rows={3}
+            rows={question.length > 90 ? 4 : 3}
             maxLength={500}
             placeholder="e.g. I have $10,000 of bonus cash. Where should it go?"
             className="w-full resize-none rounded-xl border bg-background px-3.5 py-3 text-base outline-none transition-colors placeholder:text-muted-foreground/70 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/20 md:text-sm"
           />
           <div className="flex flex-wrap gap-1.5">
-            {EXAMPLES.map((x) => (
+            {[...(offer.drops ?? []).filter((d) => d.symbol === "^GSPC" && d.under_percent >= 3).map(dropQuestion), ...EXAMPLES]
+              .filter((x) => x !== question)
+              .map((x) => (
               <button
                 key={x}
                 type="button"
@@ -192,6 +211,7 @@ function Ask({
             <span>
               Your {offer.holdings} holding{offer.holdings === 1 ? "" : "s"} by ticker with gains and which accounts are taxable, your mix,
               cash, goals and tax bracket, plus today&apos;s market
+              {offer.drops?.length ? " and how far the indexes are under their highs" : ""}
               {offer.headlines ? ` and ${offer.headlines} recent headlines` : ""}. No account numbers, names or transactions.
             </span>
           </p>
@@ -213,7 +233,7 @@ function Ask({
 
         {offer.available ? (
           <Button size="lg" onClick={ask} disabled={busy}>
-            <Sparkles /> {busy ? "Thinking it through…" : "Review my portfolio"}
+            <Sparkles /> {busy ? "Thinking it through…" : question.startsWith("The ") && question.includes("record high") ? "Ask what to do" : "Review my portfolio"}
           </Button>
         ) : (
           <>

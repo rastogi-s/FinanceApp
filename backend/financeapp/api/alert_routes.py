@@ -85,6 +85,15 @@ class DipRule(Rule):
         return {"symbol": self.symbol, "below_average": self.below_average}
 
 
+class MarketRule(Rule):
+    kind: Literal["market"]
+    symbol: Literal["^GSPC", "^IXIC", "^DJI"] = "^GSPC"  # quotes.INDEXES
+    step: float = Field(default=5, ge=1, le=25)  # every this many percent under the record close
+
+    def params(self) -> dict:
+        return {"symbol": self.symbol, "step": round(self.step, 1)}
+
+
 class BudgetRule(Rule):
     kind: Literal["budget"]
     category_id: int | None = None  # None: the whole everyday budget (for a heads-up: every category on its own)
@@ -113,7 +122,9 @@ class GoalRule(Rule):
         return {"goal_id": self.goal_id}
 
 
-RuleIn = Annotated[PriceRule | DipRule | BudgetRule | ConcentrationRule | GoalRule, Field(discriminator="kind")]
+RuleIn = Annotated[
+    PriceRule | DipRule | MarketRule | BudgetRule | ConcentrationRule | GoalRule, Field(discriminator="kind")
+]
 
 
 class RuleBody(BaseModel):
@@ -159,6 +170,9 @@ def describe(r: AlertRule, categories: dict[int, str], goals: dict[int, str] | N
             step = alerts.percent(p["from_high_percent"])
             return f"{who} falls {step} under its 52-week high, and each {step} more"
         return f"{who} drops under its {p['below_average']}-day average"
+    if r.kind == "market":
+        step = alerts.percent(p.get("step") or 5)
+        return f"The {quotes.INDEXES.get(p.get('symbol'), 'market')} falls {step} from its high, and each {step} more"
     if r.kind == "budget" and p.get("forecast"):
         if p.get("category_id") is None:
             return "Any category is on pace to go over its budget"
@@ -169,7 +183,10 @@ def describe(r: AlertRule, categories: dict[int, str], goals: dict[int, str] | N
     return f"Any one company reaches {alerts.percent(p['percent'])} of your portfolio"
 
 
-def rule_json(r: AlertRule, categories: dict[int, str], goals: dict[int, str] | None = None) -> dict:
+def rule_json(
+    r: AlertRule, categories: dict[int, str], goals: dict[int, str] | None = None, markets: dict | None = None
+) -> dict:
+    d = (markets or {}).get(r.params.get("symbol")) if r.kind == "market" else None
     return {
         "id": r.id,
         "kind": r.kind,
@@ -179,7 +196,15 @@ def rule_json(r: AlertRule, categories: dict[int, str], goals: dict[int, str] | 
         "summary": describe(r, categories, goals),
         # Fired and not re-armed yet: what the app shows as "Triggered".
         "triggered": any(k.get("on") for k in (r.state or {}).get("keys", {}).values()) and r.kind == "price",
+        # A market rule: how far the index is under its record close now.
+        "market": d,
     }
+
+
+def markets(db: DbSession) -> dict[str, dict]:
+    """Each index's drop from its record close, where it's known."""
+    found = quotes.latest(db, set(quotes.INDEXES))
+    return {s: d for s in quotes.INDEXES if (d := alerts.drawdown(found.get(s))) is not None}
 
 
 def state(db: DbSession, request: Request) -> dict:
@@ -189,8 +214,10 @@ def state(db: DbSession, request: Request) -> dict:
     rules = db.scalars(select(AlertRule).order_by(AlertRule.kind, AlertRule.id)).all()
     events = db.scalars(select(AlertEvent).order_by(AlertEvent.fired_at.desc()).limit(50)).all()
     held = sorted({s for s, c in lookthrough.held(db) if quotes.quotable(s, c)})
+    market = markets(db)
     return {
-        "rules": [rule_json(r, categories, goals) for r in rules],
+        "rules": [rule_json(r, categories, goals, market) for r in rules],
+        "markets": list(market.values()),
         "events": [alerts.event_json(e) for e in events],
         "quiet": alerts.quiet_hours(db),
         "channels": {"ntfy": bool(settings.ntfy_url), "email": bool(settings.smtp_host and settings.alert_email)},
@@ -223,8 +250,8 @@ def check_category(db: DbSession, rule: RuleIn) -> None:
 
 
 def recheck(request: Request, db: DbSession, rule: AlertRule) -> None:
-    """Looks at a new or changed price or dip rule right away, so it doesn't wait for the next round of prices."""
-    if rule.kind in ("price", "dip") and rule.enabled:
+    """Looks at a new or changed price, dip or market rule right away, not waiting for the next round of prices."""
+    if rule.kind in ("price", "dip", "market") and rule.enabled:
         db.flush()
         alerts.evaluate(db, {rule.kind})
         alerts.send_pending(db, settings_of(request))

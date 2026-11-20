@@ -8,6 +8,11 @@ the rest. A failed lookup just leaves the last price in place: holdings fall bac
 
 Trends. Once a day after the close, a year of daily closes from Yahoo gives each symbol's 52-week high and low and its
 50- and 200-day averages (Finnhub's free tier has no history), for the dip alerts in alerts.py.
+
+Market indexes. The S&P 500, Nasdaq and Dow (INDEXES) are looked up from Yahoo too, when a market drop alert watches
+one. For them the trend also keeps the record close: once, from all of Yahoo's monthly history, then from each year of
+daily closes, so the drop is measured from the all-time high, not the 52-week one (a bear market can last longer than a
+year).
 """
 
 import logging
@@ -16,6 +21,7 @@ import time as clock
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal, InvalidOperation
+from urllib.parse import quote as quote_path
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -32,6 +38,8 @@ ET = ZoneInfo("America/New_York")
 # Plain exchange tickers only (VOO, BRK.B, BF-B). Anything else (a fund name, an option, a CUSIP) isn't looked up.
 TICKER = re.compile(r"^[A-Z][A-Z0-9]{0,5}([.\-][A-Z])?$")
 QUOTED_CLASSES = {"Stocks", "Funds", "Bonds"}
+# Market indexes a drop alert can watch: Yahoo's symbol and the name people know.
+INDEXES = {"^GSPC": "S&P 500", "^IXIC": "Nasdaq", "^DJI": "Dow"}
 AFTER_CLOSE = (time(16, 5), time(18, 30))
 MAX_SYMBOLS = 150
 FINNHUB_PER_MINUTE = 55  # the free tier allows 60 calls a minute
@@ -48,6 +56,15 @@ class QuoteData:
 
 def quotable(symbol: str, asset_class: str = "Stocks") -> bool:
     return asset_class in QUOTED_CLASSES and bool(TICKER.match(symbol))
+
+
+def is_index(symbol: str) -> bool:
+    return symbol in INDEXES
+
+
+def yahoo_path(symbol: str) -> str:
+    """Yahoo writes share classes with a dash (BRK-B); an index keeps its caret, escaped."""
+    return quote_path(symbol.replace(".", "-"), safe="-")
 
 
 def market_open(t: datetime) -> bool:
@@ -95,9 +112,9 @@ def finnhub(client: httpx.Client, key: str, symbols: list[str]) -> dict[str, Quo
 def yahoo(client: httpx.Client, symbols: list[str]) -> dict[str, QuoteData]:
     out = {}
     for s in symbols:
-        # Yahoo writes share classes with a dash (BRK-B). TICKER has already made the symbol safe for a URL path.
+        # TICKER (or INDEXES) has already made the symbol safe for a URL path.
         r = client.get(
-            f"https://query1.finance.yahoo.com/v8/finance/chart/{s.replace('.', '-')}",
+            f"https://query1.finance.yahoo.com/v8/finance/chart/{yahoo_path(s)}",
             params={"range": "1d", "interval": "1d"},
         )
         if r.status_code == 404:
@@ -122,9 +139,10 @@ def fetch(settings: Settings, symbols: list[str], client: httpx.Client | None = 
     client = client or httpx.Client(timeout=10, headers={"User-Agent": "FinanceApp (self-hosted)"})
     out: dict[str, QuoteData] = {}
     try:
-        if provider in ("auto", "finnhub") and settings.finnhub_api_key:
+        stocks = [s for s in symbols if not is_index(s)]  # Finnhub's free tier has no indexes
+        if provider in ("auto", "finnhub") and settings.finnhub_api_key and stocks:
             try:
-                out.update(finnhub(client, settings.finnhub_api_key, symbols))
+                out.update(finnhub(client, settings.finnhub_api_key, stocks))
             except httpx.HTTPError as e:
                 log.warning("finnhub quotes failed (%s)", type(e).__name__)
         if provider == "yahoo" or (provider == "auto" and len(out) < len(symbols)):
@@ -157,14 +175,20 @@ def holding_symbols(db: DbSession) -> set[str]:
     return {s for s, c in rows if quotable(s, c)}
 
 
+def market_symbols(db: DbSession) -> list[str]:
+    """The indexes market drop alerts watch."""
+    rules = db.scalars(select(AlertRule).where(AlertRule.kind == "market", AlertRule.enabled.is_(True)))
+    return sorted({str(r.params.get("symbol")) for r in rules} & INDEXES.keys())
+
+
 def held_symbols(db: DbSession) -> list[str]:
-    """What to look up: every symbol held, plus those price and dip alerts watch."""
+    """What to look up: the indexes market alerts watch, then every symbol held and those price and dip alerts watch."""
     symbols = holding_symbols(db)
     for r in db.scalars(select(AlertRule).where(AlertRule.kind.in_(["price", "dip"]), AlertRule.enabled.is_(True))):
         s = str(r.params.get("symbol") or "")
         if quotable(s):
             symbols.add(s)
-    return sorted(symbols)[:MAX_SYMBOLS]
+    return (market_symbols(db) + sorted(symbols))[:MAX_SYMBOLS]
 
 
 def save(db: DbSession, quotes: dict[str, QuoteData]) -> None:
@@ -225,10 +249,11 @@ def _average(closes: list[Decimal], n: int) -> Decimal | None:
     return (sum(closes[-n:]) / n).quantize(Decimal("0.0001")) if len(closes) >= n else None
 
 
-def yahoo_trend(client: httpx.Client, symbol: str, through: date) -> dict | None:
+def yahoo_closes(client: httpx.Client, symbol: str, through: date, range_: str, interval: str):
+    """Daily (or monthly) closes up to `through`, and Yahoo's meta; None when Yahoo doesn't know the symbol."""
     r = client.get(
-        f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol.replace('.', '-')}",
-        params={"range": "1y", "interval": "1d"},
+        f"https://query1.finance.yahoo.com/v8/finance/chart/{yahoo_path(symbol)}",
+        params={"range": range_, "interval": interval},
     )
     if r.status_code == 404:
         return None
@@ -247,8 +272,19 @@ def yahoo_trend(client: httpx.Client, symbol: str, through: date) -> dict | None
             day = datetime.fromtimestamp(ts, UTC).astimezone(ET).date()
             if day <= through:  # not today's bar while the market is still open
                 days.append((day, price))
-    if not days:
+    return days, meta
+
+
+def record_close(days: list[tuple[date, Decimal]]) -> tuple[date, Decimal] | None:
+    """The highest close, and the first day it closed there."""
+    return max(days, key=lambda d: (d[1], -d[0].toordinal())) if days else None
+
+
+def yahoo_trend(client: httpx.Client, symbol: str, through: date) -> dict | None:
+    got = yahoo_closes(client, symbol, through, "1y", "1d")
+    if got is None or not got[0]:
         return None
+    days, meta = got
     closes = [c for _, c in days]
     high, low = _decimal(meta.get("fiftyTwoWeekHigh")), _decimal(meta.get("fiftyTwoWeekLow"))
     return {
@@ -258,7 +294,16 @@ def yahoo_trend(client: httpx.Client, symbol: str, through: date) -> dict | None
         "average_200": _average(closes, 200),
         "trend_as_of": days[-1][0],
         "closes": [float(c) for c in closes[-SPARK_DAYS:]],
+        "year_record": record_close(days),
     }
+
+
+def peak_update(q: Quote, record: tuple[date, Decimal] | None, full: bool = False) -> None:
+    """Keeps the highest close seen; `full` once it's been checked against all of the history."""
+    if record is not None and (q.peak is None or record[1] > q.peak):
+        q.peak_on, q.peak = record
+    if full:
+        q.peak_full = True
 
 
 def refresh_trends(database: Database, t: datetime, client: httpx.Client | None = None) -> int:
@@ -273,7 +318,16 @@ def refresh_trends(database: Database, t: datetime, client: httpx.Client | None 
     own = client is None
     client = client or httpx.Client(timeout=10, headers={"User-Agent": "FinanceApp (self-hosted)"})
     found: dict[str, dict] = {}
+    history: dict[str, tuple[date, Decimal] | None] = {}  # an index's record close over all its history
+    with database.session() as db:
+        unchecked = [s for s in stale if is_index(s) and not getattr(db.get(Quote, s), "peak_full", True)]
     try:
+        for s in unchecked:
+            try:
+                got = yahoo_closes(client, s, through, "max", "1mo")
+            except (httpx.HTTPError, ValueError):
+                continue  # tried again tomorrow; the year's record close counts meanwhile
+            history[s] = record_close(got[0]) if got else None
         for s in stale:
             try:
                 trend = yahoo_trend(client, s, through)
@@ -292,8 +346,13 @@ def refresh_trends(database: Database, t: datetime, client: httpx.Client | None 
         for s, trend in found.items():
             q = db.get(Quote, s)
             if q is not None:
+                record = trend.pop("year_record", None)
                 for k, v in trend.items():
                     setattr(q, k, v)
+                if is_index(s):
+                    peak_update(q, record)
+                    if s in history:
+                        peak_update(q, history[s], full=True)
     return len(found)
 
 
