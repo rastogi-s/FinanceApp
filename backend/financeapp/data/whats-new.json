@@ -1,5 +1,16 @@
 [
   {
+    "version": "0.71.0",
+    "title": "An easier account picker on Profit",
+    "features": [
+      {
+        "id": "profit-account-picker",
+        "title": "Pick accounts from a list",
+        "body": "On your phone, Profit now shows one Showing button instead of a row of account names that ran off the screen. Tap it for a list of your accounts, taxable ones first, then retirement and HSA, each with its full name and its profit, and tick one or more."
+      }
+    ]
+  },
+  {
     "version": "0.70.0",
     "title": "Market drops, volatility and yields, and ask what to do about them",
     "features": [

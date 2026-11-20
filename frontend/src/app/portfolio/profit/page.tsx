@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { ChevronRight, PenLine, TrendingUp } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, PenLine, TrendingUp, Wallet } from "lucide-react";
 import { Money } from "@/components/money";
 import { BackLink, Column, Columns, Notice, Wide } from "@/components/page";
 import { Badge } from "@/components/ui/badge";
@@ -17,7 +17,7 @@ import { useAuth } from "@/lib/auth";
 import { useApi } from "@/lib/household";
 import { useRemembered } from "@/lib/nav";
 import { asOf, hasDetail, holdingHref } from "@/lib/portfolio";
-import { type Profit, type ProfitHolding, byHolding, gainOf, picked, signedPercent, soldIn, totals } from "@/lib/profit";
+import { type Profit, type ProfitHolding, type Totals, byHolding, gainOf, picked, signedPercent, soldIn, totals } from "@/lib/profit";
 import { cn } from "@/lib/utils";
 
 const shareCount = new Intl.NumberFormat("en-US", { maximumFractionDigits: 3 });
@@ -74,8 +74,9 @@ function Body({ p, onSaved }: { p: Profit; onSaved: (p: Profit) => void }) {
   return (
     <>
       {p.accounts.length > 1 && (
-        <div className="-mx-4 mb-4 overflow-x-auto px-4 [scrollbar-width:none] md:mx-0 md:px-0">
-          <div className="flex w-max gap-2 md:w-auto md:flex-wrap" role="group" aria-label="Accounts">
+        <>
+          <AccountPicker p={p} ids={ids} all={all} onAll={() => setChosen([])} onToggle={toggle} />
+          <div className="mb-4 hidden flex-wrap gap-2 md:flex" role="group" aria-label="Accounts">
             <Chip on={all} onClick={() => setChosen([])}>
               All accounts
             </Chip>
@@ -87,7 +88,7 @@ function Body({ p, onSaved }: { p: Profit; onSaved: (p: Profit) => void }) {
               </Chip>
             ))}
           </div>
-        </div>
+        </>
       )}
       <Columns>
         <Column>
@@ -100,6 +101,120 @@ function Body({ p, onSaved }: { p: Profit; onSaved: (p: Profit) => void }) {
         </Column>
       </Columns>
     </>
+  );
+}
+
+/**
+ * On a phone, one full-width button that opens a sheet of accounts: long account names wrap there instead of
+ * running off the side of a scrolling chip row, and each row shows that account's profit so you can see what you pick.
+ */
+function AccountPicker({
+  p,
+  ids,
+  all,
+  onAll,
+  onToggle,
+}: {
+  p: Profit;
+  ids: Set<number>;
+  all: boolean;
+  onAll: () => void;
+  onToggle: (id: number) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const one = !all && ids.size === 1 ? p.accounts.find((a) => ids.has(a.id)) : undefined;
+  const label = all ? "All accounts" : one ? one.name : `${ids.size} of ${p.accounts.length} accounts`;
+  const groups = [
+    { title: "Taxable", accounts: p.accounts.filter((a) => a.taxable) },
+    { title: "Retirement and HSA", accounts: p.accounts.filter((a) => !a.taxable) },
+  ].filter((g) => g.accounts.length > 0);
+  const everything = totals(p, new Set(p.accounts.map((a) => a.id)));
+  return (
+    <div className="mb-4 md:hidden">
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        aria-haspopup="dialog"
+        className="flex min-h-12 w-full items-center gap-3 rounded-2xl border bg-card px-4 py-2.5 text-left transition-colors active:bg-muted"
+      >
+        <Wallet className="size-5 shrink-0 text-muted-foreground" aria-hidden />
+        <span className="min-w-0 flex-1">
+          <span className="block text-xs text-muted-foreground">Showing</span>
+          <span className="block truncate text-sm font-medium">{label}</span>
+        </span>
+        <ChevronDown className="size-5 shrink-0 text-muted-foreground" aria-hidden />
+      </button>
+      <Sheet
+        open={open}
+        onOpenChange={setOpen}
+        title="Accounts"
+        description="Pick one or more. Profit adds up across the ones you pick."
+        footer={
+          <Button className="w-full" size="lg" onClick={() => setOpen(false)}>
+            {all ? "Show all accounts" : `Show ${ids.size === 1 ? "1 account" : `${ids.size} accounts`}`}
+          </Button>
+        }
+      >
+        <ul className="divide-y rounded-xl border" role="group" aria-label="Accounts">
+          <PickRow on={all} name="All accounts" t={everything} onClick={onAll} />
+        </ul>
+        {groups.map((g) => (
+          <section key={g.title} className="mt-4">
+            <h3 className="mb-1.5 px-1 text-xs font-medium tracking-wide text-muted-foreground uppercase">{g.title}</h3>
+            <ul className="divide-y rounded-xl border">
+              {g.accounts.map((a) => (
+                <PickRow
+                  key={a.id}
+                  on={!all && ids.has(a.id)}
+                  name={a.name}
+                  t={totals(p, new Set([a.id]))}
+                  onClick={() => onToggle(a.id)}
+                />
+              ))}
+            </ul>
+          </section>
+        ))}
+      </Sheet>
+    </div>
+  );
+}
+
+function PickRow({ on, name, t, onClick }: { on: boolean; name: string; t: Totals; onClick: () => void }) {
+  return (
+    <li>
+      <button
+        type="button"
+        role="checkbox"
+        aria-checked={on}
+        onClick={onClick}
+        className="flex min-h-14 w-full items-center gap-3 px-3.5 py-2.5 text-left transition-colors active:bg-muted"
+      >
+        <span
+          className={cn(
+            "grid size-5 shrink-0 place-items-center rounded-md border transition-colors",
+            on ? "border-transparent bg-primary text-primary-foreground" : "bg-card",
+          )}
+          aria-hidden
+        >
+          {on && <Check className="size-3.5" strokeWidth={3} />}
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-sm font-medium break-words">{name}</span>
+          <span className="block text-xs text-muted-foreground tabular-nums">
+            <Money cents={t.value} /> today
+          </span>
+        </span>
+        <span className="shrink-0 text-right text-sm font-medium tabular-nums">
+          {t.cost > 0 ? (
+            <Tone cents={t.gain}>
+              <Money cents={t.gain} signed />
+            </Tone>
+          ) : (
+            <span className="text-xs font-normal text-muted-foreground">No cost yet</span>
+          )}
+        </span>
+      </button>
+    </li>
   );
 }
 
