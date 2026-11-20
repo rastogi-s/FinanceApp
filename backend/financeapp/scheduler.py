@@ -78,7 +78,7 @@ class Scheduler:
                 log.info("scheduled sync finished: %s", "ok" if run.ok else "with problems")
         if quotes.refresh(self.database, self.settings) is not None:
             quotes.refresh_trends(self.database, now())  # once a day after the close; a no-op the rest of the time
-            alerts.check(self.database, self.settings, {"price", "dip", "concentration"})
+            alerts.check(self.database, self.settings, {"price", "dip", "market", "vix", "concentration"})
         else:
             # Held alerts go out when quiet hours end, even if no new prices came in.
             with self.database.session() as db:
@@ -89,7 +89,8 @@ class Scheduler:
             if lookthrough.refresh(self.database, self.settings):
                 alerts.check(self.database, self.settings, {"concentration"})
             income.refresh_history(self.database, self.settings)  # each held symbol's dividends, once a day
-            rates.refresh(self.database, self.settings)  # national deposit rates and Treasury yields, once a day
+            if rates.refresh(self.database, self.settings):  # national deposit rates and Treasury yields, once a day
+                alerts.check(self.database, self.settings, {"yield"})
         if self.reminders_checked is None or now() - self.reminders_checked > REMINDERS_CHECK:
             self.reminders_checked = now()
             with self.database.session() as db:
