@@ -94,6 +94,36 @@ class MarketRule(Rule):
         return {"symbol": self.symbol, "step": round(self.step, 1)}
 
 
+class VixRule(Rule):
+    kind: Literal["vix"]
+    levels: list[int] = Field(default=[25, 30, 40], min_length=1, max_length=6)
+
+    @model_validator(mode="after")
+    def sensible(self):
+        self.levels = sorted(set(self.levels))
+        if any(x < 12 or x > 90 for x in self.levels):
+            raise ValueError("Pick VIX levels between 12 and 90.")
+        return self
+
+    def params(self) -> dict:
+        return {"levels": self.levels}
+
+
+class YieldRule(Rule):
+    kind: Literal["yield"]
+    above: float | None = Field(default=5.0, ge=0.5, le=15)  # the 10-year's line, in percent; None: not watched
+    inversion: bool = True  # the 2-year yielding more than the 10-year
+
+    @model_validator(mode="after")
+    def something(self):
+        if self.above is None and not self.inversion:
+            raise ValueError("Pick a 10-year yield, the inverted curve, or both.")
+        return self
+
+    def params(self) -> dict:
+        return {"above": round(self.above, 2) if self.above is not None else None, "inversion": self.inversion}
+
+
 class BudgetRule(Rule):
     kind: Literal["budget"]
     category_id: int | None = None  # None: the whole everyday budget (for a heads-up: every category on its own)
@@ -123,7 +153,8 @@ class GoalRule(Rule):
 
 
 RuleIn = Annotated[
-    PriceRule | DipRule | MarketRule | BudgetRule | ConcentrationRule | GoalRule, Field(discriminator="kind")
+    PriceRule | DipRule | MarketRule | VixRule | YieldRule | BudgetRule | ConcentrationRule | GoalRule,
+    Field(discriminator="kind"),
 ]
 
 
@@ -173,6 +204,17 @@ def describe(r: AlertRule, categories: dict[int, str], goals: dict[int, str] | N
     if r.kind == "market":
         step = alerts.percent(p.get("step") or 5)
         return f"The {quotes.INDEXES.get(p.get('symbol'), 'market')} falls {step} from its high, and each {step} more"
+    if r.kind == "vix":
+        levels = [f"{x:g}" for x in p.get("levels") or []]
+        return f"The VIX reaches {and_list(levels)}"
+    if r.kind == "yield":
+        parts = []
+        if p.get("above") is not None:
+            parts.append(f"the 10-year Treasury yield goes above {alerts.percent(p['above'])}")
+        if p.get("inversion"):
+            parts.append("the yield curve inverts")
+        text = " or ".join(parts)
+        return text[0].upper() + text[1:]
     if r.kind == "budget" and p.get("forecast"):
         if p.get("category_id") is None:
             return "Any category is on pace to go over its budget"
@@ -201,10 +243,8 @@ def rule_json(
     }
 
 
-def markets(db: DbSession) -> dict[str, dict]:
-    """Each index's drop from its record close, where it's known."""
-    found = quotes.latest(db, set(quotes.INDEXES))
-    return {s: d for s in quotes.INDEXES if (d := alerts.drawdown(found.get(s))) is not None}
+def and_list(items: list[str]) -> str:
+    return alerts.and_list(items) if items else ""
 
 
 def state(db: DbSession, request: Request) -> dict:
@@ -214,10 +254,13 @@ def state(db: DbSession, request: Request) -> dict:
     rules = db.scalars(select(AlertRule).order_by(AlertRule.kind, AlertRule.id)).all()
     events = db.scalars(select(AlertEvent).order_by(AlertEvent.fired_at.desc()).limit(50)).all()
     held = sorted({s for s, c in lookthrough.held(db) if quotes.quotable(s, c)})
-    market = markets(db)
+    overview = alerts.market_overview(db)
+    market = {d["symbol"]: d for d in overview["drops"]}
     return {
         "rules": [rule_json(r, categories, goals, market) for r in rules],
-        "markets": list(market.values()),
+        "markets": overview["drops"],
+        "vix": overview["vix"],
+        "yields": overview["yields"],
         "events": [alerts.event_json(e) for e in events],
         "quiet": alerts.quiet_hours(db),
         "channels": {"ntfy": bool(settings.ntfy_url), "email": bool(settings.smtp_host and settings.alert_email)},
@@ -250,8 +293,8 @@ def check_category(db: DbSession, rule: RuleIn) -> None:
 
 
 def recheck(request: Request, db: DbSession, rule: AlertRule) -> None:
-    """Looks at a new or changed price, dip or market rule right away, not waiting for the next round of prices."""
-    if rule.kind in ("price", "dip", "market") and rule.enabled:
+    """Looks at a new or changed market or price rule right away, not waiting for the next round of prices."""
+    if rule.kind in ("price", "dip", "market", "vix", "yield") and rule.enabled:
         db.flush()
         alerts.evaluate(db, {rule.kind})
         alerts.send_pending(db, settings_of(request))

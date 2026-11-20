@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Sparkles } from "lucide-react";
+import { Activity, Percent, Sparkles } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -35,6 +35,86 @@ export function dropQuestion(d: MarketDrop): string {
   return `The ${d.name} is ${underText(d.under_percent)} under its record high. With my holdings, cash and goals, should I invest more, hold or sell?`;
 }
 
+/** The VIX now, and a month ago (backend alerts.vix_now). */
+export type Vix = { level: number; month_ago: number | null; as_of: string };
+/** The 10-year and 2-year Treasury yields, and the gap (negative: an inverted curve). From FRED, daily. */
+export type Yields = { ten_year: number; two_year: number; spread: number; as_of: string };
+export type Markets = { drops?: MarketDrop[]; vix?: Vix | null; yields?: Yields | null };
+
+export function vixStage(v: number): { label: string; tone: "muted" | "warning" | "negative" } {
+  if (v >= 40) return { label: "Panic", tone: "negative" };
+  if (v >= 30) return { label: "Fear", tone: "negative" };
+  if (v >= 20) return { label: "Nervous", tone: "warning" };
+  return { label: "Calm", tone: "muted" };
+}
+
+export function vixQuestion(v: Vix): string {
+  return `The VIX is at ${v.level.toFixed(1)}. With my holdings, cash and goals, should I invest more, hold or sell?`;
+}
+
+export function yieldsQuestion(y: Yields): string {
+  const curve = y.spread < 0 ? " and the yield curve is inverted" : "";
+  return `The 10-year Treasury yields ${y.ten_year.toFixed(2)}%${curve}. With my holdings, cash and goals, should I change anything, like moving cash into Treasuries or CDs?`;
+}
+
+/** The question for the indicator a link names: an index symbol, ^VIX, or "yields". */
+export function questionFor(m: Markets, key: string): string | null {
+  if (key === "^VIX") return m.vix ? vixQuestion(m.vix) : null;
+  if (key === "yields") return m.yields ? yieldsQuestion(m.yields) : null;
+  const d = (m.drops ?? []).find((x) => x.symbol === key);
+  return d ? dropQuestion(d) : null;
+}
+
+export function VixRow({ v, ask = true }: { v: Vix; ask?: boolean }) {
+  const stage = vixStage(v.level);
+  return (
+    <div className="grid grid-cols-1 gap-2">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+        <p className="flex items-center gap-1.5 text-sm font-medium">
+          <Activity className="size-4 text-muted-foreground" aria-hidden /> VIX{" "}
+          <span className="font-normal tabular-nums text-muted-foreground">{v.level.toFixed(1)}</span>
+        </p>
+        <Badge variant={stage.tone}>{stage.label}</Badge>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        How big a swing stocks are expected to make.{v.month_ago ? ` ${v.month_ago.toFixed(1)} a month ago.` : ""} Under 20 is calm; over 30, fear.
+      </p>
+      {ask && <AskButton href={askHref("^VIX")} />}
+    </div>
+  );
+}
+
+export function YieldsRow({ y, ask = true }: { y: Yields; ask?: boolean }) {
+  const inverted = y.spread < 0;
+  return (
+    <div className="grid grid-cols-1 gap-2">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+        <p className="flex items-center gap-1.5 text-sm font-medium">
+          <Percent className="size-4 text-muted-foreground" aria-hidden /> 10-year Treasury{" "}
+          <span className="font-normal tabular-nums text-muted-foreground">{y.ten_year.toFixed(2)}%</span>
+        </p>
+        <Badge variant={inverted ? "warning" : "muted"}>{inverted ? "Curve inverted" : "Curve normal"}</Badge>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        The 2-year pays <span className="tabular-nums">{y.two_year.toFixed(2)}%</span>,{" "}
+        <span className="tabular-nums">{Math.abs(y.spread).toFixed(2)}</span> points {inverted ? "more" : "less"} than the 10-year.
+        {inverted ? " An inverted curve has come before most recessions, often a year or more ahead." : ""} As of {day(y.as_of)}.
+      </p>
+      {ask && <AskButton href={askHref("yields")} />}
+    </div>
+  );
+}
+
+function AskButton({ href }: { href: string }) {
+  return (
+    <Button variant="secondary" size="sm" className="justify-self-start" asChild>
+      <Link href={href}>
+        <Sparkles /> Ask AI what to do
+      </Link>
+    </Button>
+  );
+}
+
 export const askHref = (symbol: string) => `/portfolio/moves?market=${encodeURIComponent(symbol)}`;
 
 /** One index: where it is, how far under its record close, and a bar from the record down to 30% under. */
@@ -66,13 +146,7 @@ export function MarketDropRow({ d, ask = true }: { d: MarketDrop; ask?: boolean 
         <span className="tabular-nums">{level(d.peak)}</span>
         {d.peak_on ? ` on ${day(d.peak_on)}` : ""}.
       </p>
-      {ask && (
-        <Button variant="secondary" size="sm" className="justify-self-start" asChild>
-          <Link href={askHref(d.symbol)}>
-            <Sparkles /> Ask AI what to do
-          </Link>
-        </Button>
-      )}
+      {ask && <AskButton href={askHref(d.symbol)} />}
     </div>
   );
 }

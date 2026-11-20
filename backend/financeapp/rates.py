@@ -2,7 +2,8 @@
 
 - National averages: the FDIC's National Rates page (savings, interest checking, money market and CDs from 1 to 60
   months), posted on the third Monday of each month.
-- Treasury yields: FRED's daily constant-maturity series, 1 month to 5 years (DGS1MO ... DGS5), no key needed.
+- Treasury yields: FRED's daily constant-maturity series, 1 month to 10 years (DGS1MO ... DGS10), no key needed. The
+  10-year, and the 2-year against it (the yield curve), are also what the yield alerts watch (alerts.yield_hits).
 
 Checked once a day by the scheduler and kept in the "market_rates" preference; until the first check works (or with
 quotes turned off) the numbers bundled in data/rates.json are used. Only public pages are fetched; nothing about the
@@ -27,7 +28,16 @@ PREF = "market_rates"
 EVERY = timedelta(hours=20)
 FDIC_URL = "https://www.fdic.gov/national-rates-and-rate-caps"
 FRED_URL = "https://fred.stlouisfed.org/graph/fredgraph.csv"
-TREASURY = {"1": "DGS1MO", "3": "DGS3MO", "6": "DGS6MO", "12": "DGS1", "24": "DGS2", "36": "DGS3", "60": "DGS5"}
+TREASURY = {
+    "1": "DGS1MO",
+    "3": "DGS3MO",
+    "6": "DGS6MO",
+    "12": "DGS1",
+    "24": "DGS2",
+    "36": "DGS3",
+    "60": "DGS5",
+    "120": "DGS10",
+}
 FDIC_ROW = re.compile(r"(Savings|Interest Checking|Money Market|(\d+) month CD)\s+(\d+\.\d+)")
 FDIC_DATE = re.compile(r"as of ([A-Z][a-z]+ \d{1,2}, \d{4})")
 BUNDLED = json.loads((Path(__file__).parent / "data" / "rates.json").read_text())
@@ -37,6 +47,19 @@ def current(db) -> dict:
     p = db.get(Preference, PREF)
     saved = (p.value if p else {}) or {}
     return {"fdic": saved.get("fdic") or BUNDLED["fdic"], "treasury": saved.get("treasury") or BUNDLED["treasury"]}
+
+
+def yields_now(db, today: date | None = None) -> dict | None:
+    """The 10-year and 2-year Treasury yields from the last check, if it's from the last week (never the bundled ones,
+    which are only a fallback for comparing an account's rate)."""
+    p = db.get(Preference, PREF)
+    t = ((p.value if p else {}) or {}).get("treasury") or {}
+    if "120" not in t or "24" not in t or not t.get("as_of"):
+        return None
+    if date.fromisoformat(t["as_of"]) < (today or date.today()) - timedelta(days=7):
+        return None
+    ten, two = float(t["120"]), float(t["24"])
+    return {"ten_year": ten, "two_year": two, "spread": round(ten - two, 2), "as_of": t["as_of"]}
 
 
 def nearest_term(months: int, terms: list[str]) -> str:

@@ -1,6 +1,6 @@
 /** Any moves today?: a second opinion from AI on buying, selling or holding (backend: ai/moves.py). */
 
-import type { MarketDrop } from "@/components/market-drops";
+import type { MarketDrop, Vix, Yields } from "@/components/market-drops";
 
 export type MoveAction = "buy" | "sell" | "trim" | "add" | "rebalance" | "harvest_loss";
 export type Urgency = "today" | "this_week" | "this_month" | "no_rush";
@@ -57,6 +57,8 @@ export type MovesOffer = {
   preview: string | null;
   /** How far the S&P 500, Nasdaq and Dow are under their record closes, where known. */
   drops?: MarketDrop[];
+  vix?: Vix | null;
+  yields?: Yields | null;
   last: MovesResult | null;
 };
 

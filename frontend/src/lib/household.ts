@@ -37,11 +37,11 @@ export type Holding = {
   live?: boolean;
 };
 /** The dot beside an alert, by what kind of rule sent it. */
-export const KIND_DOT = { price: "bg-chart-2", dip: "bg-chart-3", market: "bg-chart-5", budget: "bg-warning", concentration: "bg-chart-4", goal: "bg-positive", upload: "bg-primary", account: "bg-chart-1", card: "bg-negative", bill: "bg-warning", funding: "bg-warning" } as const;
+export const KIND_DOT = { price: "bg-chart-2", dip: "bg-chart-3", market: "bg-chart-5", vix: "bg-chart-5", yield: "bg-chart-5", budget: "bg-warning", concentration: "bg-chart-4", goal: "bg-positive", upload: "bg-primary", account: "bg-chart-1", card: "bg-negative", bill: "bg-warning", funding: "bg-warning" } as const;
 
 export type Alert = {
   id: string;
-  kind: "budget" | "price" | "dip" | "market" | "concentration" | "goal" | "upload" | "account" | "card" | "bill" | "funding";
+  kind: "budget" | "price" | "dip" | "market" | "vix" | "yield" | "concentration" | "goal" | "upload" | "account" | "card" | "bill" | "funding";
   title: string;
   body: string;
   at: string;

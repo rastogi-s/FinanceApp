@@ -1306,11 +1306,17 @@ SP500_DROP = {
 }
 
 
+SAMPLE_VIX = {"level": 22.4, "month_ago": 15.8, "as_of": "2026-11-20T21:00:00+00:00"}
+SAMPLE_YIELDS = {"ten_year": 4.38, "two_year": 4.52, "spread": -0.14, "as_of": "2026-11-19"}
+
+
 def alerts() -> dict:
     """Settings → Alerts in demo mode."""
     at = datetime.now(UTC)
     return {
         "markets": [SP500_DROP],
+        "vix": SAMPLE_VIX,
+        "yields": SAMPLE_YIELDS,
         "rules": [
             {
                 "id": 1,
@@ -1377,6 +1383,24 @@ def alerts() -> dict:
                 "summary": "The S&P 500 falls 5% from its high, and each 5% more",
                 "triggered": False,
                 "market": SP500_DROP,
+            },
+            {
+                "id": 10,
+                "kind": "vix",
+                "params": {"levels": [25, 30, 40]},
+                "enabled": True,
+                "priority": "high",
+                "summary": "The VIX reaches 25, 30 and 40",
+                "triggered": False,
+            },
+            {
+                "id": 11,
+                "kind": "yield",
+                "params": {"above": 5.0, "inversion": True},
+                "enabled": True,
+                "priority": "default",
+                "summary": "The 10-year Treasury yield goes above 5% or the yield curve inverts",
+                "triggered": False,
             },
             {
                 "id": 8,
@@ -1907,7 +1931,9 @@ def moves_offer(today: date | None = None) -> dict:
         "holdings": len({h[0] for h in HOLDINGS}),
         "headlines": 0,
         "preview": None,
-        "drops": [{k: v for k, v in SP500_DROP.items() if k != "as_of"}],
+        "drops": [SP500_DROP],
+        "vix": SAMPLE_VIX,
+        "yields": SAMPLE_YIELDS,
         "last": {
             "at": at.isoformat(),
             "model": "claude-opus-5-5",

@@ -6,7 +6,7 @@ import { BellRing, ChevronRight, Landmark, Mail, Moon, Plus, Send, Smartphone } 
 import { KIND_ICON, type Rule, type RuleIn, RuleSheet } from "@/components/alert-sheets";
 import { BriefSettingsCard } from "@/components/brief";
 import { FundingCard } from "@/components/funding";
-import { type MarketDrop, MarketDropRow, underText } from "@/components/market-drops";
+import { type MarketDrop, MarketDropRow, type Vix, VixRow, type Yields, YieldsRow, underText } from "@/components/market-drops";
 import { SubPageTitle } from "@/components/page";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -33,6 +33,8 @@ type AlertsState = {
   categories: { id: number; name: string }[];
   goals?: { id: number; name: string }[];
   markets?: MarketDrop[];
+  vix?: Vix | null;
+  yields?: Yields | null;
 };
 
 const when = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
@@ -113,7 +115,7 @@ export default function AlertsPage() {
 
   return (
     <>
-      <SubPageTitle title="Alerts" back="/settings" subtitle="Prices, dips, market drops, budgets, low cash before a payment, and how concentrated you are, sent to your phone." />
+      <SubPageTitle title="Alerts" back="/settings" subtitle="Prices, dips, market drops, volatility and yields, budgets, low cash before a payment, and how concentrated you are, sent to your phone." />
       {!s && !error && (
         <div className="grid grid-cols-1 gap-4" aria-busy="true" aria-label="Loading">
           <Skeleton className="h-28 rounded-xl" />
@@ -167,16 +169,18 @@ export default function AlertsPage() {
 
           <FundingCard demo={demo} className="md:col-span-2" />
 
-          {s.markets && s.markets.length > 0 && (
+          {(s.markets?.length || s.vix || s.yields) && (
             <Card className="md:col-span-2">
               <CardHeader>
                 <CardTitle>The market</CardTitle>
                 <Landmark className="size-4 text-muted-foreground" aria-hidden />
               </CardHeader>
               <CardContent className="grid grid-cols-1 gap-5 md:grid-cols-2">
-                {s.markets.map((d) => (
+                {(s.markets ?? []).map((d) => (
                   <MarketDropRow key={d.symbol} d={d} />
                 ))}
+                {s.vix && <VixRow v={s.vix} />}
+                {s.yields && <YieldsRow y={s.yields} />}
               </CardContent>
             </Card>
           )}
@@ -204,7 +208,15 @@ export default function AlertsPage() {
                     <button className="min-w-0 flex-1 text-left" onClick={() => !guard() && setEditing(r)}>
                       <span className={cn("block text-sm font-medium wrap-anywhere", !r.enabled && "text-muted-foreground")}>{r.summary}</span>
                       <span className="block text-xs text-muted-foreground">
-                        {r.kind === "market"
+                        {r.kind === "vix"
+                          ? s.vix
+                            ? `Now ${s.vix.level.toFixed(1)}. Checked with every price update`
+                            : "Checked with every price update"
+                          : r.kind === "yield"
+                          ? s.yields
+                            ? `10-year now ${s.yields.ten_year.toFixed(2)}%, 2-year ${s.yields.two_year.toFixed(2)}%. Checked daily`
+                            : "Checked once a day"
+                          : r.kind === "market"
                           ? r.market
                             ? `Now ${underText(r.market.under_percent)} under its record close`
                             : "Checked with every price update, from its record close"

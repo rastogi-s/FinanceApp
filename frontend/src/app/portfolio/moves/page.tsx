@@ -17,7 +17,7 @@ import {
   Sparkles,
   Zap,
 } from "lucide-react";
-import { type MarketDrop, MarketDropRow, dropQuestion } from "@/components/market-drops";
+import { MarketDropRow, VixRow, YieldsRow, dropQuestion, questionFor } from "@/components/market-drops";
 import { Money } from "@/components/money";
 import { BackLink, Notice } from "@/components/page";
 import { Badge } from "@/components/ui/badge";
@@ -59,7 +59,7 @@ export default function MovesPage() {
   const [question, setQuestion] = useState("");
 
   // Opened from a market drop alert (or "Ask AI what to do"): that fall becomes the question.
-  const [focus, setFocus] = useState<MarketDrop | null>(null);
+  const [focus, setFocus] = useState<string | null>(null);
 
   useEffect(() => {
     const market = new URLSearchParams(window.location.search).get("market");
@@ -67,12 +67,12 @@ export default function MovesPage() {
       (o) => {
         setOffer(o);
         setResult(o.last);
-        const d = market ? (o.drops ?? []).find((x) => x.symbol === market) : undefined;
-        if (d) {
-          setFocus(d);
-          setQuestion(dropQuestion(d));
+        const q = market ? questionFor(o, market) : null;
+        if (market && q) {
+          setFocus(market);
+          setQuestion(q);
         }
-        setAsking(!o.last || !!d);
+        setAsking(!o.last || !!q);
       },
       (e: Error) => setError(e.message),
     );
@@ -124,7 +124,13 @@ export default function MovesPage() {
           {focus && (asking || !result) && !busy && (
             <Card>
               <CardContent className="pt-5">
-                <MarketDropRow d={focus} ask={false} />
+                {focus === "^VIX" && offer.vix ? (
+                  <VixRow v={offer.vix} ask={false} />
+                ) : focus === "yields" && offer.yields ? (
+                  <YieldsRow y={offer.yields} ask={false} />
+                ) : (
+                  (offer.drops ?? []).filter((d) => d.symbol === focus).map((d) => <MarketDropRow key={d.symbol} d={d} ask={false} />)
+                )}
               </CardContent>
             </Card>
           )}
@@ -211,7 +217,7 @@ function Ask({
             <span>
               Your {offer.holdings} holding{offer.holdings === 1 ? "" : "s"} by ticker with gains and which accounts are taxable, your mix,
               cash, goals and tax bracket, plus today&apos;s market
-              {offer.drops?.length ? " and how far the indexes are under their highs" : ""}
+              {offer.drops?.length || offer.vix || offer.yields ? ", how far the indexes are under their highs, the VIX and Treasury yields" : ""}
               {offer.headlines ? ` and ${offer.headlines} recent headlines` : ""}. No account numbers, names or transactions.
             </span>
           </p>
@@ -233,7 +239,7 @@ function Ask({
 
         {offer.available ? (
           <Button size="lg" onClick={ask} disabled={busy}>
-            <Sparkles /> {busy ? "Thinking it through…" : question.startsWith("The ") && question.includes("record high") ? "Ask what to do" : "Review my portfolio"}
+            <Sparkles /> {busy ? "Thinking it through…" : ["^GSPC", "^IXIC", "^DJI", "^VIX", "yields"].some((k) => question === questionFor(offer, k)) ? "Ask what to do" : "Review my portfolio"}
           </Button>
         ) : (
           <>

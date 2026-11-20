@@ -40,6 +40,7 @@ TICKER = re.compile(r"^[A-Z][A-Z0-9]{0,5}([.\-][A-Z])?$")
 QUOTED_CLASSES = {"Stocks", "Funds", "Bonds"}
 # Market indexes a drop alert can watch: Yahoo's symbol and the name people know.
 INDEXES = {"^GSPC": "S&P 500", "^IXIC": "Nasdaq", "^DJI": "Dow"}
+VIX = "^VIX"  # the stock market's expected volatility, for the VIX alerts
 AFTER_CLOSE = (time(16, 5), time(18, 30))
 MAX_SYMBOLS = 150
 FINNHUB_PER_MINUTE = 55  # the free tier allows 60 calls a minute
@@ -59,7 +60,7 @@ def quotable(symbol: str, asset_class: str = "Stocks") -> bool:
 
 
 def is_index(symbol: str) -> bool:
-    return symbol in INDEXES
+    return symbol in INDEXES or symbol == VIX
 
 
 def yahoo_path(symbol: str) -> str:
@@ -176,9 +177,12 @@ def holding_symbols(db: DbSession) -> set[str]:
 
 
 def market_symbols(db: DbSession) -> list[str]:
-    """The indexes market drop alerts watch."""
-    rules = db.scalars(select(AlertRule).where(AlertRule.kind == "market", AlertRule.enabled.is_(True)))
-    return sorted({str(r.params.get("symbol")) for r in rules} & INDEXES.keys())
+    """The indexes market drop alerts watch, and the VIX when a VIX alert is on."""
+    rules = list(
+        db.scalars(select(AlertRule).where(AlertRule.kind.in_(["market", "vix"]), AlertRule.enabled.is_(True)))
+    )
+    found = {str(r.params.get("symbol")) for r in rules if r.kind == "market"} & INDEXES.keys()
+    return sorted(found | ({VIX} if any(r.kind == "vix" for r in rules) else set()))
 
 
 def held_symbols(db: DbSession) -> list[str]:
@@ -320,7 +324,7 @@ def refresh_trends(database: Database, t: datetime, client: httpx.Client | None 
     found: dict[str, dict] = {}
     history: dict[str, tuple[date, Decimal] | None] = {}  # an index's record close over all its history
     with database.session() as db:
-        unchecked = [s for s in stale if is_index(s) and not getattr(db.get(Quote, s), "peak_full", True)]
+        unchecked = [s for s in stale if s in INDEXES and not getattr(db.get(Quote, s), "peak_full", True)]
     try:
         for s in unchecked:
             try:
@@ -349,7 +353,7 @@ def refresh_trends(database: Database, t: datetime, client: httpx.Client | None 
                 record = trend.pop("year_record", None)
                 for k, v in trend.items():
                     setattr(q, k, v)
-                if is_index(s):
+                if s in INDEXES:
                     peak_update(q, record)
                     if s in history:
                         peak_update(q, history[s], full=True)
