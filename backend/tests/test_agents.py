@@ -155,7 +155,8 @@ def test_tools_answer_with_the_apps_numbers(client, home):
     ]
     assert [t["merchant"] for t in found["transactions"]] == ["Whole Foods", "Whole Foods"] and found["more"]
     assert found["transactions"][0]["amount"] == -550.0
-    by_cat = call(client, key, "transactions", {"category": "dining out"})["structuredContent"]["transactions"]
+    dining = {"category": "dining out", "start": "2026-10-01"}  # pinned: the default 30-day window moves with the clock
+    by_cat = call(client, key, "transactions", dining)["structuredContent"]["transactions"]
     assert [t["merchant"] for t in by_cat] == ["Sweetgreen"]
 
     b = call(client, key, "budget")["structuredContent"]

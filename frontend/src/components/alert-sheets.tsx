@@ -1,23 +1,35 @@
 "use client";
 
 import { useState } from "react";
-import { Bell, ChartPie, PiggyBank, Target, Trash2, TrendingDown, TrendingUp } from "lucide-react";
+import { Activity, Bell, ChartPie, Landmark, Percent, PiggyBank, Target, Trash2, TrendingDown, TrendingUp } from "lucide-react";
+import type { MarketDrop } from "@/components/market-drops";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select } from "@/components/ui/input";
 import { Sheet } from "@/components/ui/sheet";
+import { Switch } from "@/components/ui/switch";
 import { toast } from "@/components/ui/toast";
 import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 
 export type Rule = {
   id: number;
-  kind: "price" | "dip" | "budget" | "concentration" | "goal";
+  kind: "price" | "dip" | "market" | "vix" | "yield" | "budget" | "concentration" | "goal";
   params: Record<string, number | string | null>;
   enabled: boolean;
   summary: string;
   triggered: boolean;
   priority?: Priority;
+  /** A market rule: how far its index is under its record close now, once that's known. */
+  market?: MarketDrop | null;
 };
+
+/** The indexes a market drop alert can watch (backend quotes.INDEXES). */
+export const MARKET_INDEXES = [
+  ["^GSPC", "S&P 500"],
+  ["^IXIC", "Nasdaq"],
+  ["^DJI", "Dow"],
+] as const;
+type IndexSymbol = (typeof MARKET_INDEXES)[number][0];
 
 /** How hard the phone tries to get attention: ntfy priorities 4, 3 and 2. */
 export type Priority = "high" | "default" | "low";
@@ -25,6 +37,9 @@ export type Priority = "high" | "default" | "low";
 export type RuleIn = (
   | { kind: "price"; symbol: string; above?: number; below?: number; move_percent?: number }
   | { kind: "dip"; symbol: string | null; from_high_percent?: number; below_average?: 50 | 200 }
+  | { kind: "market"; symbol: IndexSymbol; step: number }
+  | { kind: "vix"; levels: number[] }
+  | { kind: "yield"; above: number | null; inversion: boolean }
   | { kind: "budget"; category_id: number | null; percent?: number; forecast?: boolean }
   | { kind: "concentration"; percent: number }
   | { kind: "goal"; goal_id: number | null }
@@ -36,8 +51,8 @@ export const PRIORITY_OPTIONS = [
   ["low", "Quiet", "No banner or sound. It waits in the ntfy app and here."],
 ] as const;
 
-export const KIND_ICON = { price: TrendingUp, dip: TrendingDown, budget: PiggyBank, concentration: ChartPie, goal: Target } as const;
-const KIND_LABEL = { price: "A price", dip: "A dip", budget: "A budget", concentration: "One company", goal: "A goal" } as const;
+export const KIND_ICON = { price: TrendingUp, dip: TrendingDown, market: Landmark, vix: Activity, yield: Percent, budget: PiggyBank, concentration: ChartPie, goal: Target } as const;
+const KIND_LABEL = { price: "A price", dip: "A dip", market: "The market", vix: "Volatility", yield: "Yields", budget: "A budget", concentration: "One company", goal: "A goal" } as const;
 
 type PriceMode = "above" | "below" | "move_percent";
 type DipMode = "high" | "200" | "50";
@@ -138,6 +153,13 @@ function RuleForm({
   const [concPct, setConcPct] = useState<string>(rule?.kind === "concentration" ? String(p.percent) : "10");
   const [dipMode, setDipMode] = useState<DipMode>(p.below_average != null ? (String(p.below_average) as DipMode) : "high");
   const [dipPct, setDipPct] = useState<string>(p.from_high_percent != null ? String(p.from_high_percent) : "10");
+  const [index, setIndex] = useState<IndexSymbol>(rule?.kind === "market" ? ((p.symbol as IndexSymbol) ?? "^GSPC") : "^GSPC");
+  const [vixLevels, setVixLevels] = useState<number[]>(
+    rule?.kind === "vix" && Array.isArray(rule.params.levels) ? (rule.params.levels as unknown as number[]) : [25, 30, 40],
+  );
+  const [tenYear, setTenYear] = useState<string>(rule?.kind === "yield" ? (p.above != null ? String(p.above) : "") : "5");
+  const [inversion, setInversion] = useState<boolean>(rule?.kind === "yield" ? Boolean(p.inversion) : true);
+  const [step, setStep] = useState<string>(rule?.kind === "market" && p.step != null ? String(p.step) : "5");
   const [priority, setPriority] = useState<Priority>(rule?.priority ?? "high");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -160,6 +182,18 @@ function RuleForm({
       } else {
         body = { kind, symbol: s, below_average: dipMode === "200" ? 200 : 50 };
       }
+    } else if (kind === "market") {
+      const n = Number(step.replace(/[%\s]/g, ""));
+      if (!Number.isFinite(n) || n < 1 || n > 25) return setError("Pick a step between 1% and 25%.");
+      body = { kind, symbol: index, step: n };
+    } else if (kind === "vix") {
+      if (!vixLevels.length) return setError("Pick at least one level.");
+      body = { kind, levels: vixLevels };
+    } else if (kind === "yield") {
+      const t = tenYear.trim() ? Number(tenYear.replace(/[%\s]/g, "")) : null;
+      if (t !== null && (!Number.isFinite(t) || t < 0.5 || t > 15)) return setError("Pick a yield between 0.5% and 15%.");
+      if (t === null && !inversion) return setError("Pick a 10-year yield, the inverted curve, or both.");
+      body = { kind, above: t, inversion };
     } else if (kind === "budget") {
       body =
         budgetPct === "forecast"
@@ -188,8 +222,8 @@ function RuleForm({
   return (
     <form onSubmit={submit} className="grid grid-cols-1 gap-4">
       {!rule && (
-        <div role="radiogroup" aria-label="What to watch" className={cn("grid gap-2", fixed ? "grid-cols-2" : "grid-cols-3 sm:grid-cols-5")}>
-          {(fixed ? (["price", "dip"] as const) : (["price", "dip", "budget", "concentration", "goal"] as const)).map((k) => {
+        <div role="radiogroup" aria-label="What to watch" className={cn("grid gap-2", fixed ? "grid-cols-2" : "grid-cols-4")}>
+          {(fixed ? (["price", "dip"] as const) : (["price", "dip", "market", "vix", "yield", "budget", "concentration", "goal"] as const)).map((k) => {
             const Icon = KIND_ICON[k];
             return (
               <button
@@ -337,6 +371,87 @@ function RuleForm({
               {error && <span className="mt-1 block text-negative">{error}</span>}
             </p>
           )}
+        </>
+      )}
+
+      {kind === "market" && (
+        <>
+          <div role="radiogroup" aria-label="Which market" className="grid grid-cols-3 gap-1 rounded-full bg-muted p-1 text-sm">
+            {MARKET_INDEXES.map(([sym, label]) => (
+              <button
+                key={sym}
+                type="button"
+                role="radio"
+                aria-checked={index === sym}
+                onClick={() => setIndex(sym)}
+                className={cn("rounded-full py-2 font-medium transition-colors", index === sym ? "bg-card shadow-sm" : "text-muted-foreground")}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <Field
+            id="rule-market-step"
+            label="Tell me each time it falls another"
+            hint={`Under its record close by ${[1, 2, 3, 4].map((i) => `${Number(step) * i}%`).join(", ")}… Once per step, and again only after it climbs back to a new high. 10% is a correction, 20% a bear market. Facts, not advice.`}
+            error={error}
+          >
+            <Select value={step} onChange={(e) => setStep(e.target.value)}>
+              {(["2", "2.5", "5", "10"].includes(step) ? ["2", "2.5", "5", "10"] : ["2", "2.5", "5", "10", step]).map((n) => (
+                <option key={n} value={n}>
+                  {n}% from its high
+                </option>
+              ))}
+            </Select>
+          </Field>
+        </>
+      )}
+
+      {kind === "vix" && (
+        <div className="grid gap-2">
+          <span id="rule-vix" className="text-sm font-medium">
+            When the VIX reaches
+          </span>
+          <div role="group" aria-labelledby="rule-vix" className="flex flex-wrap gap-2">
+            {[20, 25, 30, 35, 40, 50].map((n) => {
+              const on = vixLevels.includes(n);
+              return (
+                <button
+                  key={n}
+                  type="button"
+                  aria-pressed={on}
+                  onClick={() => setVixLevels((l) => (on ? l.filter((x) => x !== n) : [...l, n].sort((a, b) => a - b)))}
+                  className={cn("min-w-12 rounded-full border px-3.5 py-2 text-sm font-medium tabular-nums transition-colors", on ? "border-primary bg-accent text-accent-foreground" : "text-muted-foreground hover:bg-muted")}
+                >
+                  {n}
+                </button>
+              );
+            })}
+          </div>
+          <p className="text-xs text-muted-foreground">
+            The VIX is how big a swing stocks are expected to make: under 20 is calm, over 30 is fear. Only the highest level reached sends
+            anything, and each again only after the VIX falls well back. Facts, not advice.
+          </p>
+          {error && <p className="text-xs text-negative">{error}</p>}
+        </div>
+      )}
+
+      {kind === "yield" && (
+        <>
+          <Field
+            id="rule-ten-year"
+            label="When the 10-year Treasury yield goes above"
+            hint="Checked once a day. Again only after it drops a quarter point under. Leave it empty to skip."
+            error={error}
+          >
+            <Input value={tenYear} onChange={(e) => setTenYear(e.target.value)} inputMode="decimal" placeholder="5" />
+          </Field>
+          <Switch
+            checked={inversion}
+            onCheckedChange={setInversion}
+            label="When the yield curve inverts"
+            description="The 2-year paying more than the 10-year. It has come before most US recessions, but not every time."
+          />
         </>
       )}
 

@@ -123,6 +123,110 @@ def test_dip_from_high_steps_down_once_each(client, sent):
 
 
 @needs_db
+def test_market_drop_once_per_step_until_a_new_high(client, sent):
+    with db_of(client).session() as db:
+        db.execute(delete(AlertRule))
+        db.add(AlertRule(kind="market", params={"symbol": "^GSPC", "step": 5}, enabled=True, state={}))
+        set_quote(db, "^GSPC", 6800)
+        assert alerts.evaluate(db, {"market"}, t=NOON) == 0  # the record close isn't known yet
+        q = db.get(Quote, "^GSPC")
+        q.peak, q.peak_on = Decimal("7000"), date(2026, 10, 1)
+        db.flush()
+        assert alerts.evaluate(db, {"market"}, t=NOON) == 0  # 2.9% under
+        set_quote(db, "^GSPC", 6640)
+        assert alerts.evaluate(db, {"market"}, t=NOON) == 1  # 5.1%
+        set_quote(db, "^GSPC", 6600)
+        assert alerts.evaluate(db, {"market"}, t=NOON) == 0  # still the 5% step
+        set_quote(db, "^GSPC", 5550)
+        assert alerts.evaluate(db, {"market"}, t=NOON) == 1  # straight through 10% and 15%: one alert, for 20%
+        set_quote(db, "^GSPC", 6900)
+        assert alerts.evaluate(db, {"market"}, t=NOON) == 0  # recovering, but not to a new high
+        set_quote(db, "^GSPC", 6600)
+        assert alerts.evaluate(db, {"market"}, t=NOON) == 0  # the same fall: 5% was already told
+        set_quote(db, "^GSPC", 7010)
+        alerts.evaluate(db, {"market"}, t=NOON)  # a new high: every step re-armed
+        q.peak = Decimal("7010")
+        set_quote(db, "^GSPC", 6650)
+        assert alerts.evaluate(db, {"market"}, t=NOON) == 1
+        events = db.scalars(select(AlertEvent).order_by(AlertEvent.id)).all()
+        assert [e.title for e in events] == [
+            "The S&P 500 is down 5% from its high",
+            "The S&P 500 is down 20% from its high",
+            "The S&P 500 is down 5% from its high",
+        ]
+        assert events[0].body == (
+            "At 6,640, 5.1% under its record close of 7,000 on Oct 1, 2026. Information only, not advice."
+        )
+        assert "Bear market territory (20% or more)." in events[1].body
+        assert events[0].link == "/portfolio/moves?market=%5EGSPC"  # tapping it asks what to do about it
+        # A price from weeks ago isn't news.
+        set_quote(db, "^GSPC", 4000, at=NOON - timedelta(days=10))
+        assert alerts.evaluate(db, {"market"}, t=NOON) == 0
+
+
+@needs_db
+def test_vix_once_per_spike(client, sent):
+    with db_of(client).session() as db:
+        db.execute(delete(AlertRule))
+        db.add(AlertRule(kind="vix", params={"levels": [25, 30, 40]}, enabled=True, state={}))
+        set_quote(db, "^VIX", 18)
+        db.get(Quote, "^VIX").closes = [15.0, 16.0, 18.0]
+        assert alerts.evaluate(db, {"vix"}, t=NOON) == 0
+        set_quote(db, "^VIX", 26)
+        assert alerts.evaluate(db, {"vix"}, t=NOON) == 1
+        set_quote(db, "^VIX", 24)
+        assert alerts.evaluate(db, {"vix"}, t=NOON) == 0  # under 25, but not back under 21.25: the same spike
+        set_quote(db, "^VIX", 26)
+        assert alerts.evaluate(db, {"vix"}, t=NOON) == 0
+        set_quote(db, "^VIX", 45)
+        assert alerts.evaluate(db, {"vix"}, t=NOON) == 1  # through 30 and 40: one alert, for 40
+        set_quote(db, "^VIX", 19)
+        alerts.evaluate(db, {"vix"}, t=NOON)  # calm again: every level re-armed
+        set_quote(db, "^VIX", 31)
+        assert alerts.evaluate(db, {"vix"}, t=NOON) == 1
+        events = db.scalars(select(AlertEvent).order_by(AlertEvent.id)).all()
+        assert [e.title for e in events] == ["The VIX is above 25", "The VIX is above 40", "The VIX is above 30"]
+        assert events[0].body.startswith("Markets expect big swings: the VIX is at 26.0, from 15.0 a month ago.")
+        assert events[0].link == "/portfolio/moves?market=%5EVIX"
+        set_quote(db, "^VIX", 80, at=NOON - timedelta(days=5))
+        assert alerts.evaluate(db, {"vix"}, t=NOON) == 0  # an old quote isn't news
+
+
+def set_yields(db, ten: float, two: float, as_of: str = "2026-10-20") -> None:
+    p = db.get(Preference, "market_rates") or Preference(key="market_rates", value={})
+    p.value = {**p.value, "treasury": {"as_of": as_of, "120": ten, "24": two}}
+    db.merge(p)
+    db.flush()
+
+
+@needs_db
+def test_ten_year_line_and_inverted_curve(client, sent):
+    with db_of(client).session() as db:
+        db.execute(delete(AlertRule))
+        db.add(AlertRule(kind="yield", params={"above": 5.0, "inversion": True}, enabled=True, state={}))
+        assert alerts.evaluate(db, {"yield"}, t=NOON) == 0  # no yields read yet
+        set_yields(db, 4.6, 4.2)
+        assert alerts.evaluate(db, {"yield"}, t=NOON) == 0
+        set_yields(db, 5.02, 4.9)
+        assert alerts.evaluate(db, {"yield"}, t=NOON) == 1
+        set_yields(db, 4.9, 5.0)  # under 5, but not a quarter point under; and the curve inverted
+        assert alerts.evaluate(db, {"yield"}, t=NOON) == 1
+        set_yields(db, 5.05, 5.0)  # back over by less than a tenth: not re-armed
+        assert alerts.evaluate(db, {"yield"}, t=NOON) == 0
+        set_yields(db, 4.6, 4.4)
+        alerts.evaluate(db, {"yield"}, t=NOON)
+        set_yields(db, 5.1, 5.2)
+        assert alerts.evaluate(db, {"yield"}, t=NOON) == 2
+        titles = [e.title for e in db.scalars(select(AlertEvent).order_by(AlertEvent.id))]
+        assert titles[:2] == ["The 10-year Treasury yield is above 5%", "The yield curve inverted"]
+        body = db.scalars(select(AlertEvent).order_by(AlertEvent.id)).all()[1].body
+        assert body.startswith("The 2-year Treasury yields 5.00%, more than the 10-year's 4.90%.")
+        set_yields(db, 4.0, 4.5, as_of="2026-10-01")  # weeks old: not used
+        alerts.evaluate(db, {"yield"}, t=NOON)
+        assert alerts.evaluate(db, {"yield"}, t=NOON) == 0
+
+
+@needs_db
 def test_dip_below_average_for_everything_held(client, sent, monkeypatch):
     monkeypatch.setattr(alerts.quotes, "holding_symbols", lambda db: {"VTI", "AAPL"})
     with db_of(client).session() as db:
@@ -268,7 +372,12 @@ def test_starter_rules_and_check_after_budget(client, home, sent, monkeypatch):
     r = client.get("/api/alerts")
     assert r.status_code == 200
     kinds = sorted(x["kind"] for x in r.json()["rules"])
-    assert kinds == ["budget", "budget", "concentration", "dip", "dip", "goal"]  # from the migrations
+    assert kinds == ["budget", "budget", "concentration", "dip", "dip", "goal", "market", "vix", "yield"]  # migrations
+    summaries = [x["summary"] for x in r.json()["rules"]]
+    assert "The VIX reaches 25, 30 and 40" in summaries
+    assert "The 10-year Treasury yield goes above 5% or the yield curve inverts" in summaries
+    market = next(x for x in r.json()["rules"] if x["kind"] == "market")
+    assert market["summary"] == "The S&P 500 falls 5% from its high, and each 5% more" and market["market"] is None
     assert "Any category is on pace to go over its budget" in [x["summary"] for x in r.json()["rules"]]
     monkeypatch.setattr(budget, "today", lambda: date(2026, 10, 21))
     assert alerts.check(db_of(client), client.app.state.settings, {"budget", "concentration"}) == 0
@@ -288,6 +397,11 @@ def test_rules_api(client, home, sent):
         {"kind": "dip", "from_high_percent": 10, "below_average": 200},
         {"kind": "dip", "below_average": 100},
         {"kind": "dip", "symbol": "not a ticker", "from_high_percent": 10},
+        {"kind": "market", "symbol": "^FTSE"},
+        {"kind": "market", "step": 0.5},
+        {"kind": "vix", "levels": [5]},
+        {"kind": "vix", "levels": []},
+        {"kind": "yield", "above": None, "inversion": False},
         {"kind": "email-everyone"},
     ]
     for rule in bad:
@@ -316,6 +430,16 @@ def test_rules_api(client, home, sent):
     assert client.delete(f"/api/alerts/rules/{rule['id']}", headers=h).status_code == 404
     # A rule from another household member's session still needs the CSRF token.
     assert client.post("/api/alerts/rules", json={"rule": {"kind": "concentration", "percent": 5}}).status_code == 403
+
+    with db_of(client).session() as db:
+        set_quote(db, "^IXIC", 20000, at=datetime.now(UTC))
+        q = db.get(Quote, "^IXIC")
+        q.peak, q.peak_on = Decimal("25000"), date(2026, 10, 30)
+    r = client.post("/api/alerts/rules", json={"rule": {"kind": "market", "symbol": "^IXIC", "step": 10}}, headers=h)
+    nasdaq = next(x for x in r.json()["rules"] if x["params"].get("symbol") == "^IXIC")
+    assert nasdaq["summary"] == "The Nasdaq falls 10% from its high, and each 10% more"
+    assert nasdaq["market"]["under_percent"] == 20 and r.json()["markets"][0]["name"] == "Nasdaq"
+    assert r.json()["events"][0]["title"] == "The Nasdaq is down 20% from its high"  # checked right away
 
     q = {"enabled": True, "start": "21:30", "end": "06:45", "timezone": "America/Los_Angeles"}
     assert client.put("/api/alerts/quiet", json=q, headers=h).json()["quiet"] == q

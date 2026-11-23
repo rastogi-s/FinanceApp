@@ -48,24 +48,43 @@ def long_term_on(acquired: date) -> date:
     return anniversary + timedelta(days=1)
 
 
-def _take(open_lots: list[Lot], quantity: Decimal) -> Decimal:
-    """Closes `quantity` shares from the oldest lots. Returns how many shares no lot covered."""
+def _take(open_lots: list[Lot], quantity: Decimal, closed: list[Lot] | None = None) -> Decimal:
+    """Closes `quantity` shares from the oldest lots, adding the pieces closed to `closed` if given. Returns how many
+    shares no lot covered."""
     left = quantity
     while left > TINY and open_lots:
         lot = open_lots[0]
         if lot.quantity <= left + TINY:
             left -= lot.quantity
             open_lots.pop(0)
+            if closed is not None:
+                closed.append(lot)
             continue
+        part = None
         if lot.cost_cents is not None:
-            lot.cost_cents -= int((Decimal(lot.cost_cents) * left / lot.quantity).to_integral_value())
+            part = int((Decimal(lot.cost_cents) * left / lot.quantity).to_integral_value())
+            lot.cost_cents -= part
+        if closed is not None:
+            closed.append(Lot(lot.acquired, left, part))
         lot.quantity -= left
         left = Decimal(0)
     return max(left, Decimal(0))
 
 
-def replay(activity: list[InvestmentTransaction]) -> tuple[list[Lot], bool]:
-    """Open lots after the activity, oldest first, and whether a sale reached shares from before the history."""
+@dataclass
+class Sale:
+    """Shares sold, matched to the lots they came out of (first in, first out)."""
+
+    sold: date
+    quantity: Decimal
+    proceeds_cents: int
+    pieces: list[Lot]  # acquired None and cost None: shares from before the history, cost not on file
+    uncovered: Decimal  # shares no lot on file explains (bought before the history starts)
+
+
+def replay(activity: list[InvestmentTransaction], sales: list[Sale] | None = None) -> tuple[list[Lot], bool]:
+    """Open lots after the activity, oldest first, and whether a sale reached shares from before the history. Each
+    sale (not transfers out) is added to `sales` if given, with the lots it closed."""
     open_lots: list[Lot] = []
     older = False
     for t in sorted(activity, key=lambda t: (t.date, t.id or 0)):
@@ -86,7 +105,15 @@ def replay(activity: list[InvestmentTransaction]) -> tuple[list[Lot], bool]:
                 cost = int((q * t.price * 100).to_integral_value())
             open_lots.append(Lot(t.date, q, cost))
         elif kind == "sell" or (kind == "transfer" and (t.quantity or 0) < 0):
-            older = _take(open_lots, q) > TINY or older
+            closed: list[Lot] = []
+            uncovered = _take(open_lots, q, closed)
+            older = uncovered > TINY or older
+            if kind == "sell" and sales is not None:
+                proceeds = t.amount_cents if t.amount_cents > 0 else None
+                if proceeds is None and t.price:
+                    proceeds = int((q * t.price * 100).to_integral_value())
+                if proceeds is not None:
+                    sales.append(Sale(t.date, q, proceeds, closed, uncovered if uncovered > TINY else Decimal(0)))
     return open_lots, older
 
 

@@ -396,3 +396,52 @@ def test_portfolio_page_is_light_and_cached(client, home):
         assert moved is not changed and moved["companies"][0]["symbol"] == "MSFT"  # a new price counts at once
     t = client.get("/api/portfolio").json()["trends"]
     assert t["MSFT"]["closes"] == [480.0, 500.0] and t["MSFT"]["previous_close"] == 500.0
+
+
+@needs_db
+def test_index_record_close_from_all_history_then_each_year(client):
+    """A market index keeps its record close: once from all of its monthly history, then from each year of closes."""
+    calls: list[tuple[str, str]] = []
+
+    def monthly(record: float) -> dict:
+        stamps = [int(datetime(2021, m, 1, 12, tzinfo=quotes.ET).timestamp()) for m in (1, 2, 3)]
+        meta = {"currency": "USD"}
+        quote = {"close": [100.0, record, 120.0]}
+        return {"chart": {"result": [{"meta": meta, "timestamp": stamps, "indicators": {"quote": [quote]}}]}}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.raw_path.startswith(b"/v8/finance/chart/%5EGSPC")
+        calls.append((request.url.params["range"], request.url.params["interval"]))
+        if request.url.params["range"] == "max":
+            return httpx.Response(200, json=monthly(400))
+        return httpx.Response(200, json=year_of_closes(date(2026, 10, 20), 150))
+
+    t = datetime(2026, 10, 21, 12, 0, tzinfo=quotes.ET)
+    with db_of(client).session() as db:
+        db.add(Quote(symbol="^GSPC", price=Decimal("140"), source="yahoo", as_of=t))
+    assert quotes.refresh_trends(db_of(client), t, client=mock(handler)) == 1
+    assert calls == [("max", "1mo"), ("1y", "1d")]
+    with db_of(client).session() as db:
+        q = db.get(Quote, "^GSPC")
+        assert q.peak == Decimal("400") and q.peak_on == date(2021, 2, 1) and q.peak_full
+        q.trend_as_of = date(2026, 10, 19)
+        q.peak = Decimal("120")  # say the year's closes go higher than the record: they take over
+    calls.clear()
+    assert quotes.refresh_trends(db_of(client), t, client=mock(handler)) == 1
+    assert calls == [("1y", "1d")]  # all of history only once
+    with db_of(client).session() as db:
+        q = db.get(Quote, "^GSPC")
+        assert q.peak == Decimal("150") and q.peak_on == date(2026, 10, 20)
+
+
+def test_indexes_skip_finnhub():
+    paths: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.host != "finnhub.io"
+        paths.append(request.url.raw_path.decode())
+        meta = {"regularMarketPrice": 6800.5, "chartPreviousClose": 6850.0, "regularMarketTime": 1792541318}
+        return httpx.Response(200, json={"chart": {"result": [{"meta": meta}]}})
+
+    got = quotes.fetch(Settings(finnhub_api_key="k"), ["^GSPC"], client=mock(handler))
+    assert got["^GSPC"].price == Decimal("6800.5") and paths[0].startswith("/v8/finance/chart/%5EGSPC?")
