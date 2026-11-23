@@ -1,5 +1,69 @@
 [
   {
+    "version": "0.71.0",
+    "title": "An easier account picker on Profit",
+    "features": [
+      {
+        "id": "profit-account-picker",
+        "title": "Pick accounts from a list",
+        "body": "On your phone, Profit now shows one Showing button instead of a row of account names that ran off the screen. Tap it for a list of your accounts, taxable ones first, then retirement and HSA, each with its full name and its profit, and tick one or more."
+      }
+    ]
+  },
+  {
+    "version": "0.70.0",
+    "title": "Market drops, volatility and yields, and ask what to do about them",
+    "features": [
+      {
+        "id": "market-drops",
+        "title": "Market drop alerts",
+        "body": "You'll now hear when the S&P 500 falls 5% from its record close, then again at 10%, 15%, 20% and so on. Each step sends one alert per fall, and they reset once the index closes at a new high. 10% is a correction and 20% a bear market. Change the step, switch to the Nasdaq or the Dow, or turn it off in Settings, Alerts, where a new The market card shows how far each index is under its high."
+      },
+      {
+        "id": "market-vix-yields",
+        "title": "Volatility and yield alerts",
+        "body": "You'll also hear when the VIX, how big a swing stocks are expected to make, reaches 25, 30 or 40, once per spike. And when the 10-year Treasury yield goes above 5%, or the yield curve inverts (the 2-year paying more than the 10-year, which has come before most recessions). Both show on the market card too."
+      },
+      {
+        "id": "market-ask-ai",
+        "title": "Ask AI what to do",
+        "body": "Tap a market alert, or Ask AI what to do on the market card, and Any moves today? opens with it as the question. The answer weighs it against your holdings, cash, emergency fund, goals and taxes, and says whether to invest more, hold or sell. Ideas only: nothing is bought or sold."
+      }
+    ]
+  },
+  {
+    "version": "0.69.0",
+    "title": "Profit for your 401(k), and money market sweeps left out",
+    "features": [
+      {
+        "id": "profit-what-you-paid",
+        "title": "Add what you paid",
+        "body": "Some brokerages, like Fidelity for 401(k) plan funds, don't send what you paid, so Profit couldn't count those holdings. A new What you paid card on Profit lists each one: tap Add and type its cost basis from the brokerage's site, and its profit shows up everywhere on the page. A cost the brokerage sends later always wins. 401(k) contributions are now also matched to their funds, so new buys get their own lots after the next sync."
+      },
+      {
+        "id": "profit-no-sweeps",
+        "title": "Money market sweeps aren't sales",
+        "body": "Cash moving out of a money market fund like SPAXX to pay for a buy no longer shows up under Sold, so the list and its totals are only real sales."
+      }
+    ]
+  },
+  {
+    "version": "0.68.0",
+    "title": "See how much your portfolio has actually made, by account",
+    "features": [
+      {
+        "id": "profit-page",
+        "title": "Profit, from your tax lots",
+        "body": "Portfolio has a new Profit card. Tap it to see how much your holdings have grown over what you paid, in dollars and percent, worked out lot by lot. Not sold yet splits the gain into long-term and short-term for taxable accounts, with retirement and HSA growth shown apart as not taxed. Sold shows what this year's and last year's sales made, sale by sale. By holding ranks every holding by gain, percent or size, and each one opens its lots."
+      },
+      {
+        "id": "profit-by-account",
+        "title": "Pick the accounts",
+        "body": "Tap the account chips at the top of Profit to see one account or any mix, like just E*TRADE or just your 401(k). Every total, tile and list on the page follows, and your pick stays while the app is open."
+      }
+    ]
+  },
+  {
     "version": "0.67.0",
     "title": "A heads-up when an account is short for a payment you make on a schedule",
     "features": [

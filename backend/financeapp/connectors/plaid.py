@@ -84,6 +84,16 @@ def moment(value: str | None) -> datetime | None:
     return t.replace(tzinfo=UTC) if t and t.tzinfo is None else t
 
 
+def activity_symbol(s: dict) -> str | None:
+    """A security's symbol in brokerage activity, the same as its holding's: the ticker, or for a fund with none (a
+    401(k) plan fund) its name. Cash has none."""
+    if s.get("ticker_symbol"):
+        return s["ticker_symbol"][:40]
+    if not s or s.get("is_cash_equivalent") or not s.get("name"):
+        return None
+    return s["name"][:40]
+
+
 class Plaid:
     provider = "plaid"
 
@@ -375,6 +385,10 @@ class Plaid:
         """Dividends, interest, buys and sells: the full 24 months the first time, then the last month again."""
         end = today or date.today()
         through = result.state.get("investments_through")
+        # Funds with no ticker (401(k) plan funds) used to be saved without a symbol, so their buys never met the
+        # holding. Asking for the whole history once more names them the way the holdings are named.
+        if result.state.get("investments_named") != 1:
+            through = None
         start = (
             date.fromisoformat(through) - timedelta(days=INVESTMENT_OVERLAP_DAYS)
             if through
@@ -405,7 +419,7 @@ class Plaid:
                             date=date.fromisoformat(t["date"]),
                             type=(t.get("type") or "")[:24],
                             subtype=(t.get("subtype") or "")[:48],
-                            symbol=(s.get("ticker_symbol") or "")[:40] or None,
+                            symbol=activity_symbol(s),
                             name=(t.get("name") or s.get("name") or "")[:200],
                             quantity=Decimal(str(quantity)) if quantity is not None else None,
                             price=Decimal(str(price)) if price is not None else None,
@@ -421,6 +435,7 @@ class Plaid:
             raise
         result.investment_transactions += found
         result.state["investments_through"] = end.isoformat()
+        result.state["investments_named"] = 1
 
     def _transactions(self, token: str, result: FetchResult) -> None:
         start = result.state.get("cursor")

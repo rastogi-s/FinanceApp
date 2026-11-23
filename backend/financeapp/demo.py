@@ -1163,6 +1163,66 @@ def _sample_lots(symbol: str, held: list, price: float, today: date) -> dict | N
     return {"rows": rows, **lots.summary(rows, today)} if rows else None
 
 
+# Sample sales: (days ago, symbol, account, shares, proceeds, cost (None: from before the history), held long?)
+SAMPLE_SALES = [
+    (12, "AAPL", "E*TRADE", 6, 2_037, 1_612, False),
+    (75, "MSFT", "E*TRADE", 4, 1_986, 1_204, True),
+    (160, "VTI", "E*TRADE", 10, 3_050, None, True),
+    (230, "VXUS", "Fidelity 401(k)", 40, 2_660, 2_310, True),
+    (410, "AAPL", "E*TRADE", 5, 1_150, 1_310, False),
+]
+
+
+def profit(today: date | None = None) -> dict:
+    """The Profit page from the sample holdings' lots, and a few sample sales."""
+    from financeapp import income
+    from financeapp import profit as profits
+
+    today = today or datetime.now(UTC).date()
+    names = list(dict.fromkeys(h[3] for h in HOLDINGS if h[2] != "Cash"))
+    ids = {n: i + 1 for i, n in enumerate(names)}
+    rows = []
+    for h in HOLDINGS:
+        if h[2] == "Cash":
+            continue
+        got = _sample_lots(h[0], [h], SAMPLE_PRICES.get(h[0], 100.0), today)
+        for r in (got or {}).get("rows", []):
+            if h[3] == "Fidelity 401(k)" and h[0] == "VXUS":  # a plan fund the brokerage sends no cost for
+                r = {**r, "cost_cents": None, "gain_cents": None}
+            rows.append({**r, "account_id": ids[h[3]]})
+    held = {(ids[h[3]], h[0]): h[1] for h in HOLDINGS if h[2] != "Cash"}
+    sales = []
+    for days, symbol, account, shares, proceeds, cost, long_ in sorted(SAMPLE_SALES):
+        p, c = _cents(proceeds), _cents(cost) if cost is not None else None
+        gain = p - c if c is not None else None
+        sales.append(
+            {
+                "date": (today - timedelta(days=days)).isoformat(),
+                "symbol": symbol,
+                "name": next(h[1] for h in HOLDINGS if h[0] == symbol),
+                "account_id": ids[account],
+                "taxable": not income.TAX_ADVANTAGED.search(account.lower()),
+                "quantity": float(shares),
+                "proceeds_cents": p,
+                "cost_cents": c,
+                "gain_cents": gain,
+                "short_gain_cents": gain if gain is not None and not long_ else 0,
+                "long_gain_cents": gain if gain is not None and long_ else 0,
+                "uncosted_proceeds_cents": p if c is None else 0,
+            }
+        )
+    accounts = [
+        {
+            "id": ids[n],
+            "name": n,
+            "taxable": not income.TAX_ADVANTAGED.search(n.lower()),
+            "history_from": (today - timedelta(days=730)).isoformat(),
+        }
+        for n in names
+    ]
+    return profits.report(profits.holdings(rows, held), sales, accounts, today)
+
+
 def security(symbol: str, range_: str, today: date | None = None) -> dict:
     """A holding's detail page with a made-up but steady price history."""
     today = today or datetime.now(UTC).date()
@@ -1234,10 +1294,29 @@ def security(symbol: str, range_: str, today: date | None = None) -> dict:
     }
 
 
+# The S&P 500 a little over 5% under its record close, for the market drop alert and "Any moves today?".
+SP500_DROP = {
+    "symbol": "^GSPC",
+    "name": "S&P 500",
+    "level": 6812.4,
+    "peak": 7180.12,
+    "peak_on": "2026-10-29",
+    "under_percent": 5.12,
+    "as_of": "2026-11-20T21:00:00+00:00",
+}
+
+
+SAMPLE_VIX = {"level": 22.4, "month_ago": 15.8, "as_of": "2026-11-20T21:00:00+00:00"}
+SAMPLE_YIELDS = {"ten_year": 4.38, "two_year": 4.52, "spread": -0.14, "as_of": "2026-11-19"}
+
+
 def alerts() -> dict:
     """Settings → Alerts in demo mode."""
     at = datetime.now(UTC)
     return {
+        "markets": [SP500_DROP],
+        "vix": SAMPLE_VIX,
+        "yields": SAMPLE_YIELDS,
         "rules": [
             {
                 "id": 1,
@@ -1296,6 +1375,34 @@ def alerts() -> dict:
                 "triggered": False,
             },
             {
+                "id": 9,
+                "kind": "market",
+                "params": {"symbol": "^GSPC", "step": 5},
+                "enabled": True,
+                "priority": "high",
+                "summary": "The S&P 500 falls 5% from its high, and each 5% more",
+                "triggered": False,
+                "market": SP500_DROP,
+            },
+            {
+                "id": 10,
+                "kind": "vix",
+                "params": {"levels": [25, 30, 40]},
+                "enabled": True,
+                "priority": "high",
+                "summary": "The VIX reaches 25, 30 and 40",
+                "triggered": False,
+            },
+            {
+                "id": 11,
+                "kind": "yield",
+                "params": {"above": 5.0, "inversion": True},
+                "enabled": True,
+                "priority": "default",
+                "summary": "The 10-year Treasury yield goes above 5% or the yield curve inverts",
+                "triggered": False,
+            },
+            {
                 "id": 8,
                 "kind": "goal",
                 "params": {"goal_id": None},
@@ -1337,6 +1444,17 @@ def alerts() -> dict:
                 "channel": "ntfy",
                 "read": False,
                 "link": "/portfolio/holding?s=AAPL",
+            },
+            {
+                "id": "a5",
+                "kind": "market",
+                "title": "The S&P 500 is down 5% from its high",
+                "body": "At 6,812, 5.1% under its record close of 7,180 on Oct 29, 2026. Information only, not advice.",
+                "at": (at - timedelta(days=1)).isoformat(),
+                "status": "sent",
+                "channel": "ntfy",
+                "read": False,
+                "link": "/portfolio/moves?market=%5EGSPC",
             },
             {
                 "id": "a4",
@@ -1813,6 +1931,9 @@ def moves_offer(today: date | None = None) -> dict:
         "holdings": len({h[0] for h in HOLDINGS}),
         "headlines": 0,
         "preview": None,
+        "drops": [SP500_DROP],
+        "vix": SAMPLE_VIX,
+        "yields": SAMPLE_YIELDS,
         "last": {
             "at": at.isoformat(),
             "model": "claude-opus-5-5",

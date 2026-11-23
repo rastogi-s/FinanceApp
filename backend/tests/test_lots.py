@@ -4,7 +4,7 @@ from decimal import Decimal
 from financeapp import lots, security
 from financeapp.models import Account, Connection, HoldingSnapshot, InvestmentTransaction
 from financeapp.portfolio import Position
-from tests.conftest import db_of, needs_db
+from tests.conftest import csrf, db_of, needs_db
 
 TODAY = date.today()
 
@@ -124,3 +124,126 @@ def test_a_short_history_leaves_earlier_shares_term_unknown(client, home, monkey
     assert earlier["acquired"] is None and earlier["acquired_before"] == (TODAY - timedelta(days=30)).isoformat()
     assert earlier["term"] is None
     assert earlier["long_term_on"] == lots.long_term_on(TODAY - timedelta(days=31)).isoformat()
+
+
+def test_a_sale_is_matched_to_the_lots_it_closed():
+    sales: list[lots.Sale] = []
+    lots.replay(
+        [
+            txn(600, "buy", 10, -1_000),  # $100 a share, long-term by the sale
+            txn(200, "buy", 10, -2_000),  # $200 a share, short-term at the sale
+            txn(100, "sell", -15, 3_750),  # $250 a share: all of the first lot, 5 of the second
+            txn(90, "transfer", -1, 0),  # shares moved out aren't a sale
+        ],
+        sales,
+    )
+    assert len(sales) == 1
+    from financeapp import profit
+    from financeapp.models import Account
+
+    row = profit.sale_row(sales[0], "AAPL", "Apple", Account(id=1, name="Brokerage", subtype="brokerage"))
+    assert row["proceeds_cents"] == 375_000 and row["cost_cents"] == 200_000
+    assert row["long_gain_cents"] == 250_000 - 100_000 and row["short_gain_cents"] == 125_000 - 100_000
+    assert row["uncosted_proceeds_cents"] == 0 and row["taxable"]
+
+
+def test_shares_sold_from_before_the_history_have_no_cost():
+    sales: list[lots.Sale] = []
+    lots.replay([txn(100, "buy", 2, -400), txn(50, "sell", -4, 1_000)], sales)
+    from financeapp import profit
+    from financeapp.models import Account
+
+    row = profit.sale_row(sales[0], "AAPL", "Apple", Account(id=1, name="Roth IRA", subtype="roth"))
+    assert row["cost_cents"] == 40_000 and row["short_gain_cents"] == 50_000 - 40_000
+    assert row["uncosted_proceeds_cents"] == 50_000 and not row["taxable"]
+
+
+@needs_db
+def test_profit_adds_up_the_lots_and_the_sales(client, home):
+    home.setup()
+    seed_lots(client, [(400, 4, -800), (30, 2, -460)])
+    with db_of(client).session() as db:
+        a = db.query(Account).filter_by(external_id="brokerage").one()
+        db.add(InvestmentTransaction(account_id=a.id, external_id="s1", date=TODAY - timedelta(days=10), type="sell",
+                                     subtype="sell", symbol="AAPL", name="Apple", quantity=Decimal(-1),
+                                     price=Decimal(300), amount_cents=30_000, source="plaid"))  # fmt: skip
+        db.flush()
+    p = client.get("/api/portfolio/profit").json()
+    assert [x["name"] for x in p["accounts"]] == ["E*TRADE Brokerage"]
+    h = next(x for x in p["holdings"] if x["symbol"] == "AAPL")
+    assert h["value_cents"] == 300_000 and h["cost_cents"] == 200_000 and h["uncosted_value_cents"] == 0
+    # The sale took the first of the four shares bought 400 days ago at $200 (+$100, long-term).
+    assert p["sales"][0]["long_gain_cents"] == 10_000 and p["sales"][0]["short_gain_cents"] == 0
+    sold_in = next(y for y in p["sales_by_year"] if y["year"] == (TODAY - timedelta(days=10)).year)
+    assert sold_in["by_account"][0]["count"] == 1 and sold_in["by_account"][0]["long_gain_cents"] == 10_000
+
+
+def test_demo_profit_has_every_account_with_lots():
+    from financeapp import demo
+
+    p = demo.profit(date(2026, 11, 17))
+    assert {a["name"] for a in p["accounts"]} == {"Fidelity 401(k)", "E*TRADE", "Fidelity IRA"}
+    assert [h["symbol"] for h in p["holdings"] if h["uncosted_value_cents"]] == ["VXUS"]  # the plan fund with no cost
+    assert p["sales_by_year"][0]["year"] == 2026
+
+
+def test_money_market_sales_are_not_sales():
+    from financeapp import profit
+
+    mmf = [txn(30, "buy", 500, -500, price=1), txn(10, "sell", -120, 120, price=1)]
+    for t in mmf:
+        t.symbol = "SPAXX"
+    assert profit.cash_like("SPAXX", mmf, set())
+    assert profit.cash_like("VMFXX", [], {"VMFXX"})
+    assert not profit.cash_like("AAPL", [txn(30, "buy", 2, -600, price=300)], set())
+
+
+def test_a_fund_without_a_ticker_keeps_its_name_in_the_activity():
+    from financeapp.connectors.plaid import activity_symbol
+
+    assert activity_symbol({"ticker_symbol": "VTI", "name": "Vanguard"}) == "VTI"
+    assert activity_symbol({"ticker_symbol": None, "name": "NETAPP TARGET 2050"}) == "NETAPP TARGET 2050"
+    assert activity_symbol({"ticker_symbol": None, "name": "Cash", "is_cash_equivalent": True}) is None
+    assert activity_symbol({}) is None
+
+
+@needs_db
+def test_what_you_paid_fills_a_holding_with_no_cost(client, home):
+    home.setup()
+    with db_of(client).session() as db:
+        c = Connection(provider="plaid", institution="Fidelity", state={}, created_at=datetime.now(UTC))
+        db.add(c)
+        db.flush()
+        a = Account(connection_id=c.id, external_id="k", name="401(K) Savings", institution="Fidelity",
+                    type="investment", subtype="401k")  # fmt: skip
+        db.add(a)
+        db.flush()
+        db.add(HoldingSnapshot(date=TODAY, account_id=a.id, symbol="NETAPP TARGET 2050", name="NETAPP TARGET 2050",
+                               asset_class="Funds", quantity=Decimal(100), price=Decimal(50), value_cents=500_000,
+                               cost_basis_cents=None))  # fmt: skip
+        db.add(HoldingSnapshot(date=TODAY, account_id=a.id, symbol="SPAXX", name="Fidelity Government Money Market",
+                               asset_class="Cash", quantity=Decimal(10), price=Decimal(1), value_cents=1_000,
+                               cost_basis_cents=None))  # fmt: skip
+        db.add(InvestmentTransaction(account_id=a.id, external_id="m", date=TODAY - timedelta(days=5), type="sell",
+                                     subtype="sell", symbol="SPAXX", name="Fidelity Government Money Market",
+                                     quantity=Decimal(-50), price=Decimal(1), amount_cents=5_000,
+                                     source="plaid"))  # fmt: skip
+        db.flush()
+        aid = a.id
+    p = client.get("/api/portfolio/profit").json()
+    h = next(x for x in p["holdings"] if x["account_id"] == aid)
+    assert h["uncosted_value_cents"] == 500_000 and h["cost_cents"] == 0 and not h["typed"]
+    assert not [s for s in p["sales"] if s["symbol"] == "SPAXX"]  # the sweep isn't a sale
+    h = csrf(client)
+    r = client.put("/api/portfolio/paid", json={"account_id": aid, "symbol": "NETAPP TARGET 2050", "cents": 400_000},
+                   headers=h)  # fmt: skip
+    assert r.status_code == 200, r.text
+    got = next(x for x in r.json()["holdings"] if x["account_id"] == aid)
+    assert got["cost_cents"] == 400_000 and got["uncosted_value_cents"] == 0 and got["typed"]
+    assert got["short_gain_cents"] + got["long_gain_cents"] + got["unknown_gain_cents"] == 100_000
+    nope = {"account_id": aid, "symbol": "NOPE", "cents": 1}
+    assert client.put("/api/portfolio/paid", json=nope, headers=h).status_code == 404
+    forget = {"account_id": aid, "symbol": "NETAPP TARGET 2050", "cents": None}
+    client.put("/api/portfolio/paid", json=forget, headers=h)
+    got = next(x for x in client.get("/api/portfolio/profit").json()["holdings"] if x["account_id"] == aid)
+    assert got["uncosted_value_cents"] == 500_000
