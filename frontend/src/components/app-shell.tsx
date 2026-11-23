@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { ChartPie, Eye, EyeOff, House, PiggyBank, ReceiptText, RefreshCw, Settings, TrendingUp } from "lucide-react";
 import { AlertsBell } from "@/components/alerts-bell";
 import { PullToRefresh } from "@/components/pull-to-refresh";
@@ -15,6 +15,7 @@ import { AuthProvider, isPublic, useAuth } from "@/lib/auth";
 import { refreshAll, useMeta } from "@/lib/household";
 import { followHash, installNavMemory, noteNavigation } from "@/lib/nav";
 import { cn } from "@/lib/utils";
+import { usePinnedToBottom } from "@/lib/viewport";
 
 const TABS = [
   { href: "/", label: "Home", icon: House },
@@ -128,6 +129,8 @@ function PrivateShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const meta = useMeta();
   const [privacy, togglePrivacy] = usePrivacy();
+  const tabBar = useRef<HTMLElement>(null);
+  usePinnedToBottom(tabBar);
   // Goals and Taxes are reached from Plan, so Plan stays lit there; Credit cards from Spending.
   const active = (href: string) =>
     href === "/"
@@ -212,6 +215,7 @@ function PrivateShell({ children }: { children: React.ReactNode }) {
 
       {/* Phone: a thumb-reachable tab bar. */}
       <nav
+        ref={tabBar}
         aria-label="Main"
         className="fixed inset-x-0 bottom-0 z-40 border-t bg-background/90 pb-[env(safe-area-inset-bottom)] backdrop-blur-lg md:hidden"
       >
