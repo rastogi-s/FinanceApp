@@ -66,7 +66,7 @@ services:
 
   postgres:
     <<: *hardening
-    image: postgres:17-trixie@sha256:2d2b8998d31037bf721cfdf764d76ba74171b4fab3431b7f72c27c56ddbdf9e3
+    image: postgres:19-trixie@sha256:bb6e70add742cd868fb62cb3b2f67d1dd2bdd2b65a521e778420748753687c60
     user: postgres
     environment:
       POSTGRES_DB: finance
