@@ -12,7 +12,7 @@ ENV NEXT_TELEMETRY_DISABLED=1
 RUN npm run build
 
 # ---- python: the app and its locked dependencies in a virtualenv
-FROM python:3.13-slim-trixie@sha256:70729b46c69b4f1e97c4822c1af3df53a1476cf5ddc6c087c0c10bc3a5678c2f AS python
+FROM python:3.15-slim-trixie@sha256:65a65fc7b30b06cb6df4930fd4650697cb23f4c2698ab81fc87e4b031bc36928 AS python
 ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never PIP_DISABLE_PIP_VERSION_CHECK=1
 RUN pip install --no-cache-dir uv==0.11.32
 WORKDIR /app
@@ -22,7 +22,7 @@ COPY backend/financeapp ./financeapp
 RUN uv sync --frozen --no-dev --no-editable
 
 # ---- runtime
-FROM python:3.13-slim-trixie@sha256:70729b46c69b4f1e97c4822c1af3df53a1476cf5ddc6c087c0c10bc3a5678c2f
+FROM python:3.15-slim-trixie@sha256:65a65fc7b30b06cb6df4930fd4650697cb23f4c2698ab81fc87e4b031bc36928
 ARG APP_VERSION=dev
 LABEL org.opencontainers.image.title="Finance App" \
       org.opencontainers.image.source="https://github.com/rastogi-s/FinanceApp" \
