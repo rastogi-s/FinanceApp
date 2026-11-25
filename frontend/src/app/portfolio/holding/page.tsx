@@ -384,7 +384,7 @@ function FundCard({ s }: { s: Security }) {
               : f?.status === "not_found"
                 ? (f.error ?? "The SEC has no holdings filing for this fund.")
                 : f?.status === "error"
-                  ? "The fund's filing couldn't be read this time. The app tries again later."
+                  ? (f.error ?? "The fund's filing couldn't be read this time. The app tries again later.")
                   : "Looking up this fund's holdings at the SEC. It can take a few minutes the first time."}
           </p>
         </CardContent>
@@ -400,6 +400,9 @@ function FundCard({ s }: { s: Security }) {
         </span>
       </CardHeader>
       <CardContent>
+        {f.error && (
+          <p className="mb-3 text-xs text-muted-foreground">{f.error} These are from the last filing it read.</p>
+        )}
         {f.proxy_of && (
           <p className="mb-3 text-xs text-muted-foreground">
             This fund files no holdings report, so these are from {f.proxy_of}, which tracks the same index.

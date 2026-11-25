@@ -50,6 +50,9 @@ FIGI_BATCH = 10  # OpenFIGI without a key: 10 ids a request, 25 requests a minut
 FIGI_MAX_REQUESTS = 20  # per fund per refresh; the rest are matched by name
 FIGI_PAUSE = 2.6
 SEC_PAUSE = 0.15  # the SEC allows 10 requests a second
+# How many filings to list per fund. EDGAR accepts only 10, 20, ... 100 or 500 and answers anything else
+# (it used to take 5) with a 400 that failed every fund.
+FILINGS_LISTED = 10
 REFERENCE_HOURS = 24
 # Unit trusts that file no N-PORT, and a fund that tracks the same index.
 PROXIES = {"SPY": "IVV", "MDY": "IJH"}
@@ -302,7 +305,7 @@ def latest_filing(client: httpx.Client, series_id: str) -> tuple[str, str] | Non
     r = client.get(
         "https://www.sec.gov/cgi-bin/browse-edgar",
         params={"action": "getcompany", "CIK": series_id, "type": "NPORT-P", "dateb": "", "owner": "include",
-                "count": "5", "output": "atom"},
+                "count": str(FILINGS_LISTED), "output": "atom"},
     )  # fmt: skip
     r.raise_for_status()
     root = ElementTree.fromstring(r.content, forbid_dtd=True)
@@ -417,16 +420,43 @@ def refresh(database: Database, settings: Settings, force: bool = False) -> dict
                     results[symbol] = db.get_one(Fund, symbol).status
                 except Exception as e:  # one fund failing never stops the others
                     db.rollback()
-                    log.warning("fund holdings for %s failed (%s)", symbol, type(e).__name__)
-                    f = db.get(Fund, symbol) or Fund(symbol=symbol, source="none")
-                    f.status, f.fetched_at = "error", now()
-                    f.error = "Couldn't read the fund's filing; trying again later."
-                    db.merge(f)
-                    results[symbol] = "error"
+                    log.warning("fund holdings for %s failed (%s: %s)", symbol, type(e).__name__, str(e)[:200])
+                    _failed(db, symbol, e)
+                    results[symbol] = db.get_one(Fund, symbol).status
                     continue
             if len(done) < 40:  # nested funds, one level down (plus proxies' stand-ins)
                 todo.extend(n for n in nested if n not in done and n not in fresh)
     return results
+
+
+def failure_message(e: Exception) -> str:
+    """What went wrong, in words, and whether waiting will fix it."""
+    if isinstance(e, httpx.HTTPStatusError):
+        code = e.response.status_code
+        if code == 429 or code >= 500:
+            return "The SEC's site was busy or down. The app tries again in a few hours."
+        if code == 403:
+            return "The SEC turned the app away for now (it limits how often programs ask). It tries again later."
+        return (f"The SEC rejected the app's request (error {code}). Trying again won't fix this; "
+                "the app needs an update.")  # fmt: skip
+    if isinstance(e, httpx.TransportError):
+        return "Couldn't reach the SEC. The app tries again in a few hours."
+    if isinstance(e, ValueError) and str(e) == "filing too large":
+        return "The fund's filing is too large to read. Trying again won't fix this."
+    return "The fund's filing is in a form the app can't read. Trying again won't fix this; the app needs an update."
+
+
+def _failed(db: DbSession, symbol: str, e: Exception) -> None:
+    """Records a failed refresh. A fund read before keeps those holdings (and their date) instead of losing them;
+    either way it is tried again at the next check, not a week later."""
+    message = failure_message(e)
+    f = db.get(Fund, symbol)
+    if f is not None and f.status == "ok" and f.source in ("nport", "proxy"):
+        f.error = f"Couldn't get a newer filing: {message}"[:200]  # fetched_at stays, so it's due again
+    else:
+        f = f or Fund(symbol=symbol, source="none")
+        f.status, f.fetched_at, f.error = "error", now(), message[:200]
+        db.add(f)
 
 
 # ---- exposure

@@ -5,7 +5,7 @@ from decimal import Decimal
 
 import httpx
 import pytest
-from defusedxml import DTDForbidden, EntitiesForbidden
+from defusedxml import DTDForbidden, ElementTree, EntitiesForbidden
 from sqlalchemy import select
 
 from financeapp import household, lookthrough, quotes, security
@@ -134,6 +134,89 @@ def test_look_through_math(client):
         assert e["looked_through_percent"] == 20.0
         voo = e["funds"][0]
         assert voo["status"] == "ok" and voo["as_of"] == "2026-06-30" and voo["top"][0]["symbol"] == "AAPL"
+
+
+ATOM = """<?xml version="1.0" encoding="ISO-8859-1" ?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <entry><content type="text/xml">
+    <filing-href>https://www.sec.gov/Archives/edgar/data/36405/000003640526000473/0000036405-26-000473-index.htm</filing-href>
+    <filing-type>NPORT-P</filing-type></content></entry>
+</feed>"""
+
+
+def edgar(seen: list[httpx.Request], filing: httpx.Response | None = None):
+    """A stand-in for EDGAR that, like the real one, takes only 10, 20, ... 100 or 500 as a count."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if request.url.path == "/cgi-bin/browse-edgar":
+            if request.url.params["count"] not in {str(n) for n in [*range(10, 101, 10), 500]}:
+                return httpx.Response(400, text="Invalid count")
+            return httpx.Response(200, text=ATOM)
+        if request.url.path.endswith("/primary_doc.xml"):
+            return filing or httpx.Response(200, text=NPORT)
+        if request.url.host == "api.openfigi.com":
+            return httpx.Response(200, json=[{"warning": "No identifier found."}] * len(json.loads(request.content)))
+        return httpx.Response(404)
+
+    return handler
+
+
+@needs_db
+def test_refresh_fund_reads_the_latest_filing(client):
+    seen: list[httpx.Request] = []
+    with db_of(client).session() as db:
+        lookthrough.refresh_fund(db, mock(edgar(seen)), reference(), "VOO")
+        fund = db.get_one(Fund, "VOO")
+        assert fund.status == "ok" and fund.accession == "000003640526000473" and fund.error is None
+        assert fund.as_of == date(2026, 6, 30)
+        assert db.scalar(select(FundConstituent).where(FundConstituent.key == "cik:320193")).weight == Decimal("0.07")
+    assert seen[0].url.params["CIK"] == "S000002839"
+
+
+def test_failure_messages_say_whether_waiting_helps():
+    def status(code: int) -> httpx.HTTPStatusError:
+        request = httpx.Request("GET", "https://www.sec.gov/")
+        return httpx.HTTPStatusError("x", request=request, response=httpx.Response(code, request=request))
+
+    assert "tries again" in lookthrough.failure_message(status(503))
+    assert "tries again" in lookthrough.failure_message(status(429))
+    assert "tries again" in lookthrough.failure_message(httpx.ConnectTimeout("slow"))
+    assert "won't fix" in lookthrough.failure_message(status(400))
+    assert "won't fix" in lookthrough.failure_message(ValueError("filing too large"))
+    assert "won't fix" in lookthrough.failure_message(ElementTree.ParseError("bad"))
+
+
+@needs_db
+def test_a_failed_refresh_keeps_the_holdings_it_had(client):
+    week_ago = datetime.now(UTC) - timedelta(days=8)
+    with db_of(client).session() as db:
+        seed(db, [("VOO", "Funds", 10, 100), ("SMH", "Funds", 10, 100)])
+        db.add(Fund(symbol="VOO", source="nport", status="ok", accession="1", fetched_at=week_ago))
+        db.flush()
+        aapl = FundConstituent(fund_symbol="VOO", key="cik:320193", symbol="AAPL", name="Apple", weight=Decimal("0.07"))
+        db.add(aapl)
+    seen: list[httpx.Request] = []
+    for symbol in ("VOO", "SMH"):  # what refresh() does, one session a fund
+        with db_of(client).session() as db:
+            with pytest.raises(httpx.HTTPStatusError) as failed:
+                lookthrough.refresh_fund(db, mock(edgar(seen, httpx.Response(500))), reference_with_smh(), symbol)
+            db.rollback()
+            lookthrough._failed(db, symbol, failed.value)
+    with db_of(client).session() as db:
+        voo, smh = db.get_one(Fund, "VOO"), db.get_one(Fund, "SMH")
+        assert voo.status == "ok" and "newer filing" in voo.error
+        assert voo.fetched_at.replace(tzinfo=UTC) < datetime.now(UTC) - timedelta(days=7)  # due again next check
+        assert smh.status == "error" and "busy or down" in smh.error
+        e = lookthrough.exposure(db, household.counted(db))
+        assert e["companies"][0]["symbol"] == "AAPL"  # VOO's last holdings still count
+        assert next(f for f in e["funds"] if f["symbol"] == "SMH")["error"] == smh.error
+
+
+def reference_with_smh() -> lookthrough.Reference:
+    ref = reference()
+    ref.funds["SMH"] = (1137360, "S000034411")
+    return ref
 
 
 @needs_db
